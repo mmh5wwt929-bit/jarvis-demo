@@ -1,6 +1,8 @@
 const http = require('http');
 const https = require('https');
 const url = require('url');
+const fs = require('fs');
+const path = require('path');
 
 const API_KEY = process.env.ANTHROPIC_API_KEY;
 const PORT = process.env.PORT || 3000;
@@ -22,6 +24,20 @@ const server = http.createServer(async (req, res) => {
   }
 
   const parsedUrl = url.parse(req.url, true);
+
+  // Serve index.html at root
+  if ((parsedUrl.pathname === '/' || parsedUrl.pathname === '') && req.method === 'GET') {
+    try {
+      const indexPath = path.join(__dirname, 'index.html');
+      const html = fs.readFileSync(indexPath, 'utf8');
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(html);
+    } catch (err) {
+      res.writeHead(500);
+      res.end('Error loading index.html');
+    }
+    return;
+  }
 
   if (parsedUrl.pathname === '/health' && req.method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
