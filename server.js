@@ -59,8 +59,8 @@ const server = http.createServer(async (req, res) => {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'x-api-version': '2023-06-01',
-            'Authorization': `Bearer ${API_KEY}`
+            'x-api-key': API_KEY,
+            'anthropic-version': '2023-06-01'
           }
         }, (anthropicRes) => {
           let data = '';
