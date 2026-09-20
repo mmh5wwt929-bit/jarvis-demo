@@ -557,5 +557,188 @@ $('action').addEventListener('change', e => {
 
 api('/api/integrite').then(majEtat).catch(() => {});
 </script>
+(() => {
+  'use strict';
+
+  const ÉTAPES = [
+    {
+      titre: 'Ce que tu vas voir',
+      texte: "JARVIS s'intercale entre ce que l'agent veut faire et ce qui arrive vraiment. En cinq étapes, une attaque réelle va être refusée — sans qu'aucune règle n'ait été écrite pour ce cas précis.",
+      cible: null, action: null, pause: 0, bouton: 'Commencer'
+    },
+    {
+      titre: 'Session vierge',
+      texte: "On repart de zéro. Le plancher de confiance est au vert : tout ce que l'agent sait vient de toi.",
+      cible: 'nouvelle session', action: 'clic', pause: 700
+    },
+    {
+      titre: "L'agent lit un e-mail piégé",
+      texte: "L'agent vient de lire un contenu qu'il ne contrôle pas. Regarde la barre, en haut.",
+      cible: 'un e-mail piégé', action: 'clic', pause: 900
+    },
+    {
+      titre: 'Le plancher tombe',
+      texte: "Rouge. L'origine est tracée et conservée. Rien n'est encore bloqué : le noyau a seulement cessé de traiter le contexte comme fiable.",
+      cible: null, action: null, pause: 0, viser: 'plancher'
+    },
+    {
+      titre: 'On lance les attaques',
+      texte: "Huit attaques réelles partent contre l'instance vivante — dont celle que l'e-mail préparait : faire transférer les factures à un tiers.",
+      cible: 'lancer les 8', action: 'clic', pause: 2200
+    },
+    {
+      titre: 'Refusé',
+      texte: "REFORMULATION_REQUISE. L'action n'a pas été refusée par une règle écrite pour ce cas précis. Elle a été refusée parce que sa provenance ne remonte pas à toi.",
+      cible: null, action: null, pause: 0, viser: 'resultats'
+    },
+    {
+      titre: "C'est tout le principe",
+      texte: "Tu décides, le noyau arbitre avant que ça arrive. Le banc de tests rejoue seize suites d'attaques à chaque déploiement.",
+      cible: null, action: null, pause: 0, bouton: 'Explorer librement'
+    }
+  ];
+
+  const norm = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ').trim().toLowerCase();
+
+  const SEL = 'button, a, [role="button"], input[type="button"], input[type="submit"]';
+
+  function parTexte(t) {
+    const q = norm(t); if (!q) return null;
+    const els = [...document.querySelectorAll(SEL)];
+    return els.find(e => norm(e.textContent || e.value) === q)
+        || els.find(e => norm(e.textContent || e.value).includes(q)) || null;
+  }
+
+  function zone(nom) {
+    if (nom === 'plancher') {
+      const lab = [...document.querySelectorAll('*')].find(e =>
+        e.children.length === 0 && norm(e.textContent).startsWith('plancher de confiance'));
+      return lab ? (lab.closest('div, section, header') || lab.parentElement) : null;
+    }
+    if (nom === 'resultats') {
+      const b = parTexte('lancer les 8');
+      return b ? b.closest('div, section') : null;
+    }
+    return null;
+  }
+
+  const css = document.createElement('style');
+  css.textContent = `
+    .jt-lanceur{position:fixed;left:16px;bottom:16px;z-index:2147483000;display:inline-flex;
+      align-items:center;gap:.55rem;padding:.7rem 1.05rem;border:0;border-radius:9px;
+      background:#4a9eff;color:#06121f;font:600 15px/1.2 system-ui,-apple-system,sans-serif;
+      cursor:pointer;box-shadow:0 6px 22px rgba(0,0,0,.45)}
+    .jt-lanceur:hover{background:#63adff}
+    .jt-lanceur:focus-visible{outline:2px solid #fff;outline-offset:3px}
+    .jt-lanceur[hidden]{display:none}
+    .jt-barre{position:fixed;left:0;right:0;bottom:0;z-index:2147483001;background:#0d1219;
+      border-top:1px solid #263141;padding:1rem 1.15rem calc(1rem + env(safe-area-inset-bottom,0px));
+      color:#dbe4ef;font:400 15px/1.5 system-ui,-apple-system,sans-serif;
+      box-shadow:0 -10px 34px rgba(0,0,0,.5)}
+    .jt-barre[hidden]{display:none}
+    .jt-inner{max-width:62ch;margin:0 auto}
+    .jt-compte{color:#7d8da1;font-size:12.5px;margin:0 0 .35rem}
+    .jt-titre{margin:0 0 .3rem;font-size:16.5px;font-weight:650;color:#f2f6fb}
+    .jt-texte{margin:0 0 .9rem}
+    .jt-actions{display:flex;gap:.6rem;align-items:center}
+    .jt-suivant{padding:.6rem 1.1rem;border:0;border-radius:8px;background:#4a9eff;color:#06121f;
+      font:600 15px/1 system-ui,sans-serif;cursor:pointer}
+    .jt-suivant:hover{background:#63adff}
+    .jt-suivant:disabled{opacity:.5;cursor:progress}
+    .jt-passer{background:none;border:0;color:#8b9ab0;cursor:pointer;
+      font:400 14px/1 system-ui,sans-serif;text-decoration:underline;padding:.6rem .3rem}
+    .jt-passer:hover{color:#c4d0de}
+    .jt-suivant:focus-visible,.jt-passer:focus-visible{outline:2px solid #4a9eff;outline-offset:2px}
+    .jt-vise{position:relative;z-index:2147482000;border-radius:8px;
+      box-shadow:0 0 0 2px #4a9eff,0 0 0 9px rgba(74,158,255,.18);transition:box-shadow .18s ease}
+    @media (prefers-reduced-motion:reduce){.jt-vise{transition:none}}
+  `;
+  document.head.appendChild(css);
+
+  const lanceur = document.createElement('button');
+  lanceur.className = 'jt-lanceur';
+  lanceur.type = 'button';
+  lanceur.innerHTML = '<span aria-hidden="true">\u25B6</span> Voir une attaque être bloquée';
+
+  const barre = document.createElement('section');
+  barre.className = 'jt-barre';
+  barre.hidden = true;
+  barre.setAttribute('aria-live', 'polite');
+  barre.innerHTML = '<div class="jt-inner"><p class="jt-compte"></p><h2 class="jt-titre"></h2>'
+    + '<p class="jt-texte"></p><div class="jt-actions">'
+    + '<button type="button" class="jt-suivant"></button>'
+    + '<button type="button" class="jt-passer">Quitter le parcours</button></div></div>';
+
+  document.body.append(lanceur, barre);
+
+  const elC = barre.querySelector('.jt-compte');
+  const elT = barre.querySelector('.jt-titre');
+  const elX = barre.querySelector('.jt-texte');
+  const bSuiv = barre.querySelector('.jt-suivant');
+  const bPass = barre.querySelector('.jt-passer');
+
+  let i = 0, visé = null;
+
+  const off = () => { if (visé) { visé.classList.remove('jt-vise'); visé = null; } };
+
+  function halo(el) {
+    off(); if (!el) return;
+    visé = el; el.classList.add('jt-vise');
+    const doux = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    el.scrollIntoView({ behavior: doux ? 'auto' : 'smooth', block: 'center' });
+  }
+
+  function montrer(n) {
+    const é = ÉTAPES[n];
+    elC.textContent = 'Étape ' + (n + 1) + ' sur ' + ÉTAPES.length;
+    elT.textContent = é.titre;
+    elX.textContent = é.texte;
+    bSuiv.textContent = é.bouton || 'Suivant';
+    bSuiv.disabled = false;
+    halo(é.viser ? zone(é.viser) : (é.cible ? parTexte(é.cible) : null));
+  }
+
+  async function avancer() {
+    const é = ÉTAPES[i];
+    if (é.action === 'clic' && é.cible) {
+      const b = parTexte(é.cible);
+      if (b) {
+        bSuiv.disabled = true;
+        b.click();
+        if (é.pause) await new Promise(r => setTimeout(r, é.pause));
+      }
+    }
+    i += 1;
+    if (i >= ÉTAPES.length) { fin(); return; }
+    montrer(i);
+  }
+
+  function début() {
+    i = 0;
+    lanceur.hidden = true;
+    barre.hidden = false;
+    document.body.style.paddingBottom = barre.offsetHeight + 'px';
+    montrer(0);
+    bSuiv.focus();
+  }
+
+  function fin() {
+    off();
+    barre.hidden = true;
+    lanceur.hidden = false;
+    document.body.style.paddingBottom = '';
+    lanceur.focus();
+  }
+
+  lanceur.addEventListener('click', début);
+  bSuiv.addEventListener('click', avancer);
+  bPass.addEventListener('click', fin);
+  addEventListener('keydown', e => { if (e.key === 'Escape' && !barre.hidden) fin(); });
+  addEventListener('resize', () => {
+    if (!barre.hidden) document.body.style.paddingBottom = barre.offsetHeight + 'px';
+  });
+})();
+</script>
 </body>
 </html>
