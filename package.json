@@ -1,0 +1,12 @@
+{
+  "name": "jarvis-passerelle-gouvernee",
+  "version": "5.28.3",
+  "description": "Passerelle Claude gouvernee par le noyau JARVIS",
+  "main": "server.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node tests-5283.js"
+  },
+  "engines": { "node": ">=18" }
+}
