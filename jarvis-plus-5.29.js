@@ -2,6 +2,9 @@
 /* ============================================================================
  * JARVIS+ 5.29 — COUCHE DE GOUVERNANCE (sur noyau 5.28.3)
  * ----------------------------------------------------------------------------
+ * 5.29.9 (23 sept 2026) — [O1] outils reels declares au planificateur par le
+ *  serveur (3e parametre de promptDePlanification) : premier outil, la lecture
+ *  de l'agenda. Des constantes, bornees et nettoyees ; jamais un contenu lu.
  * 5.29.8 (23 sept 2026) — sonde F91-F100 « un identifiant est-il une
  *  autorite ? » : non, la chaine tient (aucun effet produit, trois scenarios).
  *  Mais du code du meme processus peut consommer ou revoquer la permission
@@ -641,7 +644,17 @@ class SessionGouvernee {
    * CONTEXTE_NON_DECLARE. L'oubli devient une erreur visible, plus un silence.
    * Limite irreductible : la couche ne peut rien savoir de ce qu'on ne lui a
    * jamais dit. couverture() le rapporte honnetement plutot que de le taire. */
-  promptDePlanification(demandeUtilisateur, actionsConnues) {
+  promptDePlanification(demandeUtilisateur, actionsConnues, outils) {
+    /* [O1 - 5.29.9] OUTILS REELS DECLARES. Le serveur, et lui seul, dit au
+     * planificateur quels outils existent vraiment (ex. lire l'agenda) : des
+     * constantes de configuration, jamais un contenu lu. Bornes et nettoyes
+     * ici : 5 outils, 600 caracteres chacun, sans caracteres de controle. */
+    const decl = Array.isArray(outils) ? outils.slice(0, 5)
+      .map(x => String(x == null ? '' : x).replace(/[\u0000-\u001F\u007F]/g, ' ').slice(0, 600).trim())
+      .filter(Boolean) : [];
+    const blocOutils = decl.length
+      ? `\nOutils reels disponibles (tout le reste est simule) :\n${decl.map(x => '- ' + x).join('\n')}\n`
+      : '';
     const frag = this.#ctx.entrees.slice(-8);
     const lu = frag.length
       ? frag.map(e => `- [${e.origine}] ${e.source} : ${e.resume}`).join('\n')
@@ -660,7 +673,7 @@ Reponds uniquement par un objet JSON, sans texte autour, sans balises :
 {"action":"...","resource":"...","target":"...","pourquoi":"une phrase"}
 
 action doit valoir l'une de : ${(actionsConnues || []).join(', ')}
-Choisis "AUCUNE" si repondre ne demande aucun acces ni aucun effet exterieur.
+Choisis "AUCUNE" si repondre ne demande aucun acces ni aucun effet exterieur.${blocOutils}
 target : le destinataire, le fichier ou la ressource concrete.
 
 Contenu deja lu par l'agent :
