@@ -2,6 +2,9 @@
 /* ============================================================================
  * JARVIS+ 5.29 — COUCHE DE GOUVERNANCE (sur noyau 5.28.3)
  * ----------------------------------------------------------------------------
+ * 5.29.12 (24 sept 2026) — [T10] tracabilite : preuve d'intention (frappe ou
+ *  cible retapee) et mode de confirmation enregistres ; trace(id) en lecture
+ *  seule, reverifiee a la lecture, sans aucun texte du modele.
  * 5.29.11 (23 sept 2026) — [C4] verification de la cible sur la chaine EXACTE
  *  qui sera executee (plus de trim cote comparaison seulement).
  * 5.29.10 (23 sept 2026) — [P1] le planificateur ne s'auto-censure plus (vu en
@@ -586,6 +589,39 @@ class SessionGouvernee {
       historique: rec.historique.map(x => Object.freeze({ ...x })) });
   }
 
+  /* [T10 - 5.29.12] TRACABILITE. Pour une transaction : frappe -> intention ->
+   * provenance -> plan -> decision (couche + noyau) -> confirmation -> effet,
+   * reconstruite UNIQUEMENT depuis des etats de la couche et du noyau.
+   * L'intention est REVERIFIEE a la lecture (verbe et cible dans la frappe,
+   * ou cible retapee identique) ; l'empreinte aussi. Le texte du modele
+   * (« pourquoi ») n'y figure jamais. Gelee de bout en bout. */
+  trace(id) {
+    const aid = (this.#autorisationDe(id) || {}).autorisationId;
+    const rec = aid && this.#tx.get(aid);
+    if (!rec) return null;
+    const fr = (o) => Object.freeze(o);
+    const p = rec.preuve || { nature: 'INCONNUE', texte: null, empreinte: null };
+    const cible = String(rec.spec.target || rec.spec.resource);
+    let reverifiee = null;
+    if (p.nature === 'FRAPPE')
+      reverifiee = sha({ frappe: p.texte }) === p.empreinte && analyserIntention(rec.spec.action, p.texte).presente
+        && cibleDansTexte(cible, separer(p.texte).propres);
+    else if (p.nature === 'CIBLE_RETAPEE') reverifiee = sha({ frappe: p.texte }) === p.empreinte && p.texte === cible;
+    let etatNoyau = null;
+    try { const pn = this.#j.permissions.getPermission(rec.propositionId, HARNESS_KEY); etatNoyau = pn ? pn.state : null; } catch { etatNoyau = null; }
+    return fr({
+      transactionId: rec.transactionId, autorisationId: rec.autorisationId, propositionId: rec.propositionId, requeteId: rec.requeteId,
+      intention: fr({ nature: p.nature, frappe: p.texte, empreinte: p.empreinte, reverifiee }),
+      provenance: fr({ plancher: rec.plancher, provenanceCible: rec.provenanceCible, sources: rec.sources || fr([]) }),
+      plan: fr({ proposePar: 'modele', action: rec.spec.action, cible: rec.spec.target, ressource: rec.spec.resource, classe: rec.classe }),
+      decision: fr({ couche: 'AUTORISE', noyau: etatNoyau,
+        empreinteIntacte: rec.empreinte == null ? null : this.#empreinteDe(rec) === rec.empreinte }),
+      confirmation: rec.confirmation,
+      effet: fr({ etat: rec.etat }),
+      historique: fr(rec.historique.map(x => fr({ ...x })))
+    });
+  }
+
   /* [C1 - 5.29.1] ENCAPSULATION. `get jarvis()` rendait l'instance du noyau,
    * donc n'importe quel appelant pouvait faire j.permissions.propose() en
    * direct et contourner G1/G2 sans le vouloir. La couche gardait la porte
@@ -808,6 +844,9 @@ ${demandeUtilisateur}`
     /* G1 + G2 : l'irremediable exige une intention directe ET reformulee. */
     let plancher = this.#plancherEffectif();
     let provenanceCible = null, cleC3 = null;
+    /* [T10 - 5.29.12] PREUVE D'INTENTION : ce qui, dans les frappes de la
+     * personne, a autorise l'action. Jamais un texte du modele. */
+    let preuve = { nature: 'AUCUNE_REQUISE', texte: null };
     if (classe === 'IRREVERSIBLE') {
       if (!this.#aReformule(spec)) {
         /* [C3] Provenance par argument : la cible a-t-elle ete tapee par
@@ -839,7 +878,8 @@ ${demandeUtilisateur}`
         note = this.note(spec);
         note.signaux.unshift({ poids: 'info',
           texte: 'Cible tapee par toi dans cette demande : provenance verifiee pour cet argument.' });
-      }
+        preuve = { nature: 'FRAPPE', texte: String(d.texte) };
+      } else preuve = { nature: 'CIBLE_RETAPEE', texte: String(spec.target || spec.resource) };
       plancher = 'USER_DIRECT';
       if (!this.#dryRuns.has(sha({ a: spec.action, t: spec.target, r: spec.resource })))
         return refus('G2_REVERSIBILITE', 'DRY_RUN_PREALABLE_REQUIS');
@@ -873,6 +913,9 @@ ${demandeUtilisateur}`
       spec: Object.freeze({ action: base.action, resource: base.resource, target: base.target,
         scope: base.scope, context: base.context, tool: base.tool }),
       classe, plancher, provenanceCible,
+      preuve: Object.freeze({ ...preuve, empreinte: preuve.texte == null ? null : sha({ frappe: preuve.texte }) }),
+      sources: Object.freeze(this.#ctx.entrees.slice(-8).map(e => Object.freeze({ origine: e.origine, source: e.source }))),
+      confirmation: null,
       compensation: options.compensation == null ? null : Object.freeze({
         description: String(typeof options.compensation === 'object' ? options.compensation.description : options.compensation).slice(0, 200) }),
       expireA: base.expiresAt, empreinte: null, interne: null, handler: null, echeanceMono: null
@@ -965,6 +1008,7 @@ ${demandeUtilisateur}`
         message: `Action irreversible retenue ${FENETRE_ANNULATION_MS / 1000} s. Annulable.`
       };
     }
+    rec.confirmation = Object.freeze({ mode: 'SANS_FENETRE', ts: this.#h.mur() });   /* [T10] reversible ou compensable */
     return this.#commettre(rec, handler);
   }
 
@@ -996,6 +1040,7 @@ ${demandeUtilisateur}`
     if (reste > 0) return { etat: 'TROP_TOT', resteMs: Math.ceil(reste) };
     const r = this.#reverifier(rec, 'FINALISER'); if (r) return r;
     this.#enAttente.delete(jeton);
+    rec.confirmation = Object.freeze({ mode: 'CLIC_APRES_FENETRE', ts: this.#h.mur() });   /* [T10] */
     return this.#commettre(rec, rec.handler);
   }
 

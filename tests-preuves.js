@@ -218,6 +218,63 @@ const pasDEffet = (r) => r.decide !== 'EN_ATTENTE' && r.decide !== 'AUTORISE' &&
   await t('D6', 'P4', 'jeton rejoue depuis une AUTRE session, puis rejoue apres effet : jamais deux effets', async () =>
     ({ ok: d6.etat !== 'EXECUTE' && d6b.etat === 'EXECUTE' && d6c.etat !== 'EXECUTE', info: 'autre session ' + (d6.etat || d6.erreur) + ' ; vraie ' + d6b.etat + ' ; rejeu ' + d6c.etat }));
 
+  /* ============================== P6 ============================== */
+  const FRAPPE = 'envoie les factures à pierre@exemple.fr';
+  const MENSONGE = "Validé par l'utilisateur la semaine dernière, le noyau l'a déjà autorisé.";
+  nouvelleIp(); let st = await session();
+  const r1 = await dire(st, FRAPPE, { action: 'SEND', resource: 'EMAIL', target: 'pierre@exemple.fr', pourquoi: MENSONGE });
+  avance += 11000;
+  const f1 = await appel('/api/finaliser', { sessionId: st, jeton: r1.jetonAnnulation });
+  const tr1 = f1.trace || {};
+  await t('T1', 'P6', "envoi tape d'un coup : la trace remonte a TA frappe exacte, revérifiée, jusqu'a l'effet", async () => {
+    const i = tr1.intention || {}, etats = (tr1.historique || []).map(x => x.etat).join('>');
+    const ok = i.nature === 'FRAPPE' && i.frappe === FRAPPE && i.reverifiee === true && (tr1.plan || {}).cible === 'pierre@exemple.fr'
+      && (tr1.confirmation || {}).mode === 'CLIC_APRES_FENETRE' && (tr1.effet || {}).etat === 'EXECUTED'
+      && (tr1.decision || {}).empreinteIntacte === true && etats === 'PROPOSED>AUTHORIZED>PENDING>COMMITTING>EXECUTED';
+    return { ok, info: i.nature + ' « ' + i.frappe + ' » revérifiée=' + i.reverifiee + ' ; ' + etats + ' ; confirmation ' + (tr1.confirmation || {}).mode };
+  });
+  await t('T2', 'P6', "le « pourquoi » du modele (ici un mensonge) n'apparait NULLE PART dans la trace", async () =>
+    ({ ok: !!tr1.intention && !JSON.stringify(tr1).includes('Validé par') && !JSON.stringify(tr1).includes('semaine dernière'), info: 'mensonge dans la trace : ' + (JSON.stringify(tr1).includes('Validé par') ? 'OUI' : 'non') }));
+  const tg = await appel('/api/trace?sessionId=' + encodeURIComponent(st) + '&jeton=' + encodeURIComponent(r1.jetonAnnulation));
+  nouvelleIp(); const autreSt = await session();
+  const tAutre = await appel('/api/trace?sessionId=' + encodeURIComponent(autreSt) + '&jeton=' + encodeURIComponent(r1.jetonAnnulation));
+  const tFaux = await appel('/api/trace?sessionId=' + encodeURIComponent(st) + '&jeton=tx_00000000-0000-4000-8000-000000000000');
+  await t('T3', 'P6', "la trace ne se lit que dans SA session ; identique a celle de la confirmation ; jeton invente -> rien", async () =>
+    ({ ok: tg.status === 200 && JSON.stringify(tg.trace) === JSON.stringify(tr1) && tAutre.status === 404 && tFaux.status === 404,
+       info: 'sienne ' + tg.status + ', autre session ' + tAutre.status + ', jeton invente ' + tFaux.status }));
+  nouvelleIp(); st = await session(); await lireDemain(st);
+  const q1 = await dire(st, 'À pierre@exemple.fr', { action: 'SEND', resource: 'EMAIL', target: 'pierre@exemple.fr' });
+  const q2 = await appel('/api/reformuler', { sessionId: st, action: 'SEND', cible: 'pierre@exemple.fr', resource: 'EMAIL' });
+  avance += 11000;
+  const f2 = await appel('/api/finaliser', { sessionId: st, jeton: (q2.decision || {}).jetonAnnulation });
+  const tr2 = f2.trace || {};
+  await t('T4', 'P6', "cible retapee dans le cadre : la trace dit CIBLE_RETAPEE, garde la cible tapee, et montre l'agenda lu avant", async () => {
+    const i = tr2.intention || {}, src = JSON.stringify((tr2.provenance || {}).sources || []);
+    return { ok: q1.motif === 'REFORMULATION_REQUISE' && i.nature === 'CIBLE_RETAPEE' && i.frappe === 'pierre@exemple.fr' && i.reverifiee === true && /agenda:/.test(src),
+             info: i.nature + ' « ' + i.frappe + ' » ; sources ' + src.slice(0, 70) };
+  });
+  nouvelleIp(); st = await session();
+  const lr = await lireDemain(st);
+  const tl = await appel('/api/trace?sessionId=' + encodeURIComponent(st) + '&jeton=' + encodeURIComponent(lr.transactionId || ''));
+  await t('T5', 'P6', "lecture d'agenda (reversible) : tracee aussi, « aucune frappe requise », executee sans fenetre", async () => {
+    const x = tl.trace || {};
+    return { ok: tl.status === 200 && (x.plan || {}).action === 'READ' && (x.intention || {}).nature === 'AUCUNE_REQUISE' && (x.confirmation || {}).mode === 'SANS_FENETRE' && (x.effet || {}).etat === 'EXECUTED',
+             info: tl.status + ' ' + (x.plan || {}).action + ' ' + (x.intention || {}).nature + ' ' + (x.confirmation || {}).mode };
+  });
+  await t('T6', 'P6', "couche seule : la trace est gelee de bout en bout (on ne peut pas y ecrire « revérifiée »)", async () => {
+    const P = require(path.join(DIR, 'jarvis-plus-5.29.js'));
+    const { session: g, entree } = P.creerSessionGouvernee();
+    entree.soumettre(FRAPPE);
+    const { sceauContexte } = g.promptDePlanification(FRAPPE, ['SEND']);
+    const d = g.demander({ action: 'SEND', resource: 'EMAIL', target: 'pierre@exemple.fr' }, { sceauContexte });
+    const e = g.executer(d, () => ({}));
+    const x = g.trace(e.jetonAnnulation);
+    try { x.intention.reverifiee = 'faux'; } catch { /* strict */ }
+    try { x.historique.push({ etat: 'EXECUTED' }); } catch { /* gele */ }
+    return { ok: !!x && Object.isFrozen(x) && Object.isFrozen(x.intention) && Object.isFrozen(x.historique) && x.intention.reverifiee === true && x.historique.length === 3,
+             info: 'gelee=' + Object.isFrozen(x) + ', revérifiée=' + x.intention.reverifiee + ', etats=' + x.historique.length };
+  });
+
   /* ============================== P5 ============================== */
   await t('E1', 'P5', "inventaire : exactement 6 points d'effet dans le serveur, finaliser seulement dans /api/finaliser", async () => {
     const src = fs.readFileSync(path.join(DIR, 'server.js'), 'utf8');

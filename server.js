@@ -73,6 +73,10 @@
  * - limites reglables sur Render (JARVIS_APPELS_HEURE, JARVIS_APPELS_JOUR,
  *   JARVIS_MAX_TOKENS), memes valeurs publiques par defaut.
  *
+ * v4.5.6 [S29] tracabilite : GET /api/trace et trace jointe a chaque
+ *   confirmation (couche 5.29.12) ; agenda 1.1 : recurrences piegees bornees,
+ *   erreurs reseau nommees, reponses et calendriers incomplets refuses,
+ *   certificat verifie meme si Node est regle pour ne plus le faire.
  * v4.5.5 [S28] un corps JSON `null` a /api/chat arretait tout le serveur
  *   (demo publique : une requete anonyme suffisait) : corps = objet JSON ou
  *   400, erreurs de routes rattrapees (500 generique, sans detail), filet
@@ -647,7 +651,13 @@ const ERREURS_AGENDA = {
   TROP_DE_REDIRECTIONS: "l'adresse de l'agenda redirige trop de fois",
   ICS_INVALIDE: "l'adresse ne renvoie pas un agenda (le lien secret a peut-être été réinitialisé)",
   HTTP_404: "l'agenda est introuvable (le lien secret a peut-être été réinitialisé)",
-  RESEAU: 'le réseau a échoué'
+  RESEAU: 'le réseau a échoué',
+  DNS_INTROUVABLE: "l'adresse du serveur de l'agenda est introuvable",
+  CERTIFICAT_INVALIDE: "le certificat du serveur de l'agenda n'est pas valide : lecture refusée par sécurité",
+  CONNEXION_REFUSEE: "le serveur de l'agenda a refusé la connexion",
+  CONNEXION_COUPEE: "la connexion a été coupée",
+  REPONSE_INCOMPLETE: "la réponse est arrivée incomplète : rien n'a été lu",
+  ICS_INCOMPLET: "l'agenda reçu est incomplet : rien n'a été lu"
 };
 const erreurAgenda = (code) => ERREURS_AGENDA[code]
   || (String(code).startsWith('HTTP_') ? "le serveur de l'agenda a répondu " + propre(code, 20) : 'échec de lecture (' + propre(code, 30) + ')');
@@ -713,7 +723,7 @@ async function lireAgenda(s, sessionId, texte, plan, avant) {
     + "), sans les arrondir. Si la liste est vide, dis qu'il n'y a rien sur ces dates-là ; si elle est incomplète, dis-le."));
   if (rep.ok) memoriser(s, sessionId, texte, rep.texte);
   return sortie({ decide: 'AUTORISE', etape: 'COMPLET', motif: rep.ok ? null : rep.erreur,
-    reponse: rep.ok ? rep.texte : null, usage: rep.usage,
+    reponse: rep.ok ? rep.texte : null, usage: rep.usage, transactionId: exe.transactionId || null,   /* [S29] tracable */
     agenda: { periode: periode.cle, evenements: lu.evenements.length, tronque: lu.tronque } });
 }
 
@@ -1017,7 +1027,9 @@ const serveur = http.createServer((req, res) => {
   try {
     const w = new URL('http://jarvis.invalid' + (typeof req.url === 'string' && req.url.startsWith('/') ? req.url : '/'));
     if (w.host !== 'jarvis.invalid') throw new Error('hote');
-    u = { pathname: w.pathname, query: { sessionId: w.searchParams.get('sessionId') || '' } };
+    /* tous les parametres (la v4.5.4 ne gardait que sessionId : « depuis »
+     * de /api/rayon etait ignore, sans effet visible car la page envoie 0) */
+    u = { pathname: w.pathname, query: Object.fromEntries(w.searchParams) };
   } catch {
     res.writeHead(400, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ erreur: 'ADRESSE_ILLISIBLE' }));
@@ -1027,7 +1039,7 @@ const serveur = http.createServer((req, res) => {
   const inconnue = () => json(401, { erreur: 'SESSION_INCONNUE' });
 
   if (u.pathname === '/health')
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: '5.29.11', vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.5.5',
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: '5.29.12', vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.5.6',
       agenda: AGENDA ? 'actif' : 'inactif',
       acces: CLE_ACCES ? 'protege' : 'public', gouvernance: 'active', ip: sourceIp(req),
       /* [S17] l'adresse que le serveur attribue a CELUI qui demande (la sienne,
@@ -1163,8 +1175,19 @@ const serveur = http.createServer((req, res) => {
         if (rep.ok) memoriser(s, id, confirmation, rep.texte);
       }
       s.enAttente.delete(b.jeton);
-      return json(200, { etat: 'EXECUTE', reponse: rep.ok ? rep.texte : null, motif: rep.ok ? null : rep.erreur, ...etatDe(s) });
+      return json(200, { etat: 'EXECUTE', reponse: rep.ok ? rep.texte : null, motif: rep.ok ? null : rep.erreur,
+        trace: s.g.trace(String(b.jeton)), ...etatDe(s) });   /* [S29] */
     });
+
+  /* [S29] TRACABILITE — une transaction de CETTE session, en lecture seule :
+   * frappe -> intention -> provenance -> plan -> decision -> confirmation ->
+   * effet, reconstruite depuis les etats de la couche et du noyau. */
+  if (u.pathname === '/api/trace' && req.method === 'GET') {
+    const s = sessionDe(sid());
+    if (!s) return inconnue();
+    const tr = s.g.trace(String(u.query.jeton || '').slice(0, 100));
+    return tr ? json(200, { trace: tr }) : json(404, { erreur: 'TRACE_INTROUVABLE' });
+  }
 
   /* G3 — rayon d'impact. */
   if (u.pathname === '/api/rayon' && req.method === 'GET') {

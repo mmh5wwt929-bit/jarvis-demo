@@ -82,9 +82,9 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   await dort(400);
   const reelNow = Date.now; let decalage = 0; Date.now = () => reelNow() + decalage;
 
-  await t('V1', '/health : agenda actif, passerelle v4.5.x, couche 5.29.11', async () => {
+  await t('V1', '/health : agenda actif, passerelle v4.5.x, couche 5.29.12', async () => {
     const h = await appel('/health');
-    return { ok: h.agenda === 'actif' && /^v4\.5(\.\d+)?$/.test(h.passerelle) && h.couche === '5.29.11' && h.acces === 'protege', info: JSON.stringify({ agenda: h.agenda, passerelle: h.passerelle, couche: h.couche }) };
+    return { ok: h.agenda === 'actif' && /^v4\.5(\.\d+)?$/.test(h.passerelle) && h.couche === '5.29.12' && h.acces === 'protege', info: JSON.stringify({ agenda: h.agenda, passerelle: h.passerelle, couche: h.couche }) };
   });
   await t('V2', "sans la cle d'acces, rien : ni session, ni agenda", async () => {
     const s = await appel('/api/session', {}, null);

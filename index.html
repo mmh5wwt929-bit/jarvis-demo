@@ -241,7 +241,7 @@ textarea,input:not([type]),input[type=text]{-webkit-appearance:none;appearance:n
 
 <header>
   <div class="bandeau">
-    <div class="marque">JARVIS <span>noyau 5.28.3 · couche 5.29.11</span></div>
+    <div class="marque">JARVIS <span>noyau 5.28.3 · couche 5.29.12</span></div>
     <div class="mesures">
       <div class="mesure">autorité dépensée <b id="mLedger" class="mono">0 / 100</b></div>
       <div class="mesure">chaîne d'audit <b id="mAudit" class="mono">—</b></div>
@@ -550,6 +550,17 @@ function md(texte) {
   return h;
 }
 
+/* [S29] La trace en une ligne, construite depuis les etats (jamais depuis le
+ * texte du modele), affichee en texte echappe. */
+function resumeTrace(t) {
+  const i = t.intention || {}, c = t.confirmation || {};
+  const source = i.nature === 'FRAPPE' ? 'ta frappe « ' + i.frappe + ' »'
+    : i.nature === 'CIBLE_RETAPEE' ? 'la cible retapée par toi « ' + i.frappe + ' »' : 'aucune frappe requise';
+  return 'Trace : ' + source + (i.reverifiee === true ? ' (revérifiée)' : i.reverifiee === false ? ' (NON revérifiée)' : '')
+    + ' → autorisé (' + String((t.plan || {}).classe || '').toLowerCase() + ')'
+    + (c.mode === 'CLIC_APRES_FENETRE' ? ' → retenu 10 s → confirmé par ton clic' : c.mode === 'SANS_FENETRE' ? ' → exécuté sans fenêtre' : '')
+    + ' → ' + String((t.effet || {}).etat || '').toLowerCase() + '.';
+}
 function tour(qui, texte, moi, riche) {
   const d = document.createElement('div');
   d.className = 'tour' + (moi ? ' moi' : '');
@@ -787,6 +798,7 @@ document.addEventListener('click', async (ev) => {
     if (limiteAtteinte(r)) return;
     majEtat(r);
     tour('JARVIS', r.etat === 'EXECUTE' ? 'Envoyé.' : 'Pas encore : ' + (r.etat === 'TROP_TOT' ? 'la fenêtre court toujours.' : r.etat), false);
+    if (r.etat === 'EXECUTE' && r.trace) tour('JARVIS', resumeTrace(r.trace), false);   /* [S29] */
     if (r.reponse) tour('Claude', r.reponse, false);
   }
 

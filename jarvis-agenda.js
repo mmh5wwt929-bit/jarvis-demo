@@ -36,7 +36,7 @@ const { URL } = require('url');
 const LIMITES_AGENDA = Object.freeze({
   delaiMs: 8000, maxOctets: 2 * 1024 * 1024, maxRedirections: 3,
   maxEvenementsLus: 3000, maxEvenementsRendus: 60,
-  maxPasParEvenement: 40000, maxPasTotal: 1500000,
+  maxPasParEvenement: 40000, maxPasTotal: 600000, maxExdates: 5000,
   cacheMs: 5 * 60 * 1000, cacheEchecMs: 30 * 1000, permisMs: 30 * 1000,
   maxJoursPeriode: 31, titreMax: 120, lieuMax: 120, descriptionMax: 300, valeurMax: 5000
 });
@@ -85,6 +85,10 @@ function versUtc(zone, y, mo, d, h = 0, mi = 0, s = 0) {
   const naif = Date.UTC(y, mo - 1, d, h, mi, s);
   let t = naif - decalage(naif, zone);
   t = naif - decalage(t, zone);
+  /* Heure qui existe DEUX fois (nuit du passage a l'heure d'hiver) : la norme
+   * iCal (RFC 5545, 3.3.5) impose la PREMIERE occurrence. */
+  const avant = t - 3600000, l = partiesLocales(avant, zone);
+  if (l.y === y && l.mo === mo && l.d === d && l.h === h && l.mi === mi && l.s === s) return avant;
   return t;
 }
 const jourLocal = (ms, zone) => { const l = partiesLocales(ms, zone); return jourDe(l.y, l.mo, l.d); };
@@ -187,20 +191,30 @@ function lireRegle(v, zoneDefaut) {
     if (!u) return { nonGeree: true };
     regle.until = u;
   }
+  /* [A2 - agenda 1.1] Listes DEDOUBLONNEES et rangees dans des tables : un
+   * agenda piege (BYDAY de 1 240 « MO », BYMONTHDAY de 1 600 valeurs) faisait
+   * un parcours de liste a CHAQUE jour examine et bloquait le serveur 1,8 a
+   * 3,4 s (mesure le 24 sept). Au-dela des combinaisons qui existent vraiment,
+   * la regle est « non prise en charge ». */
   if (r.BYDAY) {
     const l = r.BYDAY.split(',').map(x => /^([+-]?\d{1,2})?(MO|TU|WE|TH|FR|SA|SU)$/.exec(x.trim()));
     if (l.some(x => !x)) return { nonGeree: true };
-    regle.jours = l.map(m => ({ n: m[1] ? parseInt(m[1], 10) : 0, j: JOURS[m[2]] }));
+    const cles = new Set(l.map(m => (m[1] ? parseInt(m[1], 10) : 0) + '|' + JOURS[m[2]]));
+    if (cles.size > 77 || [...cles].some(k => Math.abs(parseInt(k, 10)) > 53)) return { nonGeree: true };
+    regle.jours = [...cles].map(k => { const [n, j] = k.split('|').map(Number); return { n, j }; });
+    regle.cleJours = cles;
+    regle.joursSemaine = new Set(regle.jours.map(x => x.j));
   }
   if (r.BYMONTHDAY) {
-    const l = r.BYMONTHDAY.split(',').map(x => parseInt(x, 10));
+    const l = [...new Set(r.BYMONTHDAY.split(',').map(x => parseInt(x, 10)))];
     if (l.some(n => !n || Math.abs(n) > 31)) return { nonGeree: true };
     regle.joursMois = l;
+    regle.moisPos = new Set(l.filter(n => n > 0)); regle.moisNeg = new Set(l.filter(n => n < 0));
   }
   if (r.BYMONTH) {
-    const l = r.BYMONTH.split(',').map(x => parseInt(x, 10));
+    const l = [...new Set(r.BYMONTH.split(',').map(x => parseInt(x, 10)))];
     if (l.some(n => !(n >= 1 && n <= 12))) return { nonGeree: true };
-    regle.mois = l;
+    regle.mois = l; regle.moisSet = new Set(l);
   }
   return regle;
 }
@@ -208,6 +222,8 @@ function lireRegle(v, zoneDefaut) {
 function analyserIcs(texte, { zone = 'Europe/Paris', limites = LIMITES_AGENDA } = {}) {
   const L = limites;
   if (!/^\uFEFF?\s*BEGIN:VCALENDAR/i.test(String(texte).slice(0, 200))) return { ok: false, code: 'ICS_INVALIDE' };
+  /* [R4] un calendrier sans sa ligne de fin est incomplet : refuse, pas lu a moitie */
+  if (!/END:VCALENDAR\s*$/i.test(String(texte).slice(-200))) return { ok: false, code: 'ICS_INCOMPLET' };
   const brut = []; const pile = []; let cur = null, tronque = false;
   for (const ligne of lignesDepliees(texte)) {
     if (!ligne) continue;
@@ -233,6 +249,12 @@ function analyserIcs(texte, { zone = 'Europe/Paris', limites = LIMITES_AGENDA } 
   }
 
   const evenements = [];
+  /* [A3 - agenda 1.1] Dates exclues : 5 000 au plus par fichier, valeurs
+   * repetees memorisees. 2 Mo d'EXDATE bloquaient la lecture 1,4 s (chaque
+   * valeur coute une conversion de fuseau). Au-dela : resultat « incomplet »
+   * et evenement « approximatif », jamais une seance annulee affichee en
+   * silence comme maintenue. */
+  let exdatesVues = 0; const memo = new Map();
   for (const b of brut) {
     const debut = lireDate(b.DTSTART, zone);
     if (!debut) continue;
@@ -244,9 +266,12 @@ function analyserIcs(texte, { zone = 'Europe/Paris', limites = LIMITES_AGENDA } 
     } else {
       dureeMs = (fin && !fin.journee && fin.ms >= debut.ms) ? fin.ms - debut.ms : (b.DURATION ? (lireDuree(b.DURATION.valeur) || 0) : 0);
     }
-    const exdates = new Set();
+    const exdates = new Set(); let exdatesTronquees = false;
     for (const x of b.exdates) for (const v of String(x.valeur).split(',')) {
-      const d = lireDate({ valeur: v, params: x.params }, zone);
+      if (++exdatesVues > L.maxExdates) { exdatesTronquees = true; tronque = true; break; }
+      const cle = (x.params.TZID || '') + '|' + (x.params.VALUE || '') + '|' + v.trim();
+      let d = memo.get(cle);
+      if (d === undefined) { d = lireDate({ valeur: v, params: x.params }, zone); if (memo.size < L.maxExdates) memo.set(cle, d); }
       if (d) exdates.add(d.journee ? 'j' + d.jour : 'm' + d.ms);
     }
     const rid = lireDate(b['RECURRENCE-ID'], zone);
@@ -256,7 +281,7 @@ function analyserIcs(texte, { zone = 'Europe/Paris', limites = LIMITES_AGENDA } 
       lieu: b.LOCATION ? texteIcs(b.LOCATION.valeur) : '',
       description: b.DESCRIPTION ? texteIcs(b.DESCRIPTION.valeur) : '',
       annule: !!(b.STATUS && /^CANCELLED$/i.test(String(b.STATUS.valeur).trim())),
-      debut, dureeMs, dureeJours, exdates,
+      debut, dureeMs, dureeJours, exdates, exdatesTronquees,
       regle: b.RRULE ? lireRegle(b.RRULE.valeur, zone) : null,
       recurrenceId: rid ? (rid.journee ? 'j' + rid.jour : 'm' + rid.ms) : null
     });
@@ -265,33 +290,33 @@ function analyserIcs(texte, { zone = 'Europe/Paris', limites = LIMITES_AGENDA } 
 }
 
 /* ----------------------------------------------------------- recurrence -- */
+const jourDuMoisOk = (regle, c) => {
+  const n = joursDansMois(c.y, c.mo);
+  return regle.moisPos.has(c.d) || regle.moisNeg.has(c.d - n - 1);
+};
 function dansLeMois(regle, c, js, c0) {
-  if (regle.joursMois) {
-    const n = joursDansMois(c.y, c.mo);
-    const ok = regle.joursMois.some(x => x > 0 ? x === c.d : (n + x + 1) === c.d);
-    return ok && (!regle.jours || regle.jours.some(x => x.j === js));
-  }
+  if (regle.joursMois) return jourDuMoisOk(regle, c) && (!regle.jours || regle.joursSemaine.has(js));
   if (regle.jours) {
     const n = joursDansMois(c.y, c.mo);
     const rang = Math.floor((c.d - 1) / 7) + 1, rangFin = -(Math.floor((n - c.d) / 7) + 1);
-    return regle.jours.some(x => x.j === js && (x.n === 0 || x.n === rang || x.n === rangFin));
+    return regle.cleJours.has('0|' + js) || regle.cleJours.has(rang + '|' + js) || regle.cleJours.has(rangFin + '|' + js);
   }
   return c.d === c0.d;
 }
 function correspond(regle, j0, c0, j) {
   if (j < j0) return false;
   const c = civil(j), js = jourSemaine(j);
-  if (regle.mois && !regle.mois.includes(c.mo)) return false;
+  if (regle.mois && !regle.moisSet.has(c.mo)) return false;
   switch (regle.freq) {
     case 'DAILY':
       if ((j - j0) % regle.intervalle) return false;
-      if (regle.jours && !regle.jours.some(x => x.j === js)) return false;
-      if (regle.joursMois) { const n = joursDansMois(c.y, c.mo); if (!regle.joursMois.some(x => x > 0 ? x === c.d : (n + x + 1) === c.d)) return false; }
+      if (regle.jours && !regle.joursSemaine.has(js)) return false;
+      if (regle.joursMois && !jourDuMoisOk(regle, c)) return false;
       return true;
     case 'WEEKLY': {
       const debutSemaine = (x) => x - ((jourSemaine(x) - regle.wkst + 7) % 7);
       if (Math.round((debutSemaine(j) - debutSemaine(j0)) / 7) % regle.intervalle) return false;
-      return (regle.jours ? regle.jours.map(x => x.j) : [jourSemaine(j0)]).includes(js);
+      return regle.jours ? regle.joursSemaine.has(js) : js === jourSemaine(j0);
     }
     case 'MONTHLY':
       if (((c.y - c0.y) * 12 + (c.mo - c0.mo)) % regle.intervalle) return false;
@@ -384,7 +409,7 @@ function evenementsDans(analyse, periode, zone, L = LIMITES_AGENDA) {
     if (ev.annule) continue;
     for (const o of occurrences(ev, periode, zone, budget, L)) {
       if (ev.uid && remplaces.has(ev.uid + '|' + o.cle)) continue;
-      resultats.push({ ev, o });
+      resultats.push({ ev, o: ev.exdatesTronquees && ev.regle ? { ...o, approximatif: true } : o });
     }
     if (budget.depasse) break;
   }
@@ -428,6 +453,17 @@ function normaliserUrl(texte) {
   if (u.protocol !== 'https:' || u.username || u.password || !u.hostname) return null;
   return u.href;
 }
+/* [R1 - agenda 1.1] Chaque echec reseau a son nom (l'adresse, elle, n'apparait
+ * jamais) : DNS, certificat, refus, coupure. */
+function codeReseau(e) {
+  const c = String((e && (e.code || e.message)) || '');
+  if (/^(ENOTFOUND|EAI_AGAIN|EAI_FAIL|EAI_NONAME)$/.test(c)) return 'DNS_INTROUVABLE';
+  if (/CERT|SELF_SIGNED|UNABLE_TO_(VERIFY|GET)|ALTNAME|ERR_TLS/.test(c)) return 'CERTIFICAT_INVALIDE';
+  if (c === 'ECONNREFUSED') return 'CONNEXION_REFUSEE';
+  if (/^(ECONNRESET|EPIPE|ECONNABORTED|ERR_STREAM_PREMATURE_CLOSE)$/.test(c)) return 'CONNEXION_COUPEE';
+  if (c === 'ETIMEDOUT') return 'DELAI_DEPASSE';
+  return 'RESEAU';
+}
 function telecharger(url, get, L) {
   return new Promise((resolve) => {
     let fini = false, courante = null;
@@ -440,7 +476,9 @@ function telecharger(url, get, L) {
     function essai(u, restant) {
       let req;
       try {
-        req = get(u, { headers: { 'User-Agent': 'JARVIS-agenda/1.0', Accept: 'text/calendar, text/plain;q=0.9' } }, (res) => {
+        /* [R2] verification du certificat EXIGEE ici, meme si un reglage global
+         * (NODE_TLS_REJECT_UNAUTHORIZED=0) la desactivait pour tout le processus */
+        req = get(u, { rejectUnauthorized: true, headers: { 'User-Agent': 'JARVIS-agenda/1.1', Accept: 'text/calendar, text/plain;q=0.9' } }, (res) => {
           if (fini) { try { res.resume(); } catch { /* rien */ } return; }
           const code = Number(res.statusCode);
           if (code >= 300 && code < 400 && res.headers && res.headers.location) {
@@ -451,19 +489,27 @@ function telecharger(url, get, L) {
             return essai(suivant, restant - 1);
           }
           if (code !== 200) { try { res.resume(); } catch { /* rien */ } return finir({ ok: false, code: 'HTTP_' + (code || 0) }); }
-          const morceaux = []; let taille = 0;
+          const morceaux = []; let taille = 0, termine = false;
+          const annonce = res.headers && res.headers['content-length'] != null ? Number(res.headers['content-length']) : null;
           res.on('data', (c) => {
             if (fini) return;
             taille += c.length;
             if (taille > L.maxOctets) return finir({ ok: false, code: 'TROP_VOLUMINEUX' });
             morceaux.push(c);
           });
-          res.on('end', () => finir({ ok: true, texte: Buffer.concat(morceaux).toString('utf8') }));
-          res.on('error', () => finir({ ok: false, code: 'RESEAU' }));
+          /* [R3] une reponse coupee en route n'est JAMAIS lue a moitie */
+          res.on('end', () => {
+            termine = true;
+            if (annonce !== null && Number.isFinite(annonce) && annonce !== taille) return finir({ ok: false, code: 'REPONSE_INCOMPLETE' });
+            finir({ ok: true, texte: Buffer.concat(morceaux).toString('utf8') });
+          });
+          res.on('aborted', () => finir({ ok: false, code: 'REPONSE_INCOMPLETE' }));
+          res.on('close', () => { if (!termine) finir({ ok: false, code: 'REPONSE_INCOMPLETE' }); });
+          res.on('error', (e) => finir({ ok: false, code: termine ? codeReseau(e) : 'REPONSE_INCOMPLETE' }));
         });
       } catch { return finir({ ok: false, code: 'RESEAU' }); }
       courante = req;
-      req.on('error', () => finir({ ok: false, code: 'RESEAU' }));
+      req.on('error', (e) => finir({ ok: false, code: codeReseau(e) }));
     }
     essai(url, L.maxRedirections);
   });
@@ -519,4 +565,4 @@ function creerAgenda({ url, zone = 'Europe/Paris', get = https.get, maintenant =
 }
 
 module.exports = { creerAgenda, periodeDe, analyserIcs, evenementsDans, enTexte, telecharger, normaliserUrl,
-  versUtc, LIMITES_AGENDA, VERSION: '1.0' };
+  versUtc, LIMITES_AGENDA, VERSION: '1.1' };

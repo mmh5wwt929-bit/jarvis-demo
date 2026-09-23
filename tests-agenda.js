@@ -160,6 +160,48 @@ const SECRET = 'https://calendar.google.com/calendar/ical/moi%40gmail.com/privat
     const r = lire(ics(ev('UID:jamais', 'SUMMARY:x', 'DTSTART;TZID=Europe/Paris:19000101T100000', 'RRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30;COUNT=5')), 'demain');
     return { ok: r.tronque === true && r.evenements.length === 0 && Date.now() - d < 2000, info: 'tronque=' + r.tronque + ', ' + (Date.now() - d) + ' ms' };
   });
+  const chrono = (f) => { const d = Date.now(); const r = f(); return { r, ms: Date.now() - d }; };
+  await t('H7', "300 series avec BYDAY de 1 240 jours (invitations piegees) : calcul borne sous 1 s", () => {
+    const j = Array(1240).fill('MO').join(','); const evs = [];
+    for (let i = 0; i < 300; i++) evs.push(ev('UID:b' + i, 'SUMMARY:x', 'DTSTART;TZID=Europe/Paris:19700101T100000', 'RRULE:FREQ=DAILY;COUNT=100000;BYDAY=' + j));
+    const { r, ms } = chrono(() => lire(ics(...evs), 'demain'));
+    return { ok: ms < 1000 && r.tronque === true, info: ms + ' ms (1 800 ms avant la correction)' };
+  });
+  await t('H8', "300 series avec BYMONTHDAY de 1 600 valeurs : calcul borne sous 1 s", () => {
+    const md = Array(1600).fill('1').join(','); const evs = [];
+    for (let i = 0; i < 300; i++) evs.push(ev('UID:m' + i, 'SUMMARY:x', 'DTSTART;TZID=Europe/Paris:19700101T100000', 'RRULE:FREQ=DAILY;COUNT=100000;BYMONTHDAY=' + md));
+    const { r, ms } = chrono(() => lire(ics(...evs), 'demain'));
+    return { ok: ms < 1000 && r.tronque === true, info: ms + ' ms (3 400 ms avant la correction)' };
+  });
+  await t('H9', "2 Mo de dates exclues : lecture bornee sous 0,6 s, resultat marque incomplet", () => {
+    const ex = Array(290).fill('20200101T100000').join(','); const evs = []; let taille = 0;
+    for (let i = 0; taille < 1.9e6; i++) { const l = []; for (let k = 0; k < 5; k++) l.push('EXDATE;TZID=Europe/Paris:' + ex);
+      const e = ev('UID:x' + i, 'SUMMARY:x', 'DTSTART;TZID=Europe/Paris:20260924T100000', ...l); taille += e.join('\r\n').length; evs.push(e); }
+    const { r, ms } = chrono(() => lire(ics(...evs), 'demain'));
+    return { ok: ms < 600 && r.tronque === true, info: ms + ' ms (1 350 ms avant la correction), tronque=' + r.tronque };
+  });
+  await t('H10', "dates exclues au-dela du plafond : la serie est signalee « approximative », jamais affichee comme sure", () => {
+    const l = []; for (let k = 0; k < 20; k++) l.push('EXDATE;TZID=Europe/Paris:' + Array(300).fill(0).map((_, i) => '2020' + String(1 + (i % 12)).padStart(2, '0') + String(1 + (i % 28)).padStart(2, '0') + 'T1' + String(k % 10) + '0000').join(','));
+    const r = lire(ics(ev('UID:s', 'SUMMARY:Série', 'DTSTART;TZID=Europe/Paris:20260101T100000', 'RRULE:FREQ=DAILY', ...l)), 'demain');
+    return { ok: r.tronque === true && r.evenements.length === 1 && r.evenements[0].approximatif === true, info: 'tronque=' + r.tronque + ', approximatif=' + (r.evenements[0] || {}).approximatif };
+  });
+  await t('H11', "BYDAY=MO,MO,MO (doublons) se comporte exactement comme BYDAY=MO", () => {
+    const a = lire(ics(ev('UID:a', 'SUMMARY:x', 'DTSTART;TZID=Europe/Paris:20260105T100000', 'RRULE:FREQ=WEEKLY;BYDAY=MO,MO,MO')), '2026-10-01..2026-10-31');
+    const b = lire(ics(ev('UID:a', 'SUMMARY:x', 'DTSTART;TZID=Europe/Paris:20260105T100000', 'RRULE:FREQ=WEEKLY;BYDAY=MO')), '2026-10-01..2026-10-31');
+    return { ok: JSON.stringify(a.evenements) === JSON.stringify(b.evenements) && a.evenements.length === 4, info: a.evenements.length + ' lundis dans les deux cas' };
+  });
+  await t('H12', "changement d'heure : 2h30 qui n'existe pas (28 mars 2027) et 2h30 qui existe deux fois (25 oct) -> heures valides", () => {
+    const r1 = lire(ics(ev('UID:p', 'SUMMARY:x', 'DTSTART;TZID=Europe/Paris:20270328T023000')), '2027-03-28');
+    const r2 = lire(ics(ev('UID:q', 'SUMMARY:x', 'DTSTART;TZID=Europe/Paris:20261025T023000')), '2026-10-25');
+    const d1 = r1.evenements[0] && r1.evenements[0].debut, d2 = r2.evenements[0] && r2.evenements[0].debut;
+    return { ok: !!d1 && !!d2 && !isNaN(Date.parse(d1)) && !isNaN(Date.parse(d2)) && d1.startsWith('2027-03-28T0') && d1 === '2027-03-28T01:30:00.000Z' && d2 === '2026-10-25T00:30:00.000Z', info: d1 + ' ; ' + d2 + ' (RFC 5545 : avant le trou ; premiere occurrence)' };
+  });
+  await t('H13', "regles invalides ou extremes (HOURLY, INTERVAL=0, COUNT=0, UNTIL avant le debut, BYDAY=9MO) : aucune panne, rien d'invente", () => {
+    const cas = [['RRULE:FREQ=HOURLY', 1], ['RRULE:FREQ=DAILY;INTERVAL=0', null], ['RRULE:FREQ=DAILY;COUNT=0', 0], ['RRULE:FREQ=DAILY;UNTIL=20200101T000000Z', 0], ['RRULE:FREQ=MONTHLY;BYDAY=99MO', 1], ['RRULE:FREQ=WEEKLY;BYDAY=XX', 1]];
+    const res = cas.map(([rr]) => lire(ics(ev('UID:z', 'SUMMARY:x', 'DTSTART;TZID=Europe/Paris:20260924T100000', rr)), 'demain').evenements.length);
+    const ok = cas.every(([, attendu], i) => attendu === null ? res[i] >= 1 : res[i] === attendu);
+    return { ok, info: res.join(' ') };
+  });
   await t('H5', "fichier qui n'est pas un calendrier : refuse", () => {
     const r = A.analyserIcs('<html><body>Connexion requise</body></html>', { zone: ZONE });
     return { ok: !r.ok && r.code === 'ICS_INVALIDE', info: r.code };
@@ -246,6 +288,107 @@ const SECRET = 'https://calendar.google.com/calendar/ical/moi%40gmail.com/privat
       && A.creerAgenda({ url: 'pas une adresse' }).actif === false
       && A.creerAgenda({}).actif === false;
     return { ok, info: ok ? '5/5' : 'ECHEC' };
+  });
+
+  /* ------------------------------------------------ reseau reel [R1-R4] */
+  /* Certificat auto-signe, pour localhost et pour ces tests seulement. */
+  const CLE_TEST = `-----BEGIN PRIVATE KEY-----
+MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQDTgtEjM7GRL1R0
+hOQ0dus3Bm/nk1cpDfSY6RiHZhNTB73IUO+szUoKCFEmTJLEO7lasSGO+pJv5WiT
+47fCv02k9X5ZRAf/ioOmEpZSvUSZ7QhqaQzSKBCnATDXfBxzeKFrnrRQF18xKEwQ
+uGuj7jXPv/k08MaeApCzuifbPj4Ps19P96FDn2qguUP2hxk6xqcY4RwTu70WA3UP
+Jo8NwA0bf8/jlvkT01Lplwfz0Fi5VSS1hXOPCOlLcc9wQOC/khw2B2FqCjWoG/T3
+O+uViTg7pJv9Ys7e+B3pmyZyher6KoSyv8V+lGOhpIVQf2KKKmGA3OBuWkKyneGs
+x2wzAV8/AgMBAAECggEAFq9gKOthbxXpc/nQ1AOxJJyvIeI+peuWQVQ2ykbbabtZ
+0oNDwX/fIgZUVcw+rYdOUPjQhZpAXHn5Zms1CVElTbz6yS4vwWukxQoXT1Z3Zh7z
+GR6dPmkHqDHLgEESeBwHDBjgc/qdvhL5XY26FcH1yYtoehIc61ORG4WqwqwBUgOU
+Ckv/ex7ysF2TsHhjMlJJi4IyC5cw7+hEU+R5o6lg4+8GN4+hub7LkvTFsQWMO7YI
+vzFvd/NHCQK0RMTNv2hyH6f05DQIEZ54Zgd133RH52QRBcTvthbtBr1iy6ivvgAJ
+SVEUGoP3pT1G09uERTUDhU26h5J3t6qxAKs9T0BfUQKBgQD0mXr84uhyqlMjZctL
+DOw0wpFZYkkOFsoeX3vcTHAuEFCYBtXLvRHosZrQmM5ophMTW5tjI6CjRCsks6E1
+08lmU+zpQKPGdYnY+Xb0zlSmZcY5/A5mYC3+6YWCtrbGCxDL4rbBlTs8OmfzhC1V
+saUwr78IfE2zgV+QwJmz8IERGQKBgQDdXoemMcoYqB8a6yBpO2JWJ7Pll4IIqSeh
+MmMmIWOErEaO7Cp+sEtv6MtaSlF4ketCzVMKXBVhg/P7bXFbvCziUASGNteVRQ2A
+YnDfXONgD3ywGMk6UCXlinezWz2hLQYCCp9hYaSJ4HvBuQFNGgfN/xH5/N22REbH
+GBfLnhxGFwKBgQDZa+BeEBjNbEdwjJiTgs4n69elm28S3gEV1IxV+4AwAgKR0GmU
+q+DSdaUGzP2VGiKUr3ZFPrMYzYyIGEAxh6tbkThi8jliPLKmssEhxJKMQqVcf4gR
+Smc4Uz2BPobjLYzlnwYSt2MrG0Oxu4lMxhbvWxk1IsEy0cov8nPt9dfUaQKBgQDV
+rnLoRPVcuaRU2pQNoCn7GhX30DjP3WCIpFe6rc4feiAdw+/9HHWlD6SDgmuEI+5h
+LEs1G8/zsmin0Wvz7f+xcSX83CFbUC2JOPzVTxeYWTq1zSco58a8/N0wvykNVKWR
+AOn6GUO3Z35ucAPGhhL0kHuswJ7PWrarZiFKBlQqfwKBgD2DwjMQgw1p8qonWcrl
+3ZWXTwYzR/DGDCC/d0rh9KaxV6fcKqg/Bn7QstMFTItRVrHvPraOvlGEYqMkWjSi
+Qx147gt9v84YCE5/51kvnVqyFMoSSH7jEtpougCnKcM9ucCfmAzdivD+t7CIu7Cb
+KeWSPBPGDKikL0E50ATqwYQq
+-----END PRIVATE KEY-----`;
+  const CERT_TEST = `-----BEGIN CERTIFICATE-----
+MIIDCTCCAfGgAwIBAgIUPggE9Et1mauJKzLXn1ekAXcrlbcwDQYJKoZIhvcNAQEL
+BQAwFDESMBAGA1UEAwwJbG9jYWxob3N0MB4XDTI2MDkyMzIzMjE0OVoXDTM2MDky
+MDIzMjE0OVowFDESMBAGA1UEAwwJbG9jYWxob3N0MIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEA04LRIzOxkS9UdITkNHbrNwZv55NXKQ30mOkYh2YTUwe9
+yFDvrM1KCghRJkySxDu5WrEhjvqSb+Vok+O3wr9NpPV+WUQH/4qDphKWUr1Eme0I
+amkM0igQpwEw13wcc3iha560UBdfMShMELhro+41z7/5NPDGngKQs7on2z4+D7Nf
+T/ehQ59qoLlD9ocZOsanGOEcE7u9FgN1DyaPDcANG3/P45b5E9NS6ZcH89BYuVUk
+tYVzjwjpS3HPcEDgv5IcNgdhago1qBv09zvrlYk4O6Sb/WLO3vgd6ZsmcoXq+iqE
+sr/FfpRjoaSFUH9iiiphgNzgblpCsp3hrMdsMwFfPwIDAQABo1MwUTAdBgNVHQ4E
+FgQUCKDNfBsZxg2KpF8TFHan3/pw7YAwHwYDVR0jBBgwFoAUCKDNfBsZxg2KpF8T
+FHan3/pw7YAwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAF02a
+CcyA+nK3L+rReVPtW1t+zz741hZoHXF6zhivTmS1A8yF1fS5AwOiVH6uCV6M/LPN
++SIvY3+/kkHcLLBQ8EDycBr214W+iiJ8+6D0WLy2fp6j3RRe1byJjW1wflKyhPvx
+DY/AoG3VxO3rnVeEj2hcZdszdyispfZgLMopWaOs5IebpymzuKLBnnTsMoBQBDWP
+mg2oIRruwoARgjvUbVtF3diNU5qsQulzjph1g7hJTcv332ecS7N5jqW/AdpdnZqy
+3ctQy0Q32Cm81kZ+OlLc5AyXuCbbdUp2WtC2qJMxoufcJdx+bZbilUhSiGad4UWo
+GTJnZZ8q3/fp75kZRA==
+-----END CERTIFICATE-----`;
+  const httpsReel = require('https');
+  const serveurTls = await new Promise((ok) => {
+    const srv = httpsReel.createServer({ key: CLE_TEST, cert: CERT_TEST }, (req, res) => { res.writeHead(200, { 'Content-Type': 'text/calendar' }); res.end(CAL); });
+    srv.listen(0, '127.0.0.1', () => ok(srv));
+  });
+  const urlTls = 'https://localhost:' + serveurTls.address().port + '/cal.ics';
+  const lecteurReel = (url) => A.creerAgenda({ url, maintenant: () => MAINTENANT });
+  await t('N1', "vrai DNS : domaine inexistant -> DNS_INTROUVABLE (sans l'adresse dans le resultat)", async () => {
+    const r = await lecture(lecteurReel('https://jarvis-inexistant.invalid/cal.ics'));
+    return { ok: r.code === 'DNS_INTROUVABLE' && !/inexistant/.test(JSON.stringify(r)), info: r.code };
+  });
+  await t('N2', "vrai serveur HTTPS au certificat auto-signe -> CERTIFICAT_INVALIDE, rien n'est lu", async () => {
+    const r = await lecture(lecteurReel(urlTls));
+    return { ok: !r.ok && r.code === 'CERTIFICAT_INVALIDE' && !r.evenements, info: r.code };
+  });
+  await t('N3', "meme avec NODE_TLS_REJECT_UNAUTHORIZED=0 (verification coupee pour tout Node) : REFUSE ; une requete temoin, elle, passe", async () => {
+    const avant = process.env.NODE_TLS_REJECT_UNAUTHORIZED; process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+    const emit = process.emitWarning; process.emitWarning = () => {};
+    const temoin = await new Promise((ok) => httpsReel.get(urlTls, (res) => { res.resume(); ok(res.statusCode); }).on('error', (e) => ok(e.code)));
+    const r = await lecture(lecteurReel(urlTls));
+    if (avant === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED; else process.env.NODE_TLS_REJECT_UNAUTHORIZED = avant;
+    process.emitWarning = emit;
+    return { ok: temoin === 200 && r.code === 'CERTIFICAT_INVALIDE', info: 'temoin sans option : ' + temoin + ' ; JARVIS : ' + r.code };
+  });
+  await t('N4', "vrai refus de connexion -> CONNEXION_REFUSEE", async () => {
+    const r = await lecture(lecteurReel('https://localhost:1/cal.ics'));
+    return { ok: r.code === 'CONNEXION_REFUSEE', info: r.code };
+  });
+  serveurTls.close();
+  await t('N5', "reponse coupee en route (fermeture sans fin) -> REPONSE_INCOMPLETE, rien de lu a moitie", async () => {
+    const get = (url, opts, cb) => { const req = new EventEmitter(); req.destroy = () => {};
+      setImmediate(() => { const res = new EventEmitter(); res.statusCode = 200; res.headers = {}; res.resume = () => {}; cb(res);
+        res.emit('data', Buffer.from(CAL.slice(0, CAL.length / 2))); res.emit('close'); }); return req; };
+    const r = await lecture(A.creerAgenda({ url: SECRET, get, maintenant: () => MAINTENANT }));
+    return { ok: r.code === 'REPONSE_INCOMPLETE' && !r.evenements, info: r.code };
+  });
+  await t('N6', "longueur annoncee non tenue (Content-Length) -> REPONSE_INCOMPLETE", async () => {
+    const r = await lecture(outil({ [SECRET]: { status: 200, headers: { 'content-length': String(CAL.length + 500) }, corps: CAL } }));
+    return { ok: r.code === 'REPONSE_INCOMPLETE', info: r.code };
+  });
+  await t('N7', "calendrier sans sa ligne de fin (tronque) -> ICS_INCOMPLET, aucun evenement partiel", async () => {
+    const tronque = CAL.slice(0, CAL.lastIndexOf('END:VCALENDAR'));
+    const r = await lecture(outil({ [SECRET]: { status: 200, corps: tronque } }));
+    return { ok: r.code === 'ICS_INCOMPLET' && !r.evenements, info: r.code };
+  });
+  await t('N8', "apres un echec reseau, le permis est consomme : impossible de le rejouer", async () => {
+    const ag3 = outil({ [SECRET]: { status: 500 } });
+    const p = ag3.permis({ action: 'READ', resource: 'AGENDA', target: 'demain' });
+    const a = await ag3.lire(p), b = await ag3.lire(p);
+    return { ok: !a.ok && b.code === 'PERMIS_DEJA_UTILISE', info: a.code + ' puis ' + b.code };
   });
 
   /* ------------------------------------------------------------ permis */
