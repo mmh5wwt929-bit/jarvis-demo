@@ -241,7 +241,7 @@ textarea,input:not([type]),input[type=text]{-webkit-appearance:none;appearance:n
 
 <header>
   <div class="bandeau">
-    <div class="marque">JARVIS <span>noyau 5.28.3 · couche 5.29.6</span></div>
+    <div class="marque">JARVIS <span>noyau 5.28.3 · couche 5.29.8</span></div>
     <div class="mesures">
       <div class="mesure">autorité dépensée <b id="mLedger" class="mono">0 / 100</b></div>
       <div class="mesure">chaîne d'audit <b id="mAudit" class="mono">—</b></div>
@@ -428,6 +428,14 @@ async function ouvrirSession() {
   try {
     const r = await versServeur(API + '/api/session', { method:'POST' });
     if (r.ok) { const d = await r.json(); if (d && d.sessionId) { sid = d.sessionId; return; } }
+    /* [S17] demo pleine ou trop de sessions : le dire, en clair */
+    if (r.status === 503 || r.status === 429) {
+      let d = {}; try { d = await r.json(); } catch (e) {}
+      const min = Math.max(1, Math.ceil((d.reessayerDans || 300) / 60));
+      tour('JARVIS', (r.status === 503
+        ? 'La démo est pleine pour le moment : trop de visiteurs à la fois.'
+        : 'Trop de sessions ouvertes depuis ta connexion.') + ' Réessaie dans ' + min + ' min environ.');
+    }
   } catch (e) {}
   /* serveur ancien ou injoignable : repli, le serveur la refusera et on reessaiera */
   sid = 'web-' + Math.random().toString(36).slice(2, 10);

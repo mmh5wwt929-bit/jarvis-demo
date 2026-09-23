@@ -2,6 +2,21 @@
 /* ============================================================================
  * JARVIS+ 5.29 — COUCHE DE GOUVERNANCE (sur noyau 5.28.3)
  * ----------------------------------------------------------------------------
+ * 5.29.8 (23 sept 2026) — sonde F91-F100 « un identifiant est-il une
+ *  autorite ? » : non, la chaine tient (aucun effet produit, trois scenarios).
+ *  Mais du code du meme processus peut consommer ou revoquer la permission
+ *  d'une action retenue : le refus venait du noyau, tard. La couche verifie
+ *  desormais l'etat de la permission a chaque pas.
+ * 5.29.7 (23 sept 2026) — le patch propose par ChatGPT, trie : chaque point
+ *  garde a ete PROUVE sur 5.29.6 avant correction ; son coeur (la « preuve
+ *  utilisateur structuree ») a ete ecarte : rejoue a la lettre, il autorisait
+ *  son propre exemple critique et sa preuve n'etait jamais consommee.
+ *  [H] horloges a marque haute (NaN, exception, recul) ; [E] entree de
+ *  confiance par capacite (creerSessionGouvernee), plus de USER_DIRECT par
+ *  ingerer() ni par reformulation() publiques, plancher MODEL_INFERRED tant
+ *  que personne n'a rien tape ; [V] verbe ET cible dans les propres mots de
+ *  la personne, verifies par la couche elle-meme ; [A] contexte et ancrage en
+ *  lecture seule ; [L] capacites bornees, refus au lieu d'effacement.
  * 5.29.6 (22 sept 2026) — TRANSACTIONS SCELLEES (voir [T] plus bas). Prouve sur
  *  5.29.5 avant correction : 6 attaques sur l'objet d'autorisation (fenetre
  *  sautee, jeton de A executant B, journal falsifiable, horloge reculee...),
@@ -62,6 +77,9 @@
  * ========================================================================== */
 
 const K = require('./jarvis-5.28.3.js');
+/* [V - 5.29.7] la couche verifie elle-meme le verbe : elle ne depend plus du
+ * serveur pour ca. Fonctions pures, aucune dependance en retour. */
+const { analyserIntention, separer } = require('./jarvis-vigilance.js');
 const crypto = require('crypto');
 
 const { Jarvis, approvalFor, identityContext, envelopeFor, HARNESS_KEY } = K;
@@ -159,17 +177,60 @@ const TRANSITIONS_TX = Object.freeze({
 });
 
 /* T4 — deux domaines de temps, jamais melanges. */
+/* [H - 5.29.7] Les DEUX horloges ont une marque haute, lue des la creation :
+ * une horloge qui rend NaN, qui plante ou qui recule ne raccourcit plus la
+ * fenetre (prouve sur 5.29.6 : une horloge a NaN faisait partir l'envoi sans
+ * attendre). Une horloge cassee fige le temps : l'action attend, on peut
+ * toujours l'annuler. Ferme par defaut. */
 class HorlogeCouche {
-  #hw = 0; #mono; #mur;
+  #hw; #hm; #mono; #mur; #murOk = true;
+  static #lire(f, defaut) {
+    try { const t = Number(f()); return Number.isFinite(t) ? t : defaut; } catch { return defaut; }
+  }
   constructor(o = {}) {
+    o = (o && typeof o === 'object') ? o : {};
     this.#mono = typeof o.mono === 'function' ? o.mono : () => performance.now();
     this.#mur  = typeof o.mur  === 'function' ? o.mur  : () => Date.now();
+    this.#hm = HorlogeCouche.#lire(this.#mono, 0);
+    this.#hw = HorlogeCouche.#lire(this.#mur, 0);
   }
   /* durees : ne recule jamais, insensible a l'heure systeme */
-  mono() { return this.#mono(); }
+  mono() { const t = HorlogeCouche.#lire(this.#mono, this.#hm); if (t > this.#hm) this.#hm = t; return this.#hm; }
   /* horodatages : heure murale, marque haute contre le recul */
-  mur() { const t = this.#mur(); if (!(t >= this.#hw)) return this.#hw; this.#hw = t; return t; }
+  mur() {
+    const t = HorlogeCouche.#lire(this.#mur, NaN);
+    this.#murOk = Number.isFinite(t);
+    if (this.#murOk && t > this.#hw) this.#hw = t;
+    return this.#hw;
+  }
+  /* la derniere lecture murale etait-elle valide ? Une heure figee
+   * empecherait toute expiration : #reverifier refuse dans ce cas. */
+  murValide() { return this.#murOk; }
 }
+
+/* [L - 5.29.7] CAPACITES BORNEES. Rien n'est jamais efface pour faire de la
+ * place (ni transaction, ni preuve, ni journal) : une fois la borne atteinte,
+ * la session REFUSE les nouvelles demandes. Une session serveur dure 30 min et
+ * le serveur limite deja le debit : ces bornes ne sont atteintes qu'en cas
+ * d'abus. opts.limites peut les ABAISSER (tests), jamais les relever. */
+const LIMITES_GOUVERNANCE = Object.freeze({
+  transactions: 500, requetes: 1000, preuvesC3: 500, dryRuns: 500, reformulations: 500, journal: 5000
+});
+function limitesDe(o) {
+  const l = {};
+  for (const [k, v] of Object.entries(LIMITES_GOUVERNANCE)) {
+    const x = o && Number(o[k]);
+    l[k] = Number.isInteger(x) && x > 0 && x < v ? x : v;
+  }
+  return Object.freeze(l);
+}
+
+/* [E - 5.29.7] ENTREE DE CONFIANCE. Declarer « c'est l'utilisateur qui a
+ * tape ceci » est une CAPACITE, remise une seule fois par
+ * creerSessionGouvernee() a l'adaptateur qui recoit vraiment la frappe (la
+ * route /api/chat). Ce registre est prive au module : aucune methode publique
+ * de la session ne peut plus fabriquer USER_DIRECT. */
+const CAPACITES_ENTREE = new WeakMap();
 
 /* [T8] une seule portee existe aujourd'hui ; un joker ne s'introduit pas. */
 const PORTEES_ADMISES = Object.freeze(['CURRENT_CONTEXT']);
@@ -391,6 +452,7 @@ class SessionGouvernee {
   #derniereFrappe = null; #demandeScellee = null;   /* [C3] */
   /* [T] transactions scellees : rien de ceci ne sort de la couche */
   #id = 'ses_' + crypto.randomUUID(); #h; #tx = new Map(); #requetes = new Set(); #preuvesC3 = new Set(); #parTx = new Map();
+  #lim;   /* [L] */
 
   constructor(opts = {}) {
     this.#h = new HorlogeCouche(opts.horloge);
@@ -398,7 +460,36 @@ class SessionGouvernee {
     this.#ctx = new RegistreContexte();
     this.#ancrage = new AncrageExterne(opts.puitsAncrage);
     this.#ancrage.publier(this.#j);            /* ancre le BOOT */
+    this.#lim = limitesDe(opts.limites);
+    /* [E] la capacite d'entree est deposee ici, recuperable UNE fois par la fabrique */
+    CAPACITES_ENTREE.set(this, Object.freeze({
+      soumettre:  (texte) => this.#soumettre(texte),
+      reformuler: (action, cible) => this.#reformuler(action, cible)
+    }));
     Object.freeze(this);                       /* [T] aucune methode remplacable sur l'instance */
+  }
+
+  /* [E3] Une session ou personne n'a rien tape n'a pas d'intention humaine :
+   * son plancher est au mieux MODEL_INFERRED. USER_DIRECT n'existe que si
+   * l'utilisateur a parle, par l'entree de confiance. */
+  #plancherEffectif() {
+    return this.#derniereFrappe === null ? pire(this.#ctx.plancher(), 'MODEL_INFERRED') : this.#ctx.plancher();
+  }
+
+  /* [E] la frappe de l'utilisateur, par la seule capacite qui peut la declarer */
+  #soumettre(texte) {
+    if (typeof texte !== 'string' || !texte.trim()) return Object.freeze({ ok: false, motif: 'TEXTE_INVALIDE' });
+    const t = texte.slice(0, 4000);
+    this.#derniereFrappe = t;
+    this.#ctx.ingerer({ origine: 'USER_DIRECT', resume: t.slice(0, 120), source: 'clavier' });
+    return Object.freeze({ ok: true });
+  }
+  /* [E] la cible retapee a la main : confirme ACTION + CIBLE ensemble */
+  #reformuler(action, cible) {
+    if (typeof action !== 'string' || !action.trim() || typeof cible !== 'string' || !cible.trim())
+      return Object.freeze({ ok: false, motif: 'REFORMULATION_INVALIDE' });
+    const j = this.#confirmerCible(action, cible, 'reformulation');
+    return Object.freeze(j ? { ok: true } : { ok: false, motif: 'CAPACITE_REFORMULATIONS_ATTEINTE' });
   }
 
   /* ---- [T3] seule porte de changement d'etat ---- */
@@ -436,10 +527,31 @@ class SessionGouvernee {
     let pn = null;
     try { pn = this.#j.permissions.getPermission(rec.propositionId, HARNESS_KEY); } catch { pn = null; }
     if (!pn) return refuser('PERMISSION_NOYAU_INTROUVABLE', 'REVOKED');
+    /* [F92 - 5.29.8] L'ETAT DE LA PERMISSION COTE NOYAU. Un identifiant de
+     * reservation ou de permission n'autorise rien (verifie : F91-F100), mais
+     * il permet a du code du meme processus de CONSOMMER ou de REVOQUER la
+     * permission d'une action retenue. Le noyau refusait alors l'effet, tard,
+     * a l'execution. La couche le voit maintenant elle-meme : refus immediat,
+     * transaction close, motif explicite. Fail-closed si l'etat manque. */
+    if (String(pn.state || '') !== 'ACTIVE') return refuser('PERMISSION_NOYAU_' + (pn.state || 'SANS_ETAT'), 'REVOKED');
     for (const k of ['action', 'resource', 'target', 'scope', 'context', 'tool'])
       if (String(pn[k]) !== rec.spec[k]) return refuser('EMPREINTE_NOYAU_DIFFERENTE:' + k, 'REVOKED');
-    if (!(this.#h.mur() < rec.expireA)) return refuser('AUTORISATION_EXPIREE', 'EXPIRED');
+    const maintenant = this.#h.mur();
+    if (!this.#h.murValide()) return refuser('HORLOGE_MURALE_INVALIDE', 'REVOKED');   /* [H] */
+    if (!(maintenant < rec.expireA)) return refuser('AUTORISATION_EXPIREE', 'EXPIRED');
     return null;
+  }
+
+  /* [S17] Nombre d'actions retenues ENCORE VALIDES (en attente, non expirees).
+   * Lecture seule : sert au serveur pour ne jamais expulser une session dont
+   * la personne peut encore annuler ou confirmer un envoi. */
+  enAttenteValides() {
+    const t = this.#h.mur(); let n = 0;
+    for (const aid of this.#enAttente.values()) {
+      const r = this.#tx.get(aid);
+      if (r && r.etat === 'PENDING' && t < r.expireA) n++;
+    }
+    return n;
   }
 
   /* Vue publique d'une transaction, en lecture seule. */
@@ -467,8 +579,26 @@ class SessionGouvernee {
    * Un code qui possede deja le processus peut toujours tout faire — aucune
    * defense en memoire n'y change rien — mais le contournement ACCIDENTEL,
    * qui est le cas reel, n'est plus exprimable. */
-  get contexte() { return this.#ctx; }
-  get ancrage() { return this.#ancrage; }
+  /* [A - 5.29.7] VUES EN LECTURE SEULE. Ces deux accesseurs rendaient les
+   * objets internes : on pouvait appeler contexte.ingerer(), ou publier une
+   * fausse ancre et declencher une fausse alerte de falsification (prouve sur
+   * 5.29.6). Ils ne rendent plus que de quoi lire. */
+  get contexte() {
+    const c = this.#ctx, eff = () => this.#plancherEffectif();
+    return Object.freeze({
+      plancher: () => eff(), influencesBasses: () => c.influencesBasses(),
+      ciblesConnues: () => c.ciblesConnues(),
+      get entrees() { return c.entrees; }, get taille() { return c.taille; }
+    });
+  }
+  get ancrage() {
+    const a = this.#ancrage, j = this.#j;
+    return Object.freeze({
+      statut: () => a.statut(), get ancres() { return a.ancres; },
+      /* verifier un AUTRE journal contre nos ancres (scenario G4) : lecture seule */
+      verifier: (autre) => a.verifier(autre || j)
+    });
+  }
   get journal() { return this.#journal.map(x => ({ ...x })); }
 
   /* Vues en lecture seule, en remplacement de l'acces au noyau. */
@@ -489,12 +619,14 @@ class SessionGouvernee {
   }
 
   /* ---- G1 : tout ce que l'agent ingere passe par ici ---- */
+  /* Contenu lu par l'agent. [E - 5.29.7] USER_DIRECT n'entre plus par ici :
+   * il passe par la capacite d'entree (creerSessionGouvernee). Avant, n'importe
+   * quel appelant pouvait ecrire { origine:'USER_DIRECT', source:'clavier' }. */
   ingerer(o) {
-    const { origine, resume, source } = o || {};
-    /* [C3] texte integral de la derniere frappe, pour comparer les cibles.
-     * Le champ cible, lui, n'est jamais accepte de l'exterieur. */
-    if (origine === 'USER_DIRECT' && source === 'clavier')
-      this.#derniereFrappe = String(o.texte != null ? o.texte : (resume || '')).slice(0, 4000);
+    let origine, resume, source;
+    try { ({ origine, resume, source } = (o && typeof o === 'object') ? o : {}); }
+    catch { return Object.freeze({ ok: false, motif: 'ENTREE_ILLISIBLE' }); }
+    if (origine === 'USER_DIRECT') return Object.freeze({ ok: false, motif: 'ENTREE_UTILISATEUR_REQUISE' });
     return this.#ctx.ingerer({ origine, resume, source });
   }
 
@@ -556,11 +688,12 @@ ${demandeUtilisateur}`
    * C'est le seul mecanisme qui remonte le plancher a USER_DIRECT pour une
    * action donnee. Un texte injecte peut convaincre un modele ; il ne peut pas
    * produire une frappe humaine sur la bonne valeur. */
-  reformulation(action, cibleRetapee) {
-    return this.#confirmerCible(action, cibleRetapee, 'reformulation');
-  }
+  /* [E - 5.29.7] La reformulation publique fabriquait une preuve humaine pour
+   * n'importe quel appelant. Elle passe desormais par la capacite d'entree. */
+  reformulation() { return Object.freeze({ decide: 'REFUSE', motif: 'ENTREE_UTILISATEUR_REQUISE' }); }
   #confirmerCible(action, cible, mode) {
     const cle = String(action).toUpperCase() + '|' + String(cible);
+    if (!this.#reformulations.has(cle) && this.#reformulations.size >= this.#lim.reformulations) return null;   /* [L] */
     const jeton = { cle, nonce: crypto.randomUUID(), ts: Date.now() };
     jeton.preuve = sha(jeton);
     this.#reformulations.set(cle, jeton);
@@ -576,7 +709,7 @@ ${demandeUtilisateur}`
   /* ---- G5 : la note, avant toute decision ---- */
   note(spec) {
     return noteDeDecision({
-      spec, classe: classeDe(spec.action), plancher: this.#ctx.plancher(),
+      spec, classe: classeDe(spec.action), plancher: this.#plancherEffectif(),
       influences: this.#ctx.influencesBasses(), ciblesVues: this.#ctx.ciblesConnues(),
       heure: new Date().getHours()
     });
@@ -624,13 +757,18 @@ ${demandeUtilisateur}`
 
     /* [T1] une requete = un identifiant, jamais servi deux fois dans la session. */
     if (options.requeteId != null && !idValide(options.requeteId)) return refus('CHAINE_ID', 'REQUETE_ID_INVALIDE');
+    /* [L] bornes : on refuse, on n'efface rien */
+    if (this.#journal.length >= this.#lim.journal)      return refus('CAPACITE', 'JOURNAL_SATURE');
+    if (this.#tx.size >= this.#lim.transactions)        return refus('CAPACITE', 'CAPACITE_TRANSACTIONS_ATTEINTE');
+    if (this.#requetes.size >= this.#lim.requetes)      return refus('CAPACITE', 'CAPACITE_REQUETES_ATTEINTE');
+    if (this.#preuvesC3.size >= this.#lim.preuvesC3)    return refus('CAPACITE', 'CAPACITE_PREUVES_ATTEINTE');
     const requeteId = options.requeteId || 'req_' + crypto.randomUUID();
     if (this.#requetes.has(requeteId)) return refus('CHAINE_ID', 'REQUETE_REJOUEE');
     this.#requetes.add(requeteId);
 
     /* [C2] Des que la session porte du contenu non direct, le plan doit prouver
      * qu'il vient d'un contexte assemble par la couche. */
-    if (this.#ctx.plancher() !== 'USER_DIRECT' && this.#sceauContexte
+    if (this.#plancherEffectif() !== 'USER_DIRECT' && this.#sceauContexte
         && options.sceauContexte !== this.#sceauContexte && !options.manuel)
       return refus('G1_CONTEXTE', 'CONTEXTE_NON_DECLARE');
 
@@ -641,7 +779,7 @@ ${demandeUtilisateur}`
       return refus('G2_REVERSIBILITE', 'COMPENSATION_NON_DECLAREE');
 
     /* G1 + G2 : l'irremediable exige une intention directe ET reformulee. */
-    let plancher = this.#ctx.plancher();
+    let plancher = this.#plancherEffectif();
     let provenanceCible = null, cleC3 = null;
     if (classe === 'IRREVERSIBLE') {
       if (!this.#aReformule(spec)) {
@@ -653,11 +791,22 @@ ${demandeUtilisateur}`
         /* [T9] une phrase tapee autorise UNE action irreversible sur cette
          * cible, pas une serie : la meme demande scellee ne resert pas. */
         cleC3 = d ? sha({ sceau: d.sceau, a: String(spec.action).toUpperCase(), c: String(cible) }) : null;
-        if (options.manuel || !d || options.sceauContexte !== d.sceau || !cibleDansTexte(cible, d.texte)
-            || this.#preuvesC3.has(cleC3))
-          return refus('G1_PROVENANCE', 'REFORMULATION_REQUISE', {
+        /* [V - 5.29.7] La cible tapee ne suffisait pas : « Regarde
+         * /documents/test.pdf », puis un plan DELETE sur ce fichier, etait
+         * AUTORISE par la couche seule (prouve ; seul le serveur le bloquait).
+         * Il faut maintenant, dans les PROPRES mots de la personne (hors texte
+         * cite ou colle), le VERBE de l'action ET la cible. */
+        const pourquoi =
+            (options.manuel || !d || options.sceauContexte !== d.sceau) ? 'DEMANDE_NON_SCELLEE'
+          : !analyserIntention(spec.action, d.texte).presente         ? 'VERBE_NON_TAPE'
+          : !cibleDansTexte(cible, separer(d.texte).propres)           ? 'CIBLE_NON_TAPEE'
+          : this.#preuvesC3.has(cleC3)                                 ? 'PREUVE_DEJA_UTILISEE'
+          : null;
+        if (pourquoi)
+          return refus('G1_PROVENANCE', 'REFORMULATION_REQUISE', { pourquoi,
             aReformuler: { action: spec.action, cible, resource: spec.resource } });
-        this.#confirmerCible(spec.action, cible, 'cible tapee dans la demande');
+        if (!this.#confirmerCible(spec.action, cible, 'cible tapee dans la demande'))
+          return refus('CAPACITE', 'CAPACITE_REFORMULATIONS_ATTEINTE');
         this.dryRun(spec);
         provenanceCible = 'DEMANDE_UTILISATEUR';
         note = this.note(spec);
@@ -748,6 +897,8 @@ ${demandeUtilisateur}`
   /* ---- G2 : dry-run prealable, obligatoire avant tout irremediable ---- */
   dryRun(spec) {
     const cle = sha({ a: spec.action, t: spec.target, r: spec.resource });
+    if (!this.#dryRuns.has(cle) && this.#dryRuns.size >= this.#lim.dryRuns)   /* [L] */
+      return { simule: false, motif: 'CAPACITE_DRY_RUN_ATTEINTE' };
     this.#dryRuns.add(cle);
     const note = this.note(spec);
     return { simule: true, classe: classeDe(spec.action), note, cle: cle.slice(0, 12) };
@@ -943,6 +1094,19 @@ ${demandeUtilisateur}`
 Object.freeze(SessionGouvernee.prototype);
 Object.freeze(SessionGouvernee);
 
+/* [E - 5.29.7] LA FABRIQUE. Rend separement la session (a qui propose,
+ * planifie, execute) et l'entree de confiance (a la seule route qui recoit la
+ * frappe de la personne). La capacite ne sort qu'une fois : elle est retiree du
+ * registre prive au moment ou elle est remise. Une session creee avec « new »
+ * n'a jamais d'entree de confiance : tout ce qu'elle lit est non direct.
+ * Le modele, les outils et leurs handlers ne recoivent JAMAIS `entree`. */
+function creerSessionGouvernee(opts = {}) {
+  const session = new SessionGouvernee(opts);
+  const entree = CAPACITES_ENTREE.get(session);
+  CAPACITES_ENTREE.delete(session);
+  return Object.freeze({ session, entree });
+}
+
 
 /* ==========================================================================
  * SONDES M1 a M6 — les six mitigations, EXECUTEES
@@ -1057,6 +1221,6 @@ function lancerSondeM(nom) {
 module.exports = Object.freeze({
   SessionGouvernee, SONDES_M, lancerSondeM, RegistreContexte, AncrageExterne,
   noteDeDecision, classeDe, REVERSIBILITE, NIVEAUX, FENETRE_ANNULATION_MS, STATUTS_ANCRAGE,
-  TRANSITIONS_TX, HorlogeCouche,
+  TRANSITIONS_TX, HorlogeCouche, creerSessionGouvernee, LIMITES_GOUVERNANCE,
   noyau: K
 });
