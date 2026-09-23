@@ -73,6 +73,9 @@
  * - limites reglables sur Render (JARVIS_APPELS_HEURE, JARVIS_APPELS_JOUR,
  *   JARVIS_MAX_TOKENS), memes valeurs publiques par defaut.
  *
+ * v4.4.1 [S18] CLE D'ACCES : le compteur d'echecs est range par l'adresse du
+ *   visiteur, et non plus par celle du proxy (un inconnu pouvait bloquer le
+ *   proprietaire de l'instance avec 10 mauvaises cles).
  * v4.4 [S17] SESSIONS ET ADRESSES : une session active ou avec une action
  *   retenue n'est plus jamais expulsee (le nouveau venu attend) ; /health montre
  *   l'adresse vue par le serveur (tonIp) pour verifier en ligne que
@@ -147,7 +150,14 @@ const EMPREINTE_CLE = crypto.createHash('sha256').update(CLE_ACCES).digest();
 const echecsCle = new Map();   /* ip -> [horodatages] ; borne ci-dessous */
 function cleAcceptee(req) {
   if (!CLE_ACCES) return { ok: true };
-  const ip = String(req.socket.remoteAddress || ''), maintenant = Date.now();
+  /* [S18 - v4.4.1] Le compteur d'echecs etait range par l'adresse de connexion
+   * brute : derriere Cloudflare et Render, c'est celle du proxy, la meme pour
+   * tout le monde. Prouve : 10 mauvaises cles tapees par un inconnu bloquaient
+   * le proprietaire, bonne cle en main (429). On range maintenant par l'adresse
+   * du visiteur (ipDe), dont la fiabilite a ete verifiee en ligne le 23 sept :
+   * Cloudflare refuse toute requete portant un CF-Connecting-IP fourni par le
+   * visiteur. Chacun ne bloque plus que lui-meme. */
+  const ip = ipDe(req), maintenant = Date.now();
   const liste = (echecsCle.get(ip) || []).filter(t => maintenant - t < 15 * 60 * 1000);
   if (liste.length >= 10) return { ok: false, code: 429, erreur: 'TROP_D_ESSAIS' };
   const donnee = crypto.createHash('sha256').update(String(req.headers['x-jarvis-cle'] || '')).digest();
@@ -760,7 +770,7 @@ const serveur = http.createServer((req, res) => {
   const inconnue = () => json(401, { erreur: 'SESSION_INCONNUE' });
 
   if (u.pathname === '/health')
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: '5.29.8', vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.4',
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: '5.29.8', vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.4.1',
       acces: CLE_ACCES ? 'protege' : 'public', gouvernance: 'active', ip: sourceIp(req),
       /* [S17] l'adresse que le serveur attribue a CELUI qui demande (la sienne,
        * a lui seul) : permet de verifier en ligne qu'on ne peut pas l'inventer */

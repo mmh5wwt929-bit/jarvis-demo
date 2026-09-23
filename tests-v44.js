@@ -1,12 +1,14 @@
 'use strict';
 /* ============================================================================
- * JARVIS — tests de la passerelle v4.4 [S17]   (node tests-v44.js)
+ * JARVIS — tests de la passerelle v4.4.1 [S17, S18]   (node tests-v44.js)
  * ----------------------------------------------------------------------------
  * S17a  une session active, ou avec une action retenue, n'est plus expulsee
  *       par un afflux de nouvelles sessions : c'est le nouveau venu qui attend.
  * S17b  /health montre l'adresse que le serveur attribue au visiteur (tonIp),
  *       et JARVIS_IP_DEPUIS permet de changer de source si l'en-tete
  *       Cloudflare s'averait falsifiable en ligne.
+ * S18   cle d'acces de l'instance privee : un inconnu ne peut plus bloquer le
+ *       proprietaire en tapant de mauvaises cles.
  * Sur la v4.3 : JARVIS_DIR=../v4.3 node tests-v44.js
  * ========================================================================== */
 const path = require('path');
@@ -106,7 +108,24 @@ const health = (port, headers) => fetch('http://localhost:' + port + '/health', 
   });
   pc.kill();
 
-  log('JARVIS — passerelle v4.4 [S17] (' + DIR + ')\n');
+  /* ---- S18 : cle d'acces de l'instance privee ---- */
+  const CLE = 'une-cle-de-test-longue-et-aleatoire-42';
+  const pk = await serveurAvec({ JARVIS_CLE_ACCES: CLE }, 3968);
+  const essai = (cle, ip) => fetch('http://localhost:3968/api/session', { method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip, 'X-Jarvis-Cle': cle }, body: '{}' }).then(r => r.status);
+  const codesInconnu = []; for (let i = 0; i < 11; i++) codesInconnu.push(await essai('mauvaise-' + i, '6.6.6.6'));
+  const proprio = await essai(CLE, '87.88.176.241');
+  await t('S18.1', "cle d'acces : 10 mauvaises cles d'un inconnu ne bloquent pas le proprietaire", async () =>
+    ({ ok: proprio === 200, info: 'proprietaire, bonne cle -> ' + proprio }));
+  await t('S18.2', "cle d'acces : l'inconnu, lui, est bloque apres 10 essais", async () =>
+    ({ ok: codesInconnu[9] === 401 && codesInconnu[10] === 429, info: codesInconnu.join(' ') }));
+  await t('S18.3', "cle d'acces : sans cle ou avec une mauvaise, rien ne s'ouvre", async () => {
+    const sans = await fetch('http://localhost:3968/api/session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '9.9.9.9' }, body: '{}' }).then(r => r.status);
+    return { ok: sans === 401, info: 'sans cle -> ' + sans };
+  });
+  pk.kill();
+
+  log('JARVIS — passerelle v4.4.1 [S17, S18] (' + DIR + ')\n');
   for (const x of R) log((x.ok ? 'OK    ' : 'ECHEC ') + x.id.padEnd(6) + x.nom + '  [' + x.info + ']');
   const ko = R.filter(x => !x.ok).length;
   log('\n>>> ' + (R.length - ko) + '/' + R.length + ' tests passent');
