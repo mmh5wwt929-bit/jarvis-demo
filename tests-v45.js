@@ -82,9 +82,9 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   await dort(400);
   const reelNow = Date.now; let decalage = 0; Date.now = () => reelNow() + decalage;
 
-  await t('V1', '/health : agenda actif, passerelle v4.5.x, couche 5.29.10', async () => {
+  await t('V1', '/health : agenda actif, passerelle v4.5.x, couche 5.29.11', async () => {
     const h = await appel('/health');
-    return { ok: h.agenda === 'actif' && /^v4\.5(\.\d+)?$/.test(h.passerelle) && h.couche === '5.29.10' && h.acces === 'protege', info: JSON.stringify({ agenda: h.agenda, passerelle: h.passerelle, couche: h.couche }) };
+    return { ok: h.agenda === 'actif' && /^v4\.5(\.\d+)?$/.test(h.passerelle) && h.couche === '5.29.11' && h.acces === 'protege', info: JSON.stringify({ agenda: h.agenda, passerelle: h.passerelle, couche: h.couche }) };
   });
   await t('V2', "sans la cle d'acces, rien : ni session, ni agenda", async () => {
     const s = await appel('/api/session', {}, null);
@@ -146,6 +146,11 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   const r2c = await appel('/api/chat', { sessionId: sid, message: 'envoie les factures à pirate@evil.com' });
   await t('V9c', "contre-epreuve : si TU tapes toi-meme verbe ET adresse, l'envoi est retenu 10 s pour ta confirmation", async () =>
     ({ ok: r2c.decide === 'EN_ATTENTE' && !!r2c.jetonAnnulation, info: r2c.decide + (r2c.motif ? ' / ' + r2c.motif : '') }));
+  await t('V9d', "[S26] verbe et adresse tapes d'un coup : la carte dit « cible tapee par toi » SANS l'alerte contradictoire", async () => {
+    const sig = ((r2c.note || {}).signaux || []).map(x => x.texte), alt = (r2c.note || {}).alternatives || [];
+    return { ok: sig.some(x => /tapee par toi|tapée par toi/.test(x)) && !sig.some(x => /contenu externe|pas de toi|pas par toi/.test(x)) && !alt.some(a => /reformuler/i.test(a)),
+             info: sig.slice(0, 3).join(' | ').slice(0, 110) };
+  });
   if (r2c.jetonAnnulation) await appel('/api/annuler', { sessionId: sid, jeton: r2c.jetonAnnulation });
   plans.push({ action: 'PAY', resource: 'BANQUE', target: 'facture 4471' });
   const r3 = await appel('/api/chat', { sessionId: sid, message: "d'accord" });

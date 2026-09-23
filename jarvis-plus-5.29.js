@@ -2,6 +2,8 @@
 /* ============================================================================
  * JARVIS+ 5.29 — COUCHE DE GOUVERNANCE (sur noyau 5.28.3)
  * ----------------------------------------------------------------------------
+ * 5.29.11 (23 sept 2026) — [C4] verification de la cible sur la chaine EXACTE
+ *  qui sera executee (plus de trim cote comparaison seulement).
  * 5.29.10 (23 sept 2026) — [P1] le planificateur ne s'auto-censure plus (vu en
  *  ligne : une demande d'envoi tapee en entier n'etait pas preparee, et la
  *  conversation inventait un refus du noyau) ; il prepare fidelement la
@@ -108,8 +110,14 @@ function cibleIdentifiable(c) {
  * une casse differente ou un caractere pleine chasse font echouer la
  * comparaison — et un echec renvoie vers la reformulation, jamais l'inverse. */
 function cibleDansTexte(cible, texte) {
-  const c = String(cible == null ? '' : cible).trim();
-  if (!cibleIdentifiable(c)) return false;
+  /* [C4 - 5.29.11] On verifie EXACTEMENT ce qui sera execute. Avant, la cible
+   * etait taillee (trim) pour la comparaison, mais l'action partait avec la
+   * cible brute : « pierre@exemple.fr » + U+2028 ou espace insecable passait
+   * la verification et partait differente de la frappe (prouve en ligne de
+   * commande le 23 sept). Une cible avec des blancs aux extremites n'est plus
+   * « tapee » : a l'appelant de la canonicaliser avant. */
+  const c = String(cible == null ? '' : cible);
+  if (c !== c.trim() || !cibleIdentifiable(c)) return false;
   const e = c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp('(?:^|[\\s,;:()\\[\\]{}"\'«»<>])' + e
     + '(?=$|[\\s,;:!?()\\[\\]{}"\'«»<>]|\\.(?:$|\\s))').test(String(texte == null ? '' : texte));

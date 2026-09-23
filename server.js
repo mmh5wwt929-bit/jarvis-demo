@@ -73,6 +73,15 @@
  * - limites reglables sur Render (JARVIS_APPELS_HEURE, JARVIS_APPELS_JOUR,
  *   JARVIS_MAX_TOKENS), memes valeurs publiques par defaut.
  *
+ * v4.5.5 [S28] un corps JSON `null` a /api/chat arretait tout le serveur
+ *   (demo publique : une requete anonyme suffisait) : corps = objet JSON ou
+ *   400, erreurs de routes rattrapees (500 generique, sans detail), filet
+ *   global, 413 pour un corps trop gros.
+ * v4.5.5 [S27] la cible du plan est canonicalisee une fois (blancs aux
+ *   extremites) : verifiee et executee a l'identique (couche 5.29.11 [C4]).
+ * v4.5.5 [S26] carte coherente aussi quand verbe et cible sont tapes d'un coup
+ *   (plus de « fort : l'intention descend d'un contenu externe » a cote de
+ *   « cible tapee par toi, provenance verifiee »).
  * v4.5.4 [S25] doublon d'une action en attente : la carte dit clairement qu'une
  *   action identique attend deja (au lieu de DERIVATION_MUST_DECLARE_PARENT).
  * v4.5.4 [S24] url.parse() remplace par l'API WHATWG (avertissement DEP0169 vu
@@ -606,7 +615,9 @@ async function planifier(g, texte) {
     const a = String(o.action || 'AUCUNE').toUpperCase();
     return { action: a,   /* action inventee : G2 la classe IRREVERSIBLE */
       resource: String(o.resource || 'LOCAL').slice(0, 60),
-      target: String(o.target || 'CONVERSATION').slice(0, 120),
+      /* [S27] canonicalisee UNE fois ici : la couche verifie et l'action
+       * execute la meme chaine (voir couche [C4]) */
+      target: String(o.target || 'CONVERSATION').trim().slice(0, 120).trim() || 'CONVERSATION',
       pourquoi: String(o.pourquoi || '').slice(0, 200), sceauContexte };
   } catch {
     return { action: 'AUCUNE', resource: 'LOCAL', target: 'CONVERSATION', pourquoi: 'plan illisible', sceauContexte };
@@ -824,11 +835,18 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
    * sur la provenance de la cible et le conseil de reformuler sont remplaces
    * par le fait : la cible vient de la frappe de la personne. Le reste
    * (action irreversible, fenetre, clic final) est garde. */
+  /* [S26] Meme chose quand la COUCHE a verifie que verbe et cible sont dans la
+   * frappe de la personne (provenanceCible === 'DEMANDE_UTILISATEUR', un etat
+   * de la couche, jamais un champ du modele). Vu en ligne : la carte disait a
+   * la fois « cible tapee par toi, provenance verifiee » et « fort : l'intention
+   * descend d'un contenu externe, pas de toi ». La couche ecrit deja la ligne
+   * juste ; on retire celles qu'elle contredit. */
   let noteAffichee = demande.note;
-  if (plan.confirme && demande.note) {
+  const tapeeParToi = demande.provenanceCible === 'DEMANDE_UTILISATEUR';
+  if ((plan.confirme || tapeeParToi) && demande.note) {
     const provenance = /contenu externe|contenu lu|jamais vue|pas par toi|pas de toi/i;
     noteAffichee = { ...demande.note,
-      signaux: [{ poids: 'info', texte: 'Cible retapée par toi au clavier : cette action est ta décision.' }]
+      signaux: (plan.confirme ? [{ poids: 'info', texte: 'Cible retapée par toi au clavier : cette action est ta décision.' }] : [])
         .concat((demande.note.signaux || []).filter(x => !provenance.test(String(x && x.texte)))),
       alternatives: (demande.note.alternatives || []).filter(a => !/reformuler/i.test(String(a))) };
   }
@@ -950,14 +968,38 @@ const SUITES = ['runCheckpoint', 'runInternalCorruptionRedTeam', 'runAdditionalS
 
 /* ========================================================================== */
 
+/* [S28] LECTURE DU CORPS — vu en cherchant les « parametres inattendus » :
+ * un corps JSON `null` envoye a /api/chat faisait PLANTER tout le processus
+ * (b.message sur null, dans une route async : promesse rejetee sans
+ * gestionnaire = arret de Node). Sur la demo publique, une seule requete
+ * anonyme suffisait. Desormais :
+ *  - seul un OBJET JSON est accepte (null, tableau, texte, nombre : 400) ;
+ *  - une erreur d'une route, meme asynchrone, est rattrapee : 500 generique,
+ *    sans aucun detail interne renvoye (avant : e.message partait au client) ;
+ *  - corps trop gros : 413 lisible au lieu d'une connexion coupee. */
 const lire = (req, res, cb) => {
-  let b = '';
-  req.on('data', c => { b += c; if (b.length > LIMITES.maxCorpsOctets) req.destroy(); });
+  let b = '', trop = false;
+  const repondre = (code, o) => { if (!res.headersSent) { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); } };
+  req.on('data', c => {
+    if (trop) return;
+    b += c;
+    if (b.length > LIMITES.maxCorpsOctets) { trop = true; repondre(413, { erreur: 'CORPS_TROP_GROS' }); req.resume(); }
+  });
   req.on('end', () => {
-    try { cb(JSON.parse(b || '{}')); }
-    catch (e) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ erreur: e.message })); }
+    if (trop) return;
+    let o;
+    try { o = JSON.parse(b || '{}'); } catch { return repondre(400, { erreur: 'CORPS_ILLISIBLE' }); }
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return repondre(400, { erreur: 'CORPS_ILLISIBLE' });
+    Promise.resolve().then(() => cb(o)).catch((e) => {
+      console.error('Route en echec (rattrapee) :', e && e.name);
+      repondre(500, { erreur: 'ERREUR_INTERNE' });
+    });
   });
 };
+
+/* [S28] Filet global : une promesse rejetee oubliee est journalisee, jamais
+ * fatale. Le processus reste debout ; les etats restent fail-closed. */
+process.on('unhandledRejection', (e) => { console.error('Rejet non gere (rattrape) :', e && e.name); });
 
 const serveur = http.createServer((req, res) => {
   /* [S13] aucun CORS : la page vient de ce serveur ; les autres sites n'ont rien a y faire */
@@ -985,7 +1027,7 @@ const serveur = http.createServer((req, res) => {
   const inconnue = () => json(401, { erreur: 'SESSION_INCONNUE' });
 
   if (u.pathname === '/health')
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: '5.29.10', vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.5.4',
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: '5.29.11', vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.5.5',
       agenda: AGENDA ? 'actif' : 'inactif',
       acces: CLE_ACCES ? 'protege' : 'public', gouvernance: 'active', ip: sourceIp(req),
       /* [S17] l'adresse que le serveur attribue a CELUI qui demande (la sienne,
