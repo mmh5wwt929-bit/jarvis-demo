@@ -73,6 +73,14 @@
  * - limites reglables sur Render (JARVIS_APPELS_HEURE, JARVIS_APPELS_JOUR,
  *   JARVIS_MAX_TOKENS), memes valeurs publiques par defaut.
  *
+ * v4.5.4 [S25] doublon d'une action en attente : la carte dit clairement qu'une
+ *   action identique attend deja (au lieu de DERIVATION_MUST_DECLARE_PARENT).
+ * v4.5.4 [S24] url.parse() remplace par l'API WHATWG (avertissement DEP0169 vu
+ *   dans les journaux Render) ; chemins tordus testes : cle toujours exigee.
+ * v4.5.3 [S23] apres une confirmation au clavier, la carte dit « cible retapee
+ *   par toi » au lieu de « l'intention descend d'un contenu externe » ; et
+ *   « Confirmer l'envoi » reste grise pendant la fenetre (vu en ligne : deux
+ *   « Pas encore » avant l'envoi).
  * v4.5.2 [S22] plus de refus inventes : quand rien n'est soumis au noyau, le
  *   modele de conversation le sait et ne pretend pas le contraire ; les vraies
  *   regles du noyau lui sont donnees (vu en ligne : « le plancher baissera
@@ -143,7 +151,7 @@
 
 const http = require('http');
 const https = require('https');
-const url = require('url');
+const { URL } = require('url');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -810,10 +818,31 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
   const demande = g.demander({ action: acte, resource: plan.resource, target: plan.target }, options);
   if (avis.signaux.length && demande.note && demande.note.signaux) demande.note.signaux.unshift(...avis.signaux);   /* [S10] */
 
-  const sortie = (o) => ({ ...o, plan, note: demande.note, classe: demande.classe,
+  /* [S23] Action confirmee au clavier : la carte dit ce qui est VRAI a ce
+   * moment-la. Vu en ligne : apres « Confirmer », la carte orange disait encore
+   * « fort : l'intention descend d'un contenu externe, pas de toi ». Les signaux
+   * sur la provenance de la cible et le conseil de reformuler sont remplaces
+   * par le fait : la cible vient de la frappe de la personne. Le reste
+   * (action irreversible, fenetre, clic final) est garde. */
+  let noteAffichee = demande.note;
+  if (plan.confirme && demande.note) {
+    const provenance = /contenu externe|contenu lu|jamais vue|pas par toi|pas de toi/i;
+    noteAffichee = { ...demande.note,
+      signaux: [{ poids: 'info', texte: 'Cible retapée par toi au clavier : cette action est ta décision.' }]
+        .concat((demande.note.signaux || []).filter(x => !provenance.test(String(x && x.texte)))),
+      alternatives: (demande.note.alternatives || []).filter(a => !/reformuler/i.test(String(a))) };
+  }
+  const sortie = (o) => ({ ...o, plan, note: noteAffichee, classe: demande.classe,
     audit: g.auditDepuis(avant), ...etatDe(s) });
 
   if (demande.decide !== 'AUTORISE') {
+    /* [S25] Doublon d'une action encore en attente : le noyau le refuse (une
+     * seule a la fois, pas de double envoi), mais le motif affiche etait
+     * illisible (DERIVATION_MUST_DECLARE_PARENT). On dit ce qu'il se passe. */
+    if (demande.motif === 'DERIVATION_MUST_DECLARE_PARENT' && demande.note && Array.isArray(demande.note.signaux)
+        && [...s.enAttente.values()].some(a => a && !a.annule && a.action === acte && a.target === plan.target))
+      demande.note.signaux.unshift({ poids: 'info',
+        texte: "Une action identique est déjà en attente dans cette session : confirme-la ou annule-la avant d'en demander une autre." });
     noterVerdict(s, { decide: 'REFUSE', action: acte, target: plan.target, motif: demande.motif });
     memoriser(s, sessionId, texte, 'Le noyau a refusé cette action : ' + propre(acte, 30) + ' vers '
       + propre(plan.target) + ', motif ' + propre(demande.motif, 40) + '.');
@@ -937,13 +966,26 @@ const serveur = http.createServer((req, res) => {
   res.setHeader('X-Frame-Options', 'DENY');
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
 
-  const u = url.parse(req.url, true);
+  /* [S24] url.parse() (deprecie : DEP0169, « implications de securite ») est
+   * remplace par l'API WHATWG. Le chemin recu est pose derriere une origine
+   * FIXE : « //ailleurs/x » reste un chemin, jamais un autre hote. Adresse
+   * illisible : 400. La cle d'acces et l'aiguillage lisent le MEME chemin
+   * normalise, donc aucun ecart « on verifie ceci, on sert cela ». */
+  let u;
+  try {
+    const w = new URL('http://jarvis.invalid' + (typeof req.url === 'string' && req.url.startsWith('/') ? req.url : '/'));
+    if (w.host !== 'jarvis.invalid') throw new Error('hote');
+    u = { pathname: w.pathname, query: { sessionId: w.searchParams.get('sessionId') || '' } };
+  } catch {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    return res.end(JSON.stringify({ erreur: 'ADRESSE_ILLISIBLE' }));
+  }
   const json = (c, o) => { res.writeHead(c, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
   const sid = () => String(u.query.sessionId || '');
   const inconnue = () => json(401, { erreur: 'SESSION_INCONNUE' });
 
   if (u.pathname === '/health')
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: '5.29.10', vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.5.2',
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: '5.29.10', vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.5.4',
       agenda: AGENDA ? 'actif' : 'inactif',
       acces: CLE_ACCES ? 'protege' : 'public', gouvernance: 'active', ip: sourceIp(req),
       /* [S17] l'adresse que le serveur attribue a CELUI qui demande (la sienne,

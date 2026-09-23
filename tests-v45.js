@@ -191,6 +191,16 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
     ({ ok: hp.agenda === 'inactif' && hp.acces === 'public' && /IGNOREE/.test(sortiePub) && !/SECRET987|private-/.test(sortiePub),
        info: 'agenda=' + hp.agenda + ', journal : ' + (sortiePub.match(/Agenda[^\n]*/) || ['?'])[0].slice(0, 60) }));
 
+  /* --pending-deprecation : fait apparaitre DEP0169 sur toutes les versions de
+   * Node (Render l'affiche par defaut, pas Node 22). Sans ce drapeau, le test
+   * passait aussi sur l'ancienne version : il ne prouvait rien. */
+  const dep = spawn(process.execPath, ['--pending-deprecation', '-e', "process.env.PORT='3952';require(" + JSON.stringify(path.join(DIR, 'server.js')) + ')'],
+    { env: { ...process.env, JARVIS_CLE_ACCES: '', JARVIS_AGENDA_ICAL: '', ANTHROPIC_API_KEY: 'test' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let sortieDep = ''; dep.stdout.on('data', d => { sortieDep += d; }); dep.stderr.on('data', d => { sortieDep += d; });
+  await dort(800); await fetch('http://localhost:3952/health').catch(() => {}); await fetch('http://localhost:3952/api/etat?sessionId=x').catch(() => {});
+  await dort(300); dep.kill();
+  await t('V15b', "plus d'avertissement DEP0169 (url.parse), meme avec --pending-deprecation", async () =>
+    ({ ok: !/DEP0169/.test(sortieDep) && /Acces : public/.test(sortieDep), info: /DEP0169/.test(sortieDep) ? 'AVERTISSEMENT PRESENT' : 'aucun' }));
   await t('V16', 'le reseau ne se touche qu\'avec un permis ne dans la transaction (verification du code)', async () => {
     const src = require('fs').readFileSync(path.join(DIR, 'server.js'), 'utf8');
     const lire = (src.match(/AGENDA\.lire\(/g) || []).length, permis = (src.match(/AGENDA\.permis\(/g) || []).length;
@@ -211,6 +221,16 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   await t('V19', "sequence vue en ligne : cible retapee -> l'envoi est retenu 10 s tout de suite, sans repasser par le modele", async () =>
     ({ ok: q1.motif === 'REFORMULATION_REQUISE' && d2.decide === 'EN_ATTENTE' && !!d2.jetonAnnulation && appelsModele.length === avantConf,
        info: q1.motif + ' puis ' + d2.decide + ', appels au modele pendant la confirmation : ' + (appelsModele.length - avantConf) }));
+  await t('V19b', "apres confirmation au clavier, la carte dit « cible retapee par toi », sans l'alerte de provenance devenue fausse", async () => {
+    const sig = ((d2.note || {}).signaux || []).map(x => x.texte), alt = (d2.note || {}).alternatives || [];
+    return { ok: /Cible retapée par toi au clavier/.test(sig[0] || '') && !sig.some(x => /contenu externe|pas de toi|pas par toi/.test(x))
+               && !alt.some(a => /reformuler/i.test(a)) && sig.some(x => /rreversible/.test(x)),
+             info: sig.slice(0, 3).join(' | ').slice(0, 110) };
+  });
+  await t('V19c', "un REFUS garde ses alertes de provenance (elles y sont vraies)", async () => {
+    const sig = ((q1.note || {}).signaux || []).map(x => x.texte);
+    return { ok: sig.some(x => /contenu externe|pas par toi|pas de toi/.test(x)), info: sig.length + ' signaux, provenance ' + (sig.some(x => /contenu externe|pas par toi|pas de toi/.test(x)) ? 'gardee' : 'PERDUE') };
+  });
   if (d2.jetonAnnulation) await appel('/api/annuler', { sessionId: sid2, jeton: d2.jetonAnnulation });
   plans.push({ action: 'SEND', resource: 'EMAIL', target: 'alsid@exemple.fr' });
   const q3 = await appel('/api/chat', { sessionId: sid2, message: 'renvoie-le' });
@@ -253,6 +273,39 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
        info: 'regles presentes dans les deux prompts' }));
   await t('V26', "couche [P1] : le planificateur prepare fidelement la demande, et le contenu lu n'est jamais une demande", async () =>
     ({ ok: /planifie fidelement CE QU'ELLE DEMANDE/.test(plan4) && /jamais une demande/.test(plan4), info: /planifie fidelement/.test(plan4) ? 'present' : 'ABSENT' }));
+
+  /* ---- [S24] chemins tordus, envoyes BRUTS (sans normalisation par le client) ---- */
+  const brut = (chemin, methode = 'POST') => new Promise((ok) => {
+    const r = require('http').request({ host: 'localhost', port: 3960, path: chemin, method: methode,
+      headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '87.88.5.5' } }, (res) => {
+      let b = ''; res.on('data', c => { b += c; }); res.on('end', () => ok({ status: res.statusCode, corps: b }));
+    });
+    r.on('error', (e) => ok({ status: 'ERR', corps: e.code })); r.end('{}');
+  });
+  const tordus = ['/api/../api/session', '/./api/session', '//api/session', '/api/session/', '/API/session', '/%61pi/session',
+    '/api%2Fsession', '/api/session?x=1', '/api/session;x', '/api\\session', '/x/../api/session', '//jarvis.invalid/api/session'];
+  const res27 = []; for (const c of tordus) res27.push({ c, ...(await brut(c)) });
+  await t('V27', "chemins tordus sans cle : aucun n'ouvre de session (" + tordus.length + " variantes envoyees brutes)", async () => {
+    const ouverts = res27.filter(x => x.status === 200 || /sessionId/.test(x.corps));
+    return { ok: ouverts.length === 0, info: res27.map(x => x.status).join(' ') + (ouverts.length ? ' | OUVERTS : ' + ouverts.map(x => x.c).join(' ') : '') };
+  });
+
+  /* ---- [S25] doublon d'une action en attente ---- */
+  IP = '87.88.6.6';
+  const sid6 = (await appel('/api/session', {})).sessionId;
+  plans.push({ action: 'SEND', resource: 'EMAIL', target: 'compta@exemple.fr' });
+  const e1 = await appel('/api/chat', { sessionId: sid6, message: 'envoie les factures à compta@exemple.fr' });
+  plans.push({ action: 'SEND', resource: 'EMAIL', target: 'compta@exemple.fr' });
+  const e2 = await appel('/api/chat', { sessionId: sid6, message: 'envoie les factures à compta@exemple.fr' });
+  if (e1.jetonAnnulation) await appel('/api/annuler', { sessionId: sid6, jeton: e1.jetonAnnulation });
+  plans.push({ action: 'SEND', resource: 'EMAIL', target: 'compta@exemple.fr' });
+  const e3 = await appel('/api/chat', { sessionId: sid6, message: 'envoie les factures à compta@exemple.fr' });
+  if (e3.jetonAnnulation) await appel('/api/annuler', { sessionId: sid6, jeton: e3.jetonAnnulation });
+  await t('V28', "doublon pendant l'attente : refuse, avec une phrase claire ; apres annulation, la redemande passe", async () => {
+    const sig = ((e2.note || {}).signaux || []).map(x => x.texte);
+    return { ok: e1.decide === 'EN_ATTENTE' && e2.decide === 'REFUSE' && /déjà en attente/.test(sig[0] || '') && e3.decide === 'EN_ATTENTE',
+             info: [e1.decide, e2.decide + ' (' + (/déjà en attente/.test(sig[0] || '') ? 'expliqué' : 'OBSCUR') + ')', e3.decide].join(' → ') };
+  });
 
   await t('V17', "couche [O1] : un outil declare ne peut pas ouvrir une nouvelle ligne de consigne dans le prompt", async () => {
     const P = require(path.join(DIR, 'jarvis-plus-5.29.js'));

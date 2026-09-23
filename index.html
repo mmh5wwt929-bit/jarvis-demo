@@ -633,7 +633,7 @@ function rendreDecision(d) {
   if (d.decide === 'EN_ATTENTE') {
     h += '<div class="retenue"><p id="compte">' + esc(d.message) + '</p><div class="rang">'
       +  '<button class="danger" data-annuler="' + esc(d.jetonAnnulation) + '">Annuler</button>'
-      +  '<button data-finaliser="' + esc(d.jetonAnnulation) + '">Confirmer l\'envoi</button></div></div>';
+      +  '<button data-finaliser="' + esc(d.jetonAnnulation) + '" data-apres="' + esc(String(Number(d.executableApres) || 0)) + '" disabled>Confirmer l\'envoi</button></div></div>';
   }
   const bloc = tour('JARVIS', '', false);
   bloc.querySelector('.quoi').outerHTML = h;
@@ -642,11 +642,18 @@ function rendreDecision(d) {
   $('fil').scrollTop = $('fil').scrollHeight;
 }
 
+/* [S23] « Confirmer l'envoi » reste grise tant que la fenetre court : le serveur
+ * refuserait (TROP_TOT) et on voyait « Pas encore » en boucle. Le serveur reste
+ * seul juge ; la page evite seulement le clic inutile. */
+function activerConfirmations() {
+  for (const b of document.querySelectorAll('button[data-finaliser][disabled]'))
+    if (Number(b.dataset.apres || 0) <= Date.now()) b.disabled = false;
+}
 function compteARebours(jusqua) {
-  const p = $('compte'); if (!p) return;
+  const p = $('compte'); if (!p) { setTimeout(activerConfirmations, Math.max(0, jusqua - Date.now()) + 50); return; }
   const t = setInterval(() => {
     const r = Math.ceil((jusqua - Date.now()) / 1000);
-    if (r <= 0) { p.textContent = "Fenêtre écoulée. Confirme pour envoyer, ou annule."; clearInterval(t); }
+    if (r <= 0) { p.textContent = "Fenêtre écoulée. Confirme pour envoyer, ou annule."; activerConfirmations(); clearInterval(t); }
     else p.textContent = 'Action irréversible retenue — ' + r + ' s avant que la confirmation soit possible.';
   }, 500);
 }
