@@ -567,6 +567,31 @@ function rendreDecision(d) {
     else tour('JARVIS', "Pas de réponse : " + (d.plan && d.plan.erreur || 'appel indisponible'), false);
     return;
   }
+  /* [S21] Lecture de l'agenda autorisee : une carte sobre et EXACTE. La note
+   * generique, calculee sur le plancher de la SESSION, affichait « fort :
+   * l'intention descend d'un contenu externe » et « reformuler la cible » pour
+   * une simple lecture tapee par la personne (vu en ligne le 23 sept). A force
+   * d'alarmes sans objet, on ne lit plus celles qui comptent. Les refus, eux,
+   * gardent la carte complete, signaux compris. */
+  if (d.outil === 'agenda' && d.decide === 'AUTORISE') {
+    const a = d.agenda || {};
+    const bornes = String(a.periode || (d.plan && d.plan.target) || '').split('..');
+    const quand = bornes.length === 2 && bornes[0] !== bornes[1] ? bornes[0] + ' → ' + bornes[1] : bornes[0];
+    const echec = d.etape === 'OUTIL_ECHEC';
+    const hA = '<div class="decision autorise"><div class="plan">Lecture de ton agenda — <span class="mono">' + esc(quand) + '</span></div>'
+      + '<div class="verdict"><b>Autorisé</b><span class="code">lecture seule</span>'
+      + (echec ? '<span class="code mono">' + esc(d.motif || '') + '</span>' : '') + '</div>'
+      + '<div class="signaux">'
+      + (echec ? '' : '<div class="signal info"><i>info</i><span>' + esc(String(a.evenements || 0)) + ' événement(s)'
+          + (a.tronque ? ', liste incomplète' : '') + ". Rien n'a été modifié.</span></div>")
+      + "<div class=\"signal info\"><i>info</i><span>Le contenu de l'agenda est externe (une invitation peut venir de n'importe qui) : "
+      + 'une action sensible demandée ensuite exigera ta frappe.</span></div></div></div>';
+    const blocA = tour('JARVIS', '', false);
+    blocA.querySelector('.quoi').outerHTML = hA;
+    if (d.reponse) tour('Claude', d.reponse, false, true);
+    $('fil').scrollTop = $('fil').scrollHeight;
+    return;
+  }
   const etat = d.decide === 'AUTORISE' ? 'autorise' : d.decide === 'EN_ATTENTE' ? 'attente' : 'refuse';
   const mot  = d.decide === 'AUTORISE' ? 'Autorisé' : d.decide === 'EN_ATTENTE' ? 'Retenu' : 'Refusé';
   const n = d.note || {};
@@ -740,8 +765,10 @@ document.addEventListener('click', async (ev) => {
     t.disabled = true;
     const r = await api('/api/reformuler', corps);
     if (limiteAtteinte(r)) { t.disabled = false; return; }
-    majEtat(r);
-    tour('JARVIS', 'Cible confirmée au clavier : ' + c + '. Redemande-moi la même chose.', false);
+    /* [S20] l'action repart directement avec la cible tapee : on affiche sa decision */
+    tour('JARVIS', 'Cible confirmée au clavier : ' + c + '.', false);
+    if (r && r.decision) { majEtat(r.decision); rendreDecision(r.decision); }
+    else { majEtat(r); if (r && r.erreur) tour('JARVIS', 'Confirmation impossible : ' + r.erreur, false); }
   }
   if (t.dataset.annuler) {
     const r = await api('/api/annuler', { jeton:t.dataset.annuler });

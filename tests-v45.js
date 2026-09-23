@@ -60,9 +60,10 @@ const log = console.log; const journal = []; console.log = (...a) => journal.pus
 require(path.join(DIR, 'server.js'));
 const B = 'http://localhost:3960';
 const reponsesHttp = [];
+let IP = '87.88.1.1';   /* une adresse par section : le budget IA horaire est compte par adresse */
 const appel = async (p, corps, cle = CLE) => {
   const r = await fetch(B + p, { method: corps ? 'POST' : 'GET', body: corps ? JSON.stringify(corps) : undefined,
-    headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '87.88.1.1', ...(cle ? { 'X-Jarvis-Cle': cle } : {}) } });
+    headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': IP, ...(cle ? { 'X-Jarvis-Cle': cle } : {}) } });
   const t = await r.text(); reponsesHttp.push(t);
   let j = {}; try { j = JSON.parse(t); } catch { /* pas du JSON */ }
   return { status: r.status, ...j };
@@ -80,9 +81,9 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   await dort(400);
   const reelNow = Date.now; let decalage = 0; Date.now = () => reelNow() + decalage;
 
-  await t('V1', '/health : agenda actif, passerelle v4.5, couche 5.29.9', async () => {
+  await t('V1', '/health : agenda actif, passerelle v4.5.x, couche 5.29.9', async () => {
     const h = await appel('/health');
-    return { ok: h.agenda === 'actif' && h.passerelle === 'v4.5' && h.couche === '5.29.9' && h.acces === 'protege', info: JSON.stringify({ agenda: h.agenda, passerelle: h.passerelle, couche: h.couche }) };
+    return { ok: h.agenda === 'actif' && /^v4\.5(\.\d+)?$/.test(h.passerelle) && h.couche === '5.29.9' && h.acces === 'protege', info: JSON.stringify({ agenda: h.agenda, passerelle: h.passerelle, couche: h.couche }) };
   });
   await t('V2', "sans la cle d'acces, rien : ni session, ni agenda", async () => {
     const s = await appel('/api/session', {}, null);
@@ -107,6 +108,11 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   await t('V4', "le planificateur connait l'outil (declare par la couche) et la date du jour", async () => {
     const ok = /resource AGENDA/.test(plan1.messages[0].content) && /Aujourd'hui : /.test(plan1.messages[0].content);
     return { ok, info: ok ? 'outil et date presents' : 'ABSENT' };
+  });
+  await t('V4b', "periode vague : le planificateur doit choisir un intervalle ; la reponse doit dire les dates exactes", async () => {
+    const guide = /Periode vague/.test(plan1.messages[0].content);
+    const dates = rep1.system.includes(AG.periodeDe('demain', Date.now(), 'Europe/Paris').cle.replace('..', ' au '));
+    return { ok: guide && dates, info: 'consigne planificateur : ' + (guide ? 'oui' : 'NON') + ', dates exactes a la reponse : ' + (dates ? 'oui' : 'NON') };
   });
   await t('V5', 'lecture autorisee par la couche, un seul acces reseau, 2 evenements', async () =>
     ({ ok: r1.decide === 'AUTORISE' && r1.outil === 'agenda' && r1.agenda && r1.agenda.evenements === 2 && appelsAgenda - n0 === 1,
@@ -189,6 +195,40 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
     const lire = (src.match(/AGENDA\.lire\(/g) || []).length, permis = (src.match(/AGENDA\.permis\(/g) || []).length;
     const dansEffet = /g\.executer\(demande, \(action\) => \{ permis = AGENDA\.permis\(action\)/.test(src);
     return { ok: lire === 1 && permis === 1 && dansEffet, info: 'lire x' + lire + ', permis x' + permis + (dansEffet ? ', dans l\'effet' : ', HORS effet') };
+  });
+
+  /* ---- [S20] cible retapee = action confirmee (vu en ligne le 23 sept) ---- */
+  IP = '87.88.2.2';
+  const sid2 = (await appel('/api/session', {})).sessionId;
+  plans.push({ action: 'READ', resource: 'AGENDA', target: 'demain' });
+  await appel('/api/chat', { sessionId: sid2, message: "qu'est-ce que j'ai demain ?" });
+  plans.push({ action: 'SEND', resource: 'EMAIL', target: 'alsid@exemple.fr' });
+  const q1 = await appel('/api/chat', { sessionId: sid2, message: 'À alsid@exemple.fr' });
+  const avantConf = appelsModele.length;
+  const q2 = await appel('/api/reformuler', { sessionId: sid2, action: 'SEND', cible: 'alsid@exemple.fr', resource: 'EMAIL' });
+  const d2 = q2.decision || {};
+  await t('V19', "sequence vue en ligne : cible retapee -> l'envoi est retenu 10 s tout de suite, sans repasser par le modele", async () =>
+    ({ ok: q1.motif === 'REFORMULATION_REQUISE' && d2.decide === 'EN_ATTENTE' && !!d2.jetonAnnulation && appelsModele.length === avantConf,
+       info: q1.motif + ' puis ' + d2.decide + ', appels au modele pendant la confirmation : ' + (appelsModele.length - avantConf) }));
+  if (d2.jetonAnnulation) await appel('/api/annuler', { sessionId: sid2, jeton: d2.jetonAnnulation });
+  plans.push({ action: 'SEND', resource: 'EMAIL', target: 'alsid@exemple.fr' });
+  const q3 = await appel('/api/chat', { sessionId: sid2, message: 'renvoie-le' });
+  await t('V20', 'la confirmation au clavier ne sert qu\'une fois (consommee tout de suite)', async () =>
+    ({ ok: q3.decide === 'REFUSE' && q3.motif === 'REFORMULATION_REQUISE' && !q3.jetonAnnulation, info: q3.decide + ' / ' + q3.motif }));
+  const q4 = await appel('/api/reformuler', { sessionId: sid2, action: 'AUCUNE', cible: 'x' });
+  const q5 = await appel('/api/reformuler', { sessionId: sid2, action: 'EFFACER_TOUT', cible: 'x' });
+  const q6 = await appel('/api/reformuler', { sessionId: sid2, action: 'SEND', cible: '   ' });
+  IP = '87.88.3.3';
+  const sid3 = (await appel('/api/session', {})).sessionId;
+  let q7; for (let i = 0; i < 40; i++) { q7 = await appel('/api/reformuler', { sessionId: sid3, action: 'READ', cible: 'x' + i, resource: 'LOCAL' }); if (q7.status === 429) break; }
+  await t('V21', 'confirmation avec action vide, inconnue, ou cible blanche : refusee', async () =>
+    ({ ok: q4.status === 400 && q5.status === 400 && q6.status === 400, info: [q4.erreur, q5.erreur, q6.erreur].join(' ') }));
+  await t('V21b', 'la confirmation compte dans le budget IA : pas de contournement de la limite horaire', async () =>
+    ({ ok: q7.status === 429 && /LIMITE/.test(String(q7.motif)), info: 'apres repetition : ' + q7.status + ' ' + q7.motif }));
+  await t('V22', "le texte de journal de la confirmation n'est JAMAIS declare comme une frappe (verification du code)", async () => {
+    const src = require('fs').readFileSync(path.join(DIR, 'server.js'), 'utf8');
+    return { ok: /if \(!confirme\) s\.entree\.soumettre\(texte\);/.test(src) && (src.match(/s\.entree\.soumettre\(/g) || []).length === 1,
+             info: 'soumettre x' + (src.match(/s\.entree\.soumettre\(/g) || []).length };
   });
 
   await t('V17', "couche [O1] : un outil declare ne peut pas ouvrir une nouvelle ligne de consigne dans le prompt", async () => {
