@@ -1,6 +1,6 @@
 'use strict';
 /* ============================================================================
- * JARVIS — elevation 1.0 : Face ID (cles d'acces / WebAuthn) et code de secours
+ * JARVIS — elevation 1.1 : Face ID (cles d'acces / WebAuthn) et code de secours
  * ----------------------------------------------------------------------------
  * Pour confirmer une action IRREVERSIBLE, la couche exige une elevation
  * recente (15 min au plus). Ce module la prouve :
@@ -10,6 +10,8 @@
  *    JARVIS_PASSKEYS. C'est Render qui fait foi : sans acces au compte Render,
  *    personne ne peut ajouter sa propre cle.
  *  - CODE : un code de secours (JARVIS_CODE_SECOURS), si Face ID manque.
+ *    [1.1] 12 a 64 CHIFFRES : la page l'affiche avec le clavier a chiffres ;
+ *    un code avec des lettres etait accepte mais impossible a taper.
  *
  * CE QUI EST VERIFIE A CHAQUE FACE ID
  *  - defi aleatoire (32 octets), a usage unique, valable 2 min, lie a la session ;
@@ -102,10 +104,13 @@ function lirePasskeys(texte) {
   return out;
 }
 
+/* [1.1] le code de secours : 12 a 64 chiffres, rien d'autre (clavier a chiffres) */
+const codeValide = (code) => typeof code === 'string' && /^[0-9]{12,64}$/.test(code);
+
 function creerElevation({ passkeys, code, rpId, origine, maintenant = () => Date.now(), limites } = {}) {
   const L = Object.freeze({ ...LIMITES_ELEVATION, ...(limites || {}) });
   const cles = lirePasskeys(passkeys);
-  const codeOk = typeof code === 'string' && /^\S{6,64}$/.test(code) ? sha256(Buffer.from(code, 'utf8')) : null;
+  const codeOk = codeValide(code) ? sha256(Buffer.from(code, 'utf8')) : null;   /* [1.1] */
   const defis = new Map();       /* sessionId -> { defi, type, expire } */
   const echecs = new Map();      /* cle (session ou adresse) -> [horodatages] */
   const compteurs = new Map();   /* id de cle -> dernier compteur vu */
@@ -213,4 +218,4 @@ function creerElevation({ passkeys, code, rpId, origine, maintenant = () => Date
   });
 }
 
-module.exports = { creerElevation, decoderCbor, lireAuthData, coseVersJwk, lirePasskeys, b64u, deB64u, LIMITES_ELEVATION, VERSION: '1.0' };
+module.exports = { creerElevation, codeValide, decoderCbor, lireAuthData, coseVersJwk, lirePasskeys, b64u, deB64u, LIMITES_ELEVATION, VERSION: '1.1' };

@@ -165,6 +165,12 @@
  *   chaque appel a l'IA : avant, un appel bloque laissait la requete pendue
  *   sans fin. [S34] manifeste : /health dit si les fichiers qui tournent sont
  *   ceux livres (voir jarvis-manifeste.js).
+ *
+ * v4.6.2 — [S35] code de secours : 12 a 64 CHIFFRES (la page l'affiche au
+ *   clavier a chiffres). FERME PAR DEFAUT : une variable d'elevation presente
+ *   mais illisible ne desactive plus la protection. L'irreversible reste
+ *   bloque, /health dit « erreur-config ». Avant, l'elevation s'eteignait en
+ *   silence et l'irreversible passait sans Face ID ni code.
  * ========================================================================== */
 
 const http = require('http');
@@ -277,11 +283,18 @@ if (process.env.JARVIS_GOOGLE_COMPTE || process.env.JARVIS_AGENDA_JARVIS) {
  * exige une elevation de moins de 15 min au moment de la confirmer. */
 const ELEVATION = CLE_ACCES ? EL.creerElevation({ passkeys: process.env.JARVIS_PASSKEYS, code: process.env.JARVIS_CODE_SECOURS,
   rpId: process.env.JARVIS_RP_ID || undefined }) : null;
-if (process.env.JARVIS_CODE_SECOURS && (!ELEVATION || !ELEVATION.codeSecours))
-  console.error('Code de secours IGNORE : instance publique, ou moins de 6 caracteres / espace.');
-if (process.env.JARVIS_PASSKEYS && (!ELEVATION || !ELEVATION.faceId))
-  console.error('JARVIS_PASSKEYS IGNOREE : instance publique, ou aucune cle lisible.');
-const ELEVATION_EXIGEE = !!(ELEVATION && ELEVATION.actif);
+/* [S35] sur une instance personnelle, une variable d'elevation PRESENTE veut
+ * dire « protege l'irreversible ». Si elle est illisible, on ne retombe pas
+ * sans protection : l'irreversible reste bloque et /health le dit. */
+const VAR_ENV = (nom) => String(process.env[nom] || '').trim() !== '';
+const CODE_ILLISIBLE = !!(ELEVATION && VAR_ENV('JARVIS_CODE_SECOURS') && !ELEVATION.codeSecours);
+const CLES_ILLISIBLES = !!(ELEVATION && VAR_ENV('JARVIS_PASSKEYS') && !ELEVATION.faceId);
+if (CODE_ILLISIBLE) console.error('Code de secours REFUSE : il faut 12 a 64 chiffres, rien d\'autre.');
+if (CLES_ILLISIBLES) console.error('JARVIS_PASSKEYS : aucune cle lisible.');
+if (!ELEVATION && (VAR_ENV('JARVIS_CODE_SECOURS') || VAR_ENV('JARVIS_PASSKEYS')))
+  console.error('Elevation ignoree : instance publique (pas de JARVIS_CLE_ACCES).');
+const ELEVATION_MAL_CONFIGUREE = !!(ELEVATION && !ELEVATION.actif && (CODE_ILLISIBLE || CLES_ILLISIBLES));
+const ELEVATION_EXIGEE = !!(ELEVATION && ELEVATION.actif) || ELEVATION_MAL_CONFIGUREE;
 
 const LIMITES = {
   /* Comptes en APPELS ANTHROPIC, pas en messages : un message du chat en vaut
@@ -1208,9 +1221,11 @@ const serveur = http.createServer((req, res) => {
   const inconnue = () => json(401, { erreur: 'SESSION_INCONNUE' });
 
   if (u.pathname === '/health')
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.6.1',
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.6.2',
       agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : 'inactif',   /* [S30] */
-      elevation: !ELEVATION || !ELEVATION.actif ? 'inactif' : [ELEVATION.faceId ? 'faceid' : null, ELEVATION.codeSecours ? 'code' : null].filter(Boolean).join('+'),
+      elevation: ELEVATION_MAL_CONFIGUREE ? 'erreur-config' : !ELEVATION || !ELEVATION.actif ? 'inactif'   /* [S35] */
+        : [ELEVATION.faceId ? 'faceid' : null, ELEVATION.codeSecours ? 'code' : null,
+           CODE_ILLISIBLE ? 'code-refuse' : null, CLES_ILLISIBLES ? 'cles-illisibles' : null].filter(Boolean).join('+'),
       acces: CLE_ACCES ? 'protege' : 'public', gouvernance: 'active', ip: sourceIp(req),
       /* [S17] l'adresse que le serveur attribue a CELUI qui demande (la sienne,
        * a lui seul) : permet de verifier en ligne qu'on ne peut pas l'inventer */
@@ -1336,7 +1351,8 @@ const serveur = http.createServer((req, res) => {
       const att = s.enAttente.get(b.jeton);
       const r = s.g.finaliser(b.jeton);
       if (r.etat === 'ELEVATION_REQUISE')   /* [S31] rien n'est consomme : Face ID ou code, puis on reconfirme */
-        return json(200, { ...r, moyens: { faceId: !!(ELEVATION && ELEVATION.faceId), code: !!(ELEVATION && ELEVATION.codeSecours) }, ...etatDe(s) });
+        return json(200, { ...r, moyens: { faceId: !!(ELEVATION && ELEVATION.faceId), code: !!(ELEVATION && ELEVATION.codeSecours),
+          erreurConfig: ELEVATION_MAL_CONFIGUREE /* [S35] */ }, ...etatDe(s) });
       if (r.etat !== 'EXECUTE') return json(200, { ...r, ...etatDe(s) });
       /* [S6] la confirmation est un vrai geste de la personne : elle entre
        * dans l'historique comme son message, et la reponse voit le contexte. */
@@ -1429,7 +1445,7 @@ const serveur = http.createServer((req, res) => {
     const s = sessionDe(sid());
     if (!s) return inconnue();
     return json(200, { disponible: !!ELEVATION, faceId: !!(ELEVATION && ELEVATION.faceId), code: !!(ELEVATION && ELEVATION.codeSecours),
-      exigee: ELEVATION_EXIGEE, ...s.g.etat().elevation });
+      exigee: ELEVATION_EXIGEE, erreurConfig: ELEVATION_MAL_CONFIGUREE, ...s.g.etat().elevation });
   }
 
   /* [S29] TRACABILITE — une transaction de CETTE session, en lecture seule :
@@ -1505,6 +1521,7 @@ serveur.listen(PORT, () => {
   console.log(CLE_ACCES ? 'Acces : PROTEGE par cle (instance personnelle)' : 'Acces : public (demo)');
   console.log(AGENDA ? 'Agenda : ACTIF (lecture seule, ' + FUSEAU + ')' : 'Agenda : inactif');
   console.log(ECRITURE ? 'Ecriture : ACTIVE (agenda JARVIS dedie, sans invites)' : 'Ecriture : inactive');
-  console.log(ELEVATION_EXIGEE ? 'Elevation : EXIGEE pour l\'irreversible (' + [ELEVATION.faceId && 'Face ID', ELEVATION.codeSecours && 'code'].filter(Boolean).join(' + ') + ', 15 min)' : 'Elevation : non configuree');
+  console.log(ELEVATION_MAL_CONFIGUREE ? 'Elevation : MAL CONFIGUREE — l\'irreversible reste BLOQUE (corrige la variable dans Render)'   /* [S35] */
+    : ELEVATION_EXIGEE ? 'Elevation : EXIGEE pour l\'irreversible (' + [ELEVATION.faceId && 'Face ID', ELEVATION.codeSecours && 'code'].filter(Boolean).join(' + ') + ', 15 min)' : 'Elevation : non configuree');
   console.log('Sessions emises par le serveur (SESSION_INCONNUE sinon)');
 });

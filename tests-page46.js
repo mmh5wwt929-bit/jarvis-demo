@@ -18,7 +18,7 @@ https.request=(a,b,c)=>{
     const t=o.max_tokens===200?JSON.stringify(plans.shift()||{action:'AUCUNE'}):'Réponse.';r.emit('data',JSON.stringify({content:[{type:'text',text:t}]}));r.emit('end');};
   q.setTimeout=()=>q;q.destroy=()=>{};return q;};
 Object.assign(process.env,{ANTHROPIC_API_KEY:'t',PORT:'3957',JARVIS_CLE_ACCES:CLE,JARVIS_GOOGLE_COMPTE:JSON.stringify({type:'service_account',client_email:'j@x.iam.gserviceaccount.com',private_key:kR.export({type:'pkcs8',format:'pem'})}),
-  JARVIS_AGENDA_JARVIS:'c_x@group.calendar.google.com',JARVIS_PASSKEYS:b64u(JSON.stringify({id:b64u(idF),x:jF.x,y:jF.y})),JARVIS_CODE_SECOURS:'246810'});
+  JARVIS_AGENDA_JARVIS:'c_x@group.calendar.google.com',JARVIS_PASSKEYS:b64u(JSON.stringify({id:b64u(idF),x:jF.x,y:jF.y})),JARVIS_CODE_SECOURS:'246810135790'});
 const L=console.log;console.log=()=>{};console.error=()=>{};require((process.env.JARVIS_DIR||'.')+'/server.js');
 const {JSDOM,VirtualConsole}=require(process.env.JSDOM||'jsdom');const B='http://localhost:3957';const dort=ms=>new Promise(r=>setTimeout(r,ms));
 const R=[];const ok=(id,c,nom,info)=>R.push((c?'OK    ':'ECHEC ')+id+' '+nom+(info?'  ['+info+']':''));

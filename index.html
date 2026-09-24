@@ -712,14 +712,14 @@ function rendreDecision(d) {
       +  '<button class="primaire" data-reformuler="1">Confirmer</button></div></div>';
   }
   if (d.decide === 'EN_ATTENTE') {
-    h += '<div class="retenue"><p id="compte">' + esc(d.message) + '</p><div class="rang">'
+    h += '<div class="retenue"><p class="compte">' + esc(d.message) + '</p><div class="rang">'
       +  '<button class="danger" data-annuler="' + esc(d.jetonAnnulation) + '">Annuler</button>'
       +  '<button data-finaliser="' + esc(d.jetonAnnulation) + '" data-apres="' + esc(String(Number(d.executableApres) || 0)) + '" disabled>Confirmer l\'envoi</button></div></div>';
   }
   const bloc = tour('JARVIS', '', false);
   bloc.querySelector('.quoi').outerHTML = h;
   if (d.reponse) tour(d.etape === 'MEMOIRE' ? 'JARVIS' : 'Claude', d.reponse, false, d.etape !== 'MEMOIRE');
-  if (d.decide === 'EN_ATTENTE') compteARebours(d.executableApres);
+  if (d.decide === 'EN_ATTENTE') compteARebours(d.executableApres, bloc.querySelector('.compte'));   /* [S35] sa propre boîte */
   $('fil').scrollTop = $('fil').scrollHeight;
 }
 
@@ -730,9 +730,13 @@ function activerConfirmations() {
   for (const b of document.querySelectorAll('button[data-finaliser][disabled]'))
     if (Number(b.dataset.apres || 0) <= Date.now()) b.disabled = false;
 }
-function compteARebours(jusqua) {
-  const p = $('compte'); if (!p) { setTimeout(activerConfirmations, Math.max(0, jusqua - Date.now()) + 50); return; }
+/* [S35] chaque action a SA boîte : avant, un seul id « compte » pour toutes,
+ * et le décompte de la 2e action s'affichait dans la boîte de la 1re. */
+function compteARebours(jusqua, p) {
+  if (!p) { setTimeout(activerConfirmations, Math.max(0, jusqua - Date.now()) + 50); return; }
   const t = setInterval(() => {
+    const boite = p.closest('.retenue');
+    if (boite && boite.dataset.close) { clearInterval(t); activerConfirmations(); return; }
     const r = Math.ceil((jusqua - Date.now()) / 1000);
     if (r <= 0) { p.textContent = "Fenêtre écoulée. Confirme pour envoyer, ou annule."; activerConfirmations(); clearInterval(t); }
     else p.textContent = 'Action irréversible retenue — ' + r + ' s avant que la confirmation soit possible.';
@@ -789,23 +793,79 @@ function limiteAtteinte(d) {
 }
 
 /* ---------- gestes ---------- */
+/* [S35] une seule demande d'identité par action : re-toucher « Confirmer
+ * l'envoi » ramène à la carte déjà ouverte au lieu d'en empiler une autre. */
+const carteElevation = (jeton) => [...document.querySelectorAll('#fil .elevation')]
+  .find(b => b.dataset.jeton === jeton && !b.dataset.fini) || null;
+function rappelerCarte(boite) {
+  const champ = boite.querySelector('input.code'), etat = boite.querySelector('.etat-elev');
+  if (etat && !etat.textContent) etat.textContent = 'Confirme ici que c\'est toi : l\'envoi partira ensuite tout seul.';
+  boite.scrollIntoView({ block: 'center' });
+  if (champ) champ.focus();
+}
+const boutonsConfirmer = (jeton) => [...document.querySelectorAll('button[data-finaliser]')].filter(b => b.dataset.finaliser === jeton);
+
 /* [S31] confirmer une action retenue ; si le noyau exige Face ID, le proposer */
+const confirmationsEnCours = new Set();   /* [S35] deux touchers rapides = une seule requête */
+const confirmationsFaites = new Set();    /* [S35] action terminée : plus rien ne se relance */
+/* [S35] l'état d'une action retenue s'écrit DANS sa boîte ; on n'empile plus
+ * « Pas encore : INTROUVABLE » à chaque toucher. */
+const retenueDe = (jeton) => { const b = boutonsConfirmer(jeton)[0]; return b ? b.closest('.retenue') : null; };
+function direDansRetenue(jeton, texte) {
+  const boite = retenueDe(jeton), p = boite && boite.querySelector('.compte');
+  if (p) p.textContent = texte; else tour('JARVIS', texte, false);
+}
+function clore(jeton, texte) {
+  confirmationsFaites.add(jeton);
+  const carte = carteElevation(jeton); if (carte) fermerCarte(carte);
+  const boite = retenueDe(jeton); if (!boite) return;
+  boite.dataset.close = '1';
+  const p = boite.querySelector('.compte'); if (p) p.textContent = texte;
+  for (const b of boite.querySelectorAll('button')) { b.disabled = true; if (b.dataset.finaliser) b.dataset.apres = '9e15'; }
+}
 async function finaliserJeton(jeton) {
-  const r = await api('/api/finaliser', { jeton });
-  if (limiteAtteinte(r)) return;
+  const ouverte = carteElevation(jeton);
+  if (ouverte) return rappelerCarte(ouverte);          /* [S35] */
+  if (confirmationsEnCours.has(jeton) || confirmationsFaites.has(jeton)) return;
+  confirmationsEnCours.add(jeton);
+  const boutons = boutonsConfirmer(jeton);
+  const rendre = () => { for (const b of boutons) b.disabled = false; };
+  for (const b of boutons) b.disabled = true;          /* [S35] pas de double envoi pendant la requête */
+  let r = null;
+  try { r = await api('/api/finaliser', { jeton }); } catch (e) { r = null; } finally { confirmationsEnCours.delete(jeton); }
+  if (!r) { rendre(); return direDansRetenue(jeton, 'Pas de réponse du serveur : réessaie « Confirmer l\'envoi ».'); }
+  if (limiteAtteinte(r)) return rendre();
   majEtat(r);
-  if (r.etat === 'ELEVATION_REQUISE') return demanderElevation(jeton, r.moyens || {});
-  tour('JARVIS', r.etat === 'EXECUTE' ? 'Envoyé.' : 'Pas encore : ' + (r.etat === 'TROP_TOT' ? 'la fenêtre court toujours.' : r.etat), false);
-  if (r.etat === 'EXECUTE' && r.trace) tour('JARVIS', resumeTrace(r.trace), false);   /* [S29] */
+  if (r.etat === 'ELEVATION_REQUISE') { rendre(); return demanderElevation(jeton, r.moyens || {}); }
+  if (r.etat === 'TROP_TOT') { rendre(); return direDansRetenue(jeton, 'Pas encore : la fenêtre court toujours.'); }
+  if (r.etat === 'INTROUVABLE') return clore(jeton, 'Déjà traitée (envoyée ou annulée) : plus rien à confirmer.');
+  if (r.etat === 'EXECUTE') {
+    clore(jeton, 'Envoyé.');
+    tour('JARVIS', 'Envoyé.', false);
+    if (r.trace) tour('JARVIS', resumeTrace(r.trace), false);   /* [S29] */
+    if (r.reponse) tour('Claude', r.reponse, false);
+    return;
+  }
+  const refus = 'Refusée au dernier contrôle' + (r.motif ? ' (' + r.motif + ')' : '') + ' : rien n\'est parti.';
+  clore(jeton, refus);
+  tour('JARVIS', refus, false);
   if (r.reponse) tour('Claude', r.reponse, false);
 }
+/* [S35] identité prouvée : la carte est terminée, ses commandes s'éteignent */
+function fermerCarte(boite) {
+  boite.dataset.fini = '1';
+  for (const x of boite.querySelectorAll('button, input')) x.disabled = true;
+}
 async function demanderElevation(jeton, moyens) {
+  const deja = carteElevation(jeton);
+  if (deja) return rappelerCarte(deja);                /* [S35] */
   const avecFaceId = moyens.faceId && FaceId.dispo();
   const bloc = tour('JARVIS', '', false);
   let h = '<div class="elevation" data-jeton="' + esc(jeton) + '"><p>Action irréversible : confirme que c\'est bien toi (valable 15 min).</p><div class="rang">';
   if (avecFaceId) h += '<button class="primaire" data-faceid="1" disabled>Face ID</button>';
   if (moyens.code) h += '<input class="code" type="password" inputmode="numeric" autocomplete="off" placeholder="code de secours" aria-label="Code de secours"><button data-code="1">Valider le code</button>';
-  if (!avecFaceId && !moyens.code) h += '<span>Aucun moyen disponible sur cet appareil.</span>';
+  if (moyens.erreurConfig) h += '<span>Code de secours mal réglé dans Render (il faut 12 à 64 chiffres) : l\'envoi reste bloqué tant qu\'il n\'est pas corrigé.</span>';   /* [S35] */
+  else if (!avecFaceId && !moyens.code) h += '<span>Aucun moyen disponible sur cet appareil.</span>';
   h += '</div><p class="etat-elev"></p></div>';
   bloc.querySelector('.quoi').outerHTML = h;
   const boite = $('fil').lastElementChild.querySelector('.elevation');
@@ -962,9 +1022,18 @@ document.addEventListener('click', async (ev) => {
     else { majEtat(r); if (r && r.erreur) tour('JARVIS', 'Confirmation impossible : ' + r.erreur, false); }
   }
   if (t.dataset.annuler) {
-    const r = await api('/api/annuler', { jeton:t.dataset.annuler });
-    if (limiteAtteinte(r)) return;
-    majEtat(r); tour('JARVIS', r.message || "Action annulée. Elle n'a jamais eu lieu.", false);
+    /* [S35] une fois ; et jamais « annulée » pour une action déjà envoyée */
+    const jeton = t.dataset.annuler;
+    if (confirmationsFaites.has(jeton) || t.disabled) return;
+    t.disabled = true;
+    let r = null;
+    try { r = await api('/api/annuler', { jeton }); } catch (e) { r = null; }
+    if (!r) { t.disabled = false; return direDansRetenue(jeton, 'Pas de réponse du serveur : réessaie « Annuler ».'); }
+    if (limiteAtteinte(r)) { t.disabled = false; return; }
+    majEtat(r);
+    if (r.etat === 'ANNULE') { clore(jeton, 'Annulée : rien n\'est parti.'); tour('JARVIS', r.message || "Action annulée. Elle n'a jamais eu lieu.", false); }
+    else if (r.etat === 'INTROUVABLE') clore(jeton, 'Rien à annuler : cette action a déjà été traitée.');
+    else { t.disabled = false; direDansRetenue(jeton, 'Annulation impossible' + (r.motif || r.erreur ? ' : ' + (r.motif || r.erreur) : '.')); }
   }
   if (t.dataset.finaliser) await finaliserJeton(t.dataset.finaliser);
 
@@ -1007,6 +1076,7 @@ document.addEventListener('click', async (ev) => {
     const r = await FaceId.envoyer(cred);
     if (!r || !r.ok) { etat.textContent = 'Face ID refusé' + (r && r.motif === 'TROP_D_ECHECS' ? ' : trop d\'échecs, attends 15 min.' : '.'); await FaceId.preparer(boite); return; }
     majEtat(r); etat.textContent = 'Face ID validé pour 15 min.';
+    fermerCarte(boite);   /* [S35] */
     await finaliserJeton(boite.dataset.jeton);
   }
   if (t.dataset.code) {
@@ -1018,6 +1088,7 @@ document.addEventListener('click', async (ev) => {
     t.disabled = false;
     if (!r || !r.ok) { etat.textContent = r && r.motif === 'TROP_D_ECHECS' ? "Trop d'échecs : attends 15 min." : 'Code refusé.'; return; }
     majEtat(r); etat.textContent = 'Code validé pour 15 min.';
+    fermerCarte(boite);   /* [S35] */
     await finaliserJeton(boite.dataset.jeton);
   }
   if (t.id === 'micro') Voix.basculer();

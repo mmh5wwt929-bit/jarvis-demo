@@ -48,7 +48,7 @@ const RP = 'dianinou.onrender.com', ORIG = 'https://dianinou.onrender.com';
   const vc = reg.verifierCreation('s1', RP, { id: b64u(ap.idCle), clientDataJSON: b64u(clientData('webauthn.create', dc.options.challenge, ORIG)), attestationObject: b64u(attObj) });
   await t('F1', "enregistrement Face ID : la cle publique extraite est prete a coller dans Render", async () =>
     ({ ok: vc.ok && typeof vc.identifiant === 'string' && EL.lirePasskeys(vc.identifiant).size === 1, info: vc.ok ? 'identifiant de ' + vc.identifiant.length + ' caracteres' : vc.motif }));
-  const el = EL.creerElevation({ passkeys: vc.identifiant, code: '482913', maintenant: () => now });
+  const el = EL.creerElevation({ passkeys: vc.identifiant, code: '482913576104', maintenant: () => now });
   let compteur = 0;
   const assertion = (o = {}) => {
     const d = o.defi !== undefined ? { options: { challenge: o.defi } } : el.defiAssertion(o.session || 's1', RP, '1.2.3.4');
@@ -113,9 +113,9 @@ const RP = 'dianinou.onrender.com', ORIG = 'https://dianinou.onrender.com';
     return { ok: r.every(x => x !== 'ACCEPTE'), info: r.join(' ') };
   });
   await t('F10', 'code de secours : bon code accepte ; faux codes bloques a 5 ; code trop court non configure', async () => {
-    const ok = el.verifierCode('s6', '6.6.6.6', '482913').ok;
+    const ok = el.verifierCode('s6', '6.6.6.6', '482913576104').ok;
     for (let i = 0; i < 5; i++) el.verifierCode('s7', '7.7.7.7', '000000');
-    const bloque = el.verifierCode('s7', '7.7.7.7', '482913');
+    const bloque = el.verifierCode('s7', '7.7.7.7', '482913576104');
     const court = EL.creerElevation({ code: '123' }).codeSecours;
     return { ok: ok && !bloque.ok && bloque.motif === 'TROP_D_ECHECS' && court === false, info: 'bon ' + ok + ', apres 5 faux : ' + bloque.motif + ', code court configure : ' + court };
   });
