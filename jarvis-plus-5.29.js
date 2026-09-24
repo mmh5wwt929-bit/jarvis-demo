@@ -2,6 +2,11 @@
 /* ============================================================================
  * JARVIS+ 5.29 — COUCHE DE GOUVERNANCE (sur noyau 5.28.3)
  * ----------------------------------------------------------------------------
+ * 5.30.0 (24 sept 2026) — [V1] canal de frappe (clavier / voix) : la voix seule
+ *  n'autorise pas l'irreversible sans Face ID ; [V2] elevation Face ID / code,
+ *  15 min au plus, exigee a la confirmation d'une action irreversible ;
+ *  [G1] confirmation par geste pour une action compensable ; [F1] effet reel
+ *  constate (jeton d'effet) ; [K2] compensation en deux temps, verifiee.
  * 5.29.12 (24 sept 2026) — [T10] tracabilite : preuve d'intention (frappe ou
  *  cible retapee) et mode de confirmation enregistres ; trace(id) en lecture
  *  seule, reverifiee a la lecture, sans aucun texte du modele.
@@ -191,7 +196,9 @@ const TRANSITIONS_TX = Object.freeze({
   COMPENSATING:        Object.freeze(['COMPENSATED', 'COMPENSATION_FAILED']),
   REJECTED: Object.freeze([]), CANCELLED: Object.freeze([]), REVOKED: Object.freeze([]),
   EXPIRED: Object.freeze([]), FAILED: Object.freeze([]),
-  COMPENSATED: Object.freeze([]), COMPENSATION_FAILED: Object.freeze([])
+  /* [K2 - 5.30] une compensation dont la verification a echoue (reseau) peut
+   * etre retentee, avec la meme verification a chaque essai */
+  COMPENSATED: Object.freeze([]), COMPENSATION_FAILED: Object.freeze(['COMPENSATING'])
 });
 
 /* T4 — deux domaines de temps, jamais melanges. */
@@ -468,6 +475,10 @@ class SessionGouvernee {
   #j; #ctx; #ancrage; #enAttente = new Map(); #journal = []; #dryRuns = new Set();
   #reformulations = new Map(); #assemble = false; #sceauContexte = null;
   #derniereFrappe = null; #demandeScellee = null;   /* [C3] */
+  /* [5.30] canal de la derniere frappe, confirmations par geste, elevation
+   * (Face ID / code), jetons d'effet reel et de compensation */
+  #canalFrappe = 'clavier'; #confirmations = new Map(); #exigerElevation = false; #elevation = null;
+  #jetonsEffet = new Map(); #jetonsCompensation = new Map();
   /* [T] transactions scellees : rien de ceci ne sort de la couche */
   #id = 'ses_' + crypto.randomUUID(); #h; #tx = new Map(); #requetes = new Set(); #preuvesC3 = new Set(); #parTx = new Map();
   #lim;   /* [L] */
@@ -479,10 +490,16 @@ class SessionGouvernee {
     this.#ancrage = new AncrageExterne(opts.puitsAncrage);
     this.#ancrage.publier(this.#j);            /* ancre le BOOT */
     this.#lim = limitesDe(opts.limites);
-    /* [E] la capacite d'entree est deposee ici, recuperable UNE fois par la fabrique */
+    this.#exigerElevation = opts.exigerElevation === true;   /* [V2 - 5.30] */
+    /* [E] la capacite d'entree est deposee ici, recuperable UNE fois par la fabrique.
+     * [5.30] elle porte aussi : la confirmation par GESTE (un toucher sur une
+     * carte qui montre l'action exacte) et l'ELEVATION (Face ID ou code verifie
+     * par le serveur). Seul le detenteur de la capacite peut les declarer. */
     CAPACITES_ENTREE.set(this, Object.freeze({
-      soumettre:  (texte) => this.#soumettre(texte),
-      reformuler: (action, cible) => this.#reformuler(action, cible)
+      soumettre:  (texte, o) => this.#soumettre(texte, o),
+      reformuler: (action, cible) => this.#reformuler(action, cible),
+      confirmer:  (action, cible) => this.#confirmerGeste(action, cible),
+      elever:     (ms, mode) => this.#elever(ms, mode)
     }));
     Object.freeze(this);                       /* [T] aucune methode remplacable sur l'instance */
   }
@@ -495,13 +512,44 @@ class SessionGouvernee {
   }
 
   /* [E] la frappe de l'utilisateur, par la seule capacite qui peut la declarer */
-  #soumettre(texte) {
+  #soumettre(texte, o) {
     if (typeof texte !== 'string' || !texte.trim()) return Object.freeze({ ok: false, motif: 'TEXTE_INVALIDE' });
     const t = texte.slice(0, 4000);
-    this.#derniereFrappe = t;
-    this.#ctx.ingerer({ origine: 'USER_DIRECT', resume: t.slice(0, 120), source: 'clavier' });
+    /* [V1 - 5.30] LA VOIX N'EST PAS UN CLAVIER. Un son peut venir d'ailleurs
+     * (video, haut-parleur, voisin) : la frappe garde son canal, et la voix
+     * seule n'autorise jamais une action irreversible sans Face ID. */
+    const canal = o && o.canal === 'voix' ? 'voix' : 'clavier';
+    this.#derniereFrappe = t; this.#canalFrappe = canal;
+    this.#ctx.ingerer({ origine: 'USER_DIRECT', resume: t.slice(0, 120), source: canal === 'voix' ? 'micro' : 'clavier' });
+    return Object.freeze({ ok: true, canal });
+  }
+  /* [G1 - 5.30] Confirmation par GESTE, pour une action COMPENSABLE seulement :
+   * la personne a touche « Creer » sur une carte qui montre l'action exacte.
+   * Usage unique, meme stockage borne que les reformulations. */
+  #confirmerGeste(action, cible) {
+    if (typeof action !== 'string' || !action.trim() || typeof cible !== 'string' || !cible.trim())
+      return Object.freeze({ ok: false, motif: 'CONFIRMATION_INVALIDE' });
+    if (this.#confirmations.size >= this.#lim.reformulations) return Object.freeze({ ok: false, motif: 'CAPACITE_CONFIRMATIONS_ATTEINTE' });
+    const cle = String(action).toUpperCase() + '|' + String(cible), nonce = crypto.randomUUID(), ts = this.#h.mur();
+    this.#confirmations.set(cle, { cle, nonce, ts, preuve: sha({ cle, nonce, ts }) });
     return Object.freeze({ ok: true });
   }
+  #aConfirmeGeste(spec) {
+    const j = this.#confirmations.get(String(spec.action).toUpperCase() + '|' + String(spec.target || spec.resource));
+    return !!(j && sha({ cle: j.cle, nonce: j.nonce, ts: j.ts }) === j.preuve);
+  }
+  /* [V2 - 5.30] ELEVATION : Face ID (ou code de secours) verifie par le serveur,
+   * valable au plus 15 min, dans CETTE session. Prouve QUI, jamais QUOI. */
+  #elever(ms, mode) {
+    const m = mode === 'FACE_ID' || mode === 'CODE' ? mode : null;
+    const d = Math.max(60 * 1000, Math.min(15 * 60 * 1000, Number(ms) || 0));
+    if (!m || !this.#h.murValide()) return Object.freeze({ ok: false, motif: 'ELEVATION_INVALIDE' });
+    const t = this.#h.mur();
+    this.#elevation = Object.freeze({ mode: m, depuis: t, jusqua: t + d });
+    this.#journal.push({ ts: t, evenement: 'ELEVATION', mode: m, jusqua: t + d });
+    return Object.freeze({ ok: true, mode: m, jusqua: t + d });
+  }
+  #eleve() { return !!(this.#elevation && this.#h.mur() < this.#elevation.jusqua); }
   /* [E] la cible retapee a la main : confirme ACTION + CIBLE ensemble */
   #reformuler(action, cible) {
     if (typeof action !== 'string' || !action.trim() || typeof cible !== 'string' || !cible.trim())
@@ -603,10 +651,10 @@ class SessionGouvernee {
     const p = rec.preuve || { nature: 'INCONNUE', texte: null, empreinte: null };
     const cible = String(rec.spec.target || rec.spec.resource);
     let reverifiee = null;
-    if (p.nature === 'FRAPPE')
+    if (p.nature === 'FRAPPE' || p.nature === 'VOIX')
       reverifiee = sha({ frappe: p.texte }) === p.empreinte && analyserIntention(rec.spec.action, p.texte).presente
         && cibleDansTexte(cible, separer(p.texte).propres);
-    else if (p.nature === 'CIBLE_RETAPEE') reverifiee = sha({ frappe: p.texte }) === p.empreinte && p.texte === cible;
+    else if (p.nature === 'CIBLE_RETAPEE' || p.nature === 'CONFIRMATION_GESTE') reverifiee = sha({ frappe: p.texte }) === p.empreinte && p.texte === cible;
     let etatNoyau = null;
     try { const pn = this.#j.permissions.getPermission(rec.propositionId, HARNESS_KEY); etatNoyau = pn ? pn.state : null; } catch { etatNoyau = null; }
     return fr({
@@ -617,7 +665,7 @@ class SessionGouvernee {
       decision: fr({ couche: 'AUTORISE', noyau: etatNoyau,
         empreinteIntacte: rec.empreinte == null ? null : this.#empreinteDe(rec) === rec.empreinte }),
       confirmation: rec.confirmation,
-      effet: fr({ etat: rec.etat }),
+      effet: fr({ etat: rec.etat, reel: rec.effetReel || null, compense: !!rec.preuveCompensation }),
       historique: fr(rec.historique.map(x => fr({ ...x })))
     });
   }
@@ -666,7 +714,9 @@ class SessionGouvernee {
   etat() {
     return { plancher: this.#ctx.plancher(), influences: this.#ctx.influencesBasses(),
              ledger: this.ledger(), integrite: this.integrite(), verrouille: this.verrouille(),
-             contexteAssemble: this.#assemble };
+             contexteAssemble: this.#assemble,
+             elevation: { exigee: this.#exigerElevation, active: this.#eleve(),
+               jusqua: this.#eleve() ? this.#elevation.jusqua : null, mode: this.#eleve() ? this.#elevation.mode : null } };
   }
 
   /* ---- G1 : tout ce que l'agent ingere passe par ici ---- */
@@ -712,7 +762,7 @@ class SessionGouvernee {
     /* [C3] La demande ne sert de source de cibles que si c'est bien la
      * derniere frappe de l'utilisateur, et seulement pour CE sceau. */
     this.#demandeScellee = (this.#derniereFrappe !== null && String(demandeUtilisateur) === this.#derniereFrappe)
-      ? { sceau: this.#sceauContexte, texte: this.#derniereFrappe } : null;
+      ? { sceau: this.#sceauContexte, texte: this.#derniereFrappe, canal: this.#canalFrappe } : null;
     return {
       sceauContexte: this.#sceauContexte,
       prompt: `Tu es un agent assistant. Determine la SEULE action que tu veux effectuer pour repondre a la demande.
@@ -847,6 +897,11 @@ ${demandeUtilisateur}`
     /* [T10 - 5.29.12] PREUVE D'INTENTION : ce qui, dans les frappes de la
      * personne, a autorise l'action. Jamais un texte du modele. */
     let preuve = { nature: 'AUCUNE_REQUISE', texte: null };
+    /* [G1 - 5.30] une action COMPENSABLE confirmee par un GESTE sur la carte
+     * exacte porte l'intention de la personne : plancher USER_DIRECT pour
+     * cette action seulement. */
+    const confirmeParGeste = classe === 'COMPENSABLE' && this.#aConfirmeGeste(spec);
+    if (confirmeParGeste) { plancher = 'USER_DIRECT'; preuve = { nature: 'CONFIRMATION_GESTE', texte: String(spec.target || spec.resource) }; }
     if (classe === 'IRREVERSIBLE') {
       if (!this.#aReformule(spec)) {
         /* [C3] Provenance par argument : la cible a-t-elle ete tapee par
@@ -864,6 +919,7 @@ ${demandeUtilisateur}`
          * cite ou colle), le VERBE de l'action ET la cible. */
         const pourquoi =
             (options.manuel || !d || options.sceauContexte !== d.sceau) ? 'DEMANDE_NON_SCELLEE'
+          : (d.canal === 'voix' && !this.#exigerElevation)             ? 'VOIX_SANS_FACE_ID'
           : !analyserIntention(spec.action, d.texte).presente         ? 'VERBE_NON_TAPE'
           : !cibleDansTexte(cible, separer(d.texte).propres)           ? 'CIBLE_NON_TAPEE'
           : this.#preuvesC3.has(cleC3)                                 ? 'PREUVE_DEJA_UTILISEE'
@@ -878,7 +934,7 @@ ${demandeUtilisateur}`
         note = this.note(spec);
         note.signaux.unshift({ poids: 'info',
           texte: 'Cible tapee par toi dans cette demande : provenance verifiee pour cet argument.' });
-        preuve = { nature: 'FRAPPE', texte: String(d.texte) };
+        preuve = { nature: d.canal === 'voix' ? 'VOIX' : 'FRAPPE', texte: String(d.texte) };
       } else preuve = { nature: 'CIBLE_RETAPEE', texte: String(spec.target || spec.resource) };
       plancher = 'USER_DIRECT';
       if (!this.#dryRuns.has(sha({ a: spec.action, t: spec.target, r: spec.resource })))
@@ -951,6 +1007,11 @@ ${demandeUtilisateur}`
       this.#reformulations.delete(String(spec.action).toUpperCase() + '|' + String(spec.target || spec.resource));
       if (cleC3) this.#preuvesC3.add(cleC3);
     }
+    /* [G1 - 5.30] meme regle pour le GESTE : consomme a l'autorisation qu'il
+     * produit. Il etait range dans le bloc IRREVERSIBLE, donc jamais consomme
+     * pour un COMPENSABLE : un seul « Creer » autorisait une seconde creation
+     * identique (trouve par le test, avant livraison). */
+    if (confirmeParGeste) this.#confirmations.delete(String(spec.action).toUpperCase() + '|' + String(spec.target || spec.resource));
 
     /* [T] Un RECU, pas une autorisation : gele, et seul son identifiant compte. */
     return Object.freeze({
@@ -1038,9 +1099,14 @@ ${demandeUtilisateur}`
      * systeme ne raccourcit plus la fenetre (attaque A13). */
     const reste = rec.echeanceMono - this.#h.mono();
     if (reste > 0) return { etat: 'TROP_TOT', resteMs: Math.ceil(reste) };
+    /* [V2 - 5.30] irreversible + elevation exigee : Face ID ou code dans les
+     * 15 dernieres minutes, sinon rien n'est consomme et on le demande. */
+    if (rec.classe === 'IRREVERSIBLE' && this.#exigerElevation && !this.#eleve())
+      return { etat: 'ELEVATION_REQUISE', transactionId: rec.transactionId };
     const r = this.#reverifier(rec, 'FINALISER'); if (r) return r;
     this.#enAttente.delete(jeton);
-    rec.confirmation = Object.freeze({ mode: 'CLIC_APRES_FENETRE', ts: this.#h.mur() });   /* [T10] */
+    rec.confirmation = Object.freeze({ mode: 'CLIC_APRES_FENETRE', ts: this.#h.mur(),   /* [T10] */
+      elevation: rec.classe === 'IRREVERSIBLE' && this.#exigerElevation ? this.#elevation.mode : null });
     return this.#commettre(rec, rec.handler);
   }
 
@@ -1087,8 +1153,12 @@ ${demandeUtilisateur}`
       indexAudit: avant, hash: this.#j.audit.lastHash
     });
     this.#ancrage.publier(this.#j);
+    /* [F1 - 5.30] jeton d'effet : seul celui qui a execute peut ensuite
+     * CONSTATER le resultat reel d'un effet asynchrone (appel reseau). */
+    const jetonEffet = 'fx_' + crypto.randomUUID();
+    this.#jetonsEffet.set(rec.transactionId, sha({ jeton: jetonEffet }));
     return { etat: 'EXECUTE', resultat: r.result, ledger: this.#j.ledger.snapshot(),
-             autorisationId: rec.autorisationId, transactionId: rec.transactionId };
+             autorisationId: rec.autorisationId, transactionId: rec.transactionId, jetonEffet };
   }
 
   /* [T7] COMPENSATION PROUVEE : definition (declaree a la demande) ->
@@ -1117,6 +1187,62 @@ ${demandeUtilisateur}`
     this.#journal.push({ ts: this.#h.mur(), evenement: 'COMPENSE', autorisationId: rec.autorisationId,
       transactionId: rec.transactionId, action: rec.spec.action, cible: rec.spec.target,
       preuve: rec.preuveCompensation.slice(0, 16) });
+    return { etat: 'COMPENSE', preuve: rec.preuveCompensation };
+  }
+
+  /* [F1 - 5.30] EFFET REEL. La couche marque EXECUTED quand l'effet part ; pour
+   * un effet asynchrone (appel a Google), le resultat reel arrive apres. Il
+   * est CONSTATE ici, une fois, par le seul detenteur du jeton d'effet. La
+   * trace dit donc si l'evenement existe vraiment, pas seulement s'il a ete
+   * autorise. */
+  constaterEffet(id, jeton, resultat) {
+    const rec = this.#autorisationDe(id);
+    if (!rec) return Object.freeze({ ok: false, motif: 'INTROUVABLE' });
+    const attendu = this.#jetonsEffet.get(rec.transactionId);
+    if (!attendu || typeof jeton !== 'string' || sha({ jeton }) !== attendu) return Object.freeze({ ok: false, motif: 'JETON_EFFET_INVALIDE' });
+    this.#jetonsEffet.delete(rec.transactionId);
+    const ok = !!(resultat && resultat.ok === true);
+    rec.effetReel = Object.freeze({ ok, code: String((resultat && resultat.code) || (ok ? 'OK' : 'ECHEC')).slice(0, 60),
+      preuve: resultat && resultat.preuve ? String(resultat.preuve).slice(0, 200) : null, ts: this.#h.mur() });
+    this.#journal.push({ ts: this.#h.mur(), evenement: ok ? 'EFFET_CONFIRME' : 'EFFET_ECHOUE', transactionId: rec.transactionId,
+      action: rec.spec.action, cible: rec.spec.target, code: rec.effetReel.code });
+    return Object.freeze({ ok: true });
+  }
+
+  /* [K2 - 5.30] COMPENSATION EN DEUX TEMPS, pour un effet asynchrone :
+   * 1. compensationDebut : la couche passe en COMPENSATING et rend un jeton ;
+   * 2. le detenteur fait l'annulation (supprimer l'evenement) puis la VERIFIE
+   *    (l'evenement a bien disparu) ;
+   * 3. compensationFin : COMPENSATED si verifie === true, sinon
+   *    COMPENSATION_FAILED (retentable). Rien d'annule sans preuve. */
+  compensationDebut(id) {
+    const rec = this.#autorisationDe(id);
+    if (!rec) return { etat: 'INTROUVABLE' };
+    if (!rec.compensation) return { etat: 'REFUSE', motif: 'COMPENSATION_NON_DECLAREE' };
+    if (rec.effetReel && rec.effetReel.ok !== true) return { etat: 'REFUSE', motif: 'EFFET_NON_REALISE' };
+    if (!this.#transition(rec, 'COMPENSATING')) return { etat: 'REFUSE', motif: 'ETAT_' + rec.etat };
+    const jeton = 'cp_' + crypto.randomUUID();
+    this.#jetonsCompensation.set(rec.transactionId, sha({ jeton }));
+    return { etat: 'COMPENSATING', jeton, cible: Object.freeze({ ...rec.spec, compensation: rec.compensation.description,
+      autorisationId: rec.autorisationId, transactionId: rec.transactionId }) };
+  }
+  compensationFin(id, jeton, { verifie, resultat } = {}) {
+    const rec = this.#autorisationDe(id);
+    if (!rec) return { etat: 'INTROUVABLE' };
+    const attendu = this.#jetonsCompensation.get(rec.transactionId);
+    if (!attendu || typeof jeton !== 'string' || sha({ jeton }) !== attendu) return { etat: 'REFUSE', motif: 'JETON_COMPENSATION_INVALIDE' };
+    this.#jetonsCompensation.delete(rec.transactionId);
+    if (verifie !== true) {
+      this.#transition(rec, 'COMPENSATION_FAILED');
+      this.#journal.push({ ts: this.#h.mur(), evenement: 'COMPENSATION_ECHOUEE', autorisationId: rec.autorisationId,
+        action: rec.spec.action, cible: rec.spec.target });
+      return { etat: 'ECHEC', motif: 'COMPENSATION_NON_VERIFIEE' };
+    }
+    rec.preuveCompensation = sha({ transactionId: rec.transactionId, empreinte: rec.empreinte, compensation: rec.compensation,
+      resultat: String(JSON.stringify(resultat) || '').slice(0, 500), ts: this.#h.mur() });
+    this.#transition(rec, 'COMPENSATED');
+    this.#journal.push({ ts: this.#h.mur(), evenement: 'COMPENSE', autorisationId: rec.autorisationId,
+      transactionId: rec.transactionId, action: rec.spec.action, cible: rec.spec.target, preuve: rec.preuveCompensation.slice(0, 16) });
     return { etat: 'COMPENSE', preuve: rec.preuveCompensation };
   }
 
@@ -1294,5 +1420,6 @@ module.exports = Object.freeze({
   SessionGouvernee, SONDES_M, lancerSondeM, RegistreContexte, AncrageExterne,
   noteDeDecision, classeDe, REVERSIBILITE, NIVEAUX, FENETRE_ANNULATION_MS, STATUTS_ANCRAGE,
   TRANSITIONS_TX, HorlogeCouche, creerSessionGouvernee, LIMITES_GOUVERNANCE,
-  noyau: K
+  noyau: K,
+  VERSION: '5.30.0'   /* [S33] lue par /health : prouve quel fichier est vraiment chargé */
 });

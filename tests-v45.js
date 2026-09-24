@@ -82,9 +82,9 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   await dort(400);
   const reelNow = Date.now; let decalage = 0; Date.now = () => reelNow() + decalage;
 
-  await t('V1', '/health : agenda actif, passerelle v4.5.x, couche 5.29.12', async () => {
+  await t('V1', '/health : agenda actif, passerelle v4.5.x ou v4.6.x, couche 5.29.12 ou 5.30.x', async () => {
     const h = await appel('/health');
-    return { ok: h.agenda === 'actif' && /^v4\.5(\.\d+)?$/.test(h.passerelle) && h.couche === '5.29.12' && h.acces === 'protege', info: JSON.stringify({ agenda: h.agenda, passerelle: h.passerelle, couche: h.couche }) };
+    return { ok: h.agenda === 'actif' && /^v4\.[56](\.\d+)?$/.test(h.passerelle) && /^5\.(29\.12|30\.\d+)$/.test(h.couche) && h.acces === 'protege', info: JSON.stringify({ agenda: h.agenda, passerelle: h.passerelle, couche: h.couche }) };
   });
   await t('V2', "sans la cle d'acces, rien : ni session, ni agenda", async () => {
     const s = await appel('/api/session', {}, null);
@@ -253,7 +253,7 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
     ({ ok: q7.status === 429 && /LIMITE/.test(String(q7.motif)), info: 'apres repetition : ' + q7.status + ' ' + q7.motif }));
   await t('V22', "le texte de journal de la confirmation n'est JAMAIS declare comme une frappe (verification du code)", async () => {
     const src = require('fs').readFileSync(path.join(DIR, 'server.js'), 'utf8');
-    return { ok: /if \(!confirme\) s\.entree\.soumettre\(texte\);/.test(src) && (src.match(/s\.entree\.soumettre\(/g) || []).length === 1,
+    return { ok: /if \(!confirme\) s\.entree\.soumettre\(texte[,)]/.test(src) && (src.match(/s\.entree\.soumettre\(/g) || []).length === 1,
              info: 'soumettre x' + (src.match(/s\.entree\.soumettre\(/g) || []).length };
   });
 

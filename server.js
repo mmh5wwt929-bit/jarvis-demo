@@ -175,6 +175,8 @@ const { SessionGouvernee, creerSessionGouvernee, classeDe, SONDES_M, lancerSonde
 const { Vigilance } = require('./jarvis-vigilance.js');   /* [S10] */
 const M = require('./jarvis-memoire.js');                  /* [S12] */
 const AG = require('./jarvis-agenda.js');                   /* [S19] */
+const EC = require('./jarvis-ecriture.js');                 /* [S30] */
+const EL = require('./jarvis-elevation.js');                /* [S31] */
 /* Entier borne depuis l'environnement : une valeur absurde retombe au defaut. */
 const nombreEnv = (nom, defaut, min, max) => { const n = parseInt(process.env[nom], 10);
   return Number.isFinite(n) && n >= min && n <= max ? n : defaut; };
@@ -243,6 +245,27 @@ if (process.env.JARVIS_AGENDA_ICAL) {
     if (a.actif) AGENDA = a; else console.error('Agenda : JARVIS_AGENDA_ICAL ignoree (' + a.motif + ').');
   }
 }
+
+/* [S30] ECRITURE : l'agenda DEDIE « JARVIS », via un compte de service Google
+ * auquel la personne n'a partage que cet agenda. Instance protegee seulement. */
+let ECRITURE = null;
+if (process.env.JARVIS_GOOGLE_COMPTE || process.env.JARVIS_AGENDA_JARVIS) {
+  if (!CLE_ACCES) console.error('Ecriture : IGNOREE : instance publique (pas de JARVIS_CLE_ACCES).');
+  else {
+    const e = EC.creerEcriture({ compte: process.env.JARVIS_GOOGLE_COMPTE, agendaId: process.env.JARVIS_AGENDA_JARVIS, zone: FUSEAU });
+    if (e.actif) ECRITURE = e; else console.error('Ecriture : ignoree (' + e.motif + ').');
+  }
+}
+/* [S31] ELEVATION : Face ID (JARVIS_PASSKEYS) et/ou code de secours
+ * (JARVIS_CODE_SECOURS). Des qu'un des deux existe, toute action IRREVERSIBLE
+ * exige une elevation de moins de 15 min au moment de la confirmer. */
+const ELEVATION = CLE_ACCES ? EL.creerElevation({ passkeys: process.env.JARVIS_PASSKEYS, code: process.env.JARVIS_CODE_SECOURS,
+  rpId: process.env.JARVIS_RP_ID || undefined }) : null;
+if (process.env.JARVIS_CODE_SECOURS && (!ELEVATION || !ELEVATION.codeSecours))
+  console.error('Code de secours IGNORE : instance publique, ou moins de 6 caracteres / espace.');
+if (process.env.JARVIS_PASSKEYS && (!ELEVATION || !ELEVATION.faceId))
+  console.error('JARVIS_PASSKEYS IGNOREE : instance publique, ou aucune cle lisible.');
+const ELEVATION_EXIGEE = !!(ELEVATION && ELEVATION.actif);
 
 const LIMITES = {
   /* Comptes en APPELS ANTHROPIC, pas en messages : un message du chat en vaut
@@ -390,9 +413,9 @@ function creerSession() {
   const id = 's-' + crypto.randomBytes(16).toString('hex');
   /* [S16] la session et l'entree de confiance sont remises separement :
    * `entree` ne sert qu'aux deux routes ou la personne tape elle-meme. */
-  const { session: g, entree } = creerSessionGouvernee({ plafond: 100, puitsAncrage });
+  const { session: g, entree } = creerSessionGouvernee({ plafond: 100, puitsAncrage, exigerElevation: ELEVATION_EXIGEE });   /* [S31] */
   const s = { g, entree, vue: Date.now(), enAttente: new Map(),
-              historique: [], verdicts: [], vig: new Vigilance(), souvenirs: [] };   /* [S10] [S12] */
+              historique: [], verdicts: [], vig: new Vigilance(), souvenirs: [], creations: new Map(), propositions: new Map() };   /* [S10] [S12] [S30] */
   sessions.set(id, s);
   return { id, s };
 }
@@ -595,15 +618,24 @@ const ACTIONS_CONNUES = ['READ','LIST','SUMMARIZE','SEARCH','WRITE','CREATE','RE
 /* [S19] Les outils reels, declares au planificateur par la couche [O1] : des
  * constantes du serveur (et la date du jour), jamais un contenu lu. */
 function outilsDeclares() {
-  if (!AGENDA) return [];
+  if (!AGENDA && !ECRITURE) return [];
   const maintenant = new Date();
   const jour = new Intl.DateTimeFormat('fr-FR', { timeZone: FUSEAU, weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(maintenant);
   const iso = new Intl.DateTimeFormat('en-CA', { timeZone: FUSEAU, year: 'numeric', month: '2-digit', day: '2-digit' }).format(maintenant);
-  return ["action READ, resource AGENDA : lire l'agenda de la personne (lecture seule ; creer, modifier ou supprimer un evenement est impossible). "
+  const outils = [];
+  if (AGENDA) outils.push("action READ, resource AGENDA : lire l'agenda de la personne (lecture seule ; modifier ou supprimer un evenement est impossible). "
     + 'target = aujourdhui | demain | apres-demain | semaine | semaine-prochaine | AAAA-MM-JJ | AAAA-MM-JJ..AAAA-MM-JJ (31 jours au plus). '
     + "Aujourd'hui : " + jour + ' (' + iso + '), fuseau ' + FUSEAU + '. '
     + "A choisir pour toute question sur son emploi du temps, ses rendez-vous, ses entrainements ou ses disponibilites. "
-    + "Periode vague (« dans 2 mois », « en novembre », « le mois prochain ») : un intervalle AAAA-MM-JJ..AAAA-MM-JJ qui la couvre, jamais un seul jour."];
+    + "Periode vague (« dans 2 mois », « en novembre », « le mois prochain ») : un intervalle AAAA-MM-JJ..AAAA-MM-JJ qui la couvre, jamais un seul jour.");
+  /* [S30] l'outil d'ecriture : UN evenement, dans l'agenda dedie, sans invites */
+  if (ECRITURE) outils.push("action CREATE, resource AGENDA_JARVIS : creer UN evenement dans l'agenda dedie « JARVIS » de la personne "
+    + "(jamais d'invites, aucune notification ; elle confirmera sur une carte et pourra l'annuler). "
+    + 'target = AAAA-MM-JJTHH:MM|duree en minutes|titre court, par exemple 2026-09-25T18:30|90|Entrainement U18. Duree non dite : 60. '
+    + "Aujourd'hui : " + jour + ' (' + iso + '), fuseau ' + FUSEAU + '. '
+    + "A choisir quand la personne demande d'ajouter, creer, noter ou programmer un rendez-vous ou un evenement. "
+    + "Heure ou date absente : ne rien inventer, action AUCUNE. Modifier ou supprimer un evenement existant : impossible.");
+  return outils;
 }
 
 async function planifier(g, texte) {
@@ -728,9 +760,88 @@ async function lireAgenda(s, sessionId, texte, plan, avant) {
 }
 
 /* ==========================================================================
+ * [S30] CREER UN EVENEMENT — premiere action REELLE et REVERSIBLE
+ * ------------------------------------------------------------------------
+ *  1. la cible du modele est validee et canonisee (date, heure, duree,
+ *     titre nettoye) ; sinon rien ;
+ *  2. JAMAIS d'ecriture sans GESTE : une carte montre l'evenement exact, la
+ *     personne touche « Creer » (route /api/confirmer, capacite confirmer) ;
+ *  3. la couche autorise CREATE sur AGENDA_JARVIS (COMPENSABLE, compensation
+ *     declaree : supprimer l'evenement) ; le permis nait dans l'effet (T6) ;
+ *  4. Google repond : le resultat REEL est constate dans la couche (F1) ;
+ *  5. « Supprimer » : compensation en deux temps, verifiee (K2).
+ * Aucun appel au modele : la reponse est ecrite par le serveur, exacte.
+ * ======================================================================== */
+const ERREURS_ECRITURE = {
+  AGENDA_INACCESSIBLE: "l'agenda JARVIS n'est pas accessible (partage au compte de service, ou identifiant d'agenda, à vérifier)",
+  AUTH_GOOGLE_REFUSEE: "Google a refusé la clé du compte de service",
+  PLAFOND_JOURNALIER: 'le plafond de 20 créations par jour est atteint',
+  CONFLIT_IDENTIFIANT: "un autre événement porte déjà cet identifiant : rien n'a été écrasé",
+  GOOGLE_LIMITE: 'Google limite les requêtes en ce moment, réessaie plus tard',
+  DELAI_DEPASSE: "Google n'a pas répondu à temps", DNS_INTROUVABLE: 'Google est injoignable (DNS)',
+  CERTIFICAT_INVALIDE: 'le certificat de Google est invalide : refusé par sécurité', RESEAU: 'le réseau a échoué',
+  REPONSE_INCOMPLETE: 'la réponse de Google est arrivée incomplète', TOUJOURS_PRESENT: "l'événement est toujours là après la suppression",
+  PAS_UN_EVENEMENT_JARVIS: "cet événement ne porte pas la marque de cette transaction : je n'y touche pas"
+};
+const erreurEcriture = (code) => ERREURS_ECRITURE[code] || 'échec (' + propre(code, 30) + ')';
+
+async function creerEvenement(s, sessionId, texte, plan, avant) {
+  const g = s.g;
+  const base = (o) => ({ ...o, plan, outil: 'agenda-jarvis', audit: g.auditDepuis(avant), ...etatDe(s) });
+  const dire = (reponse, o) => { memoriser(s, sessionId, texte, reponse); return base({ reponse, ...o }); };
+  if (!ECRITURE) return dire(CLE_ACCES
+    ? "Aucun agenda JARVIS n'est relié : ajoute JARVIS_GOOGLE_COMPTE et JARVIS_AGENDA_JARVIS dans Render (voir le guide)."
+    : "C'est la démo publique : elle ne crée aucun événement réel.", { decide: 'SANS_OBJET', etape: 'OUTIL', motif: 'ECRITURE_ABSENTE' });
+  const v = ECRITURE.validerCible(String(plan.target || ''));
+  if (!v || (plan.confirme && v.cle !== plan.target))
+    return dire("Pour créer l'événement, il me faut une date, une heure et un titre, entre hier et dans un an "
+      + "(par exemple « ajoute entraînement U18 jeudi à 18h30 pendant 1h30 »).", { decide: 'SANS_OBJET', etape: 'OUTIL', motif: 'CIBLE_INVALIDE' });
+  if (!plan.confirme) {
+    /* [S30] la carte montree est enregistree : seule une carte PROPOSEE ici
+     * peut etre confirmee, une fois, dans les 10 minutes */
+    s.propositions.set(v.cle, { ts: Date.now(), etat: 'PROPOSEE' });
+    if (s.propositions.size > 20) s.propositions.delete(s.propositions.keys().next().value);
+    noterVerdict(s, { decide: 'EN_ATTENTE', action: 'CREATE', target: v.cle, motif: 'CONFIRMATION_REQUISE' });
+    return dire("Je te propose de créer dans l'agenda JARVIS : " + v.lisible + ". Vérifie la date et l'heure, puis touche « Créer ».",
+      { decide: 'CONFIRMATION_REQUISE', etape: 'G1_GESTE', motif: null, classe: 'COMPENSABLE',
+        aConfirmer: { action: 'CREATE', resource: 'AGENDA_JARVIS', cible: v.cle, lisible: v.lisible } });
+  }
+  const demande = g.demander({ action: 'CREATE', resource: 'AGENDA_JARVIS', target: v.cle },
+    { manuel: true, compensation: "supprimer l'événement créé dans l'agenda JARVIS" });
+  const sortie = (reponse, o) => dire(reponse, { ...o, note: demande.note, classe: demande.classe });
+  if (demande.decide !== 'AUTORISE') {
+    noterVerdict(s, { decide: 'REFUSE', action: 'CREATE', target: v.cle, motif: demande.motif });
+    return sortie('Le noyau a refusé la création (' + propre(demande.motif, 40) + ") : rien n'a été créé.",
+      { decide: 'REFUSE', etape: demande.etape, motif: demande.motif });
+  }
+  let permis = null;
+  const exe = g.executer(demande, (action) => { permis = ECRITURE.permis(action); return { creation: 'autorisee' }; });
+  if (exe.etat !== 'EXECUTE' || !permis) {
+    const motif = exe.motif || 'PERMIS_REFUSE';
+    noterVerdict(s, { decide: 'REFUSE', action: 'CREATE', target: v.cle, motif });
+    return sortie('Le noyau a bloqué la création (' + propre(motif, 40) + ") : rien n'a été créé.", { decide: 'REFUSE', etape: 'NOYAU_EXECUTE', motif });
+  }
+  const cree = await ECRITURE.creer(permis);
+  g.constaterEffet(exe.transactionId, exe.jetonEffet, cree);   /* [F1] le resultat REEL entre dans la trace */
+  const trace = g.trace(exe.transactionId);
+  if (!cree.ok) {
+    noterVerdict(s, { decide: 'REFUSE', action: 'CREATE', target: v.cle, motif: cree.code });
+    return sortie("Le noyau avait autorisé la création, mais elle n'a pas abouti : " + erreurEcriture(cree.code) + ". Rien n'a été créé.",
+      { decide: 'AUTORISE', etape: 'OUTIL_ECHEC', motif: cree.code, transactionId: exe.transactionId, trace });
+  }
+  s.creations.set(exe.transactionId, { lisible: v.lisible });
+  if (s.creations.size > 50) s.creations.delete(s.creations.keys().next().value);
+  noterVerdict(s, { decide: 'AUTORISE', action: 'CREATE', target: v.cle, motif: null });
+  return sortie((cree.code === 'DEJA_CREE' ? "Cet événement existait déjà pour cette transaction : aucun doublon. " : "C'est fait : ")
+    + v.lisible + " est dans ton agenda JARVIS. « Supprimer » l'annule.",
+    { decide: 'AUTORISE', etape: 'COMPLET', motif: null, transactionId: exe.transactionId, trace,
+      evenement: { lisible: v.lisible, transactionId: exe.transactionId } });
+}
+
+/* ==========================================================================
  * LE CŒUR — un message, gouverne par la couche
  * ======================================================================== */
-async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, confirme) {
+async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, confirme, o = {}) {
   const s = sessionDe(sessionId);
   if (!s) return { decide: 'REFUSE', etape: 'SESSION', motif: 'SESSION_INCONNUE', erreur: 'SESSION_INCONNUE' };
   const g = s.g;
@@ -741,12 +852,21 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
    * seule frappe (la cible) a deja ete declaree par entree.reformuler(). Le
    * texte de journal fabrique ici par le serveur ne doit jamais passer pour
    * une demande tapee. */
-  if (!confirme) s.entree.soumettre(texte);
+  /* [S32] la voix garde son canal : la couche ne la traite pas comme une frappe */
+  const voix = o.canal === 'voix';
+  if (!confirme) s.entree.soumettre(texte, { canal: voix ? 'voix' : 'clavier' });
 
   /* [S12] "retiens que ..." : un souvenir, depuis les seuls mots de la personne
    * (G6.1), ecrit par une action WRITE sur MEMOIRE que le noyau arbitre (G6.2).
    * Aucun appel au modele : il ne peut ni declencher ni reformuler un souvenir. */
   const souvenir = (actionForcee || confirme) ? null : M.extraireSouvenir(texte);
+  /* [S32] un souvenir voyage avec chaque message : il ne s'ecrit pas a la voix
+   * (un son peut venir d'une video ou d'un voisin), seulement au clavier. */
+  if (souvenir && voix) {
+    const reponse = "Pour que je retienne quelque chose, tape-le au clavier : à la voix, je ne peux pas être sûr que c'est toi qui parles.";
+    memoriser(s, sessionId, texte, reponse);
+    return { decide: 'SANS_OBJET', etape: 'MEMOIRE', motif: 'VOIX_NON_ADMISE', reponse, plan: { action: 'AUCUNE' }, ...etatDe(s) };
+  }
   if (souvenir && souvenir.secret) {
     const reponse = "Je ne retiens pas ça : ça ressemble à un mot de passe, un code ou un numéro bancaire. "
       + "Un souvenir voyage avec chacun de tes messages ; ce genre d'information doit rester dans un gestionnaire de mots de passe.";
@@ -787,7 +907,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
   /* L'assistant decide. Le mode manuel reste possible pour les demonstrations. */
   const plan = confirme
     ? { action: confirme.action, resource: confirme.resource, target: confirme.target,
-        pourquoi: 'cible retapee au clavier par la personne', manuel: true, confirme: true }   /* [S20] */
+        pourquoi: confirme.pourquoi || 'cible retapee au clavier par la personne', manuel: true, confirme: true }   /* [S20] */
     : actionForcee
     ? { action: actionForcee, resource: 'LOCAL', target: cibleForcee || 'CONVERSATION', pourquoi: 'action imposee', manuel: true }
     : await planifier(g, texte);
@@ -814,8 +934,19 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
   }
 
   /* [S19] Lecture de l'agenda : le vrai outil, par le vrai circuit gouverne. */
-  if (plan.action === 'READ' && RESSOURCES_AGENDA.has(String(plan.resource || '').toUpperCase()))
-    return lireAgenda(s, sessionId, texte, plan, avant);
+  /* [S30] L'agenda : lire (READ) ou creer UN evenement dans l'agenda JARVIS
+   * (CREATE). Toute autre action sur un agenda est refusee ici : avant, un
+   * « CREATE AGENDA » partait dans le circuit simule et repondait « fait ». */
+  const ressource = String(plan.resource || '').toUpperCase();
+  if (RESSOURCES_AGENDA.has(ressource) || ressource === 'AGENDA_JARVIS') {
+    if (plan.action === 'READ') return lireAgenda(s, sessionId, texte, plan, avant);
+    if (plan.action === 'CREATE') return creerEvenement(s, sessionId, texte, { ...plan, resource: 'AGENDA_JARVIS' }, avant);
+    const reponse = "Je peux lire ton agenda et créer un événement dans l'agenda JARVIS ; modifier ou supprimer un événement existant, non. "
+      + "Un événement que j'ai créé s'annule avec son bouton « Supprimer ».";
+    memoriser(s, sessionId, texte, reponse);
+    return { decide: 'SANS_OBJET', etape: 'OUTIL', motif: 'ACTION_AGENDA_NON_PRISE_EN_CHARGE', reponse, plan,
+      audit: g.auditDepuis(avant), ...etatDe(s) };
+  }
 
   const acte = plan.action;
 
@@ -1039,8 +1170,9 @@ const serveur = http.createServer((req, res) => {
   const inconnue = () => json(401, { erreur: 'SESSION_INCONNUE' });
 
   if (u.pathname === '/health')
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: '5.29.12', vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.5.6',
-      agenda: AGENDA ? 'actif' : 'inactif',
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.6.0',
+      agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : 'inactif',   /* [S30] */
+      elevation: !ELEVATION || !ELEVATION.actif ? 'inactif' : [ELEVATION.faceId ? 'faceid' : null, ELEVATION.codeSecours ? 'code' : null].filter(Boolean).join('+'),
       acces: CLE_ACCES ? 'protege' : 'public', gouvernance: 'active', ip: sourceIp(req),
       /* [S17] l'adresse que le serveur attribue a CELUI qui demande (la sienne,
        * a lui seul) : permet de verifier en ligne qu'on ne peut pas l'inventer */
@@ -1162,6 +1294,8 @@ const serveur = http.createServer((req, res) => {
       if (!d.ok) return json(429, { etat: 'REFUSE', motif: d.motif, reessayerDans: d.reessayerDans });
       const att = s.enAttente.get(b.jeton);
       const r = s.g.finaliser(b.jeton);
+      if (r.etat === 'ELEVATION_REQUISE')   /* [S31] rien n'est consomme : Face ID ou code, puis on reconfirme */
+        return json(200, { ...r, moyens: { faceId: !!(ELEVATION && ELEVATION.faceId), code: !!(ELEVATION && ELEVATION.codeSecours) }, ...etatDe(s) });
       if (r.etat !== 'EXECUTE') return json(200, { ...r, ...etatDe(s) });
       /* [S6] la confirmation est un vrai geste de la personne : elle entre
        * dans l'historique comme son message, et la reponse voit le contexte. */
@@ -1178,6 +1312,84 @@ const serveur = http.createServer((req, res) => {
       return json(200, { etat: 'EXECUTE', reponse: rep.ok ? rep.texte : null, motif: rep.ok ? null : rep.erreur,
         trace: s.g.trace(String(b.jeton)), ...etatDe(s) });   /* [S29] */
     });
+
+  /* [S30] « Creer » touche sur la carte : le GESTE qui confirme l'evenement
+   * exact. La cible doit etre deja canonique : la carte ne renvoie que ce que
+   * le serveur a lui-meme ecrit. */
+  if (u.pathname === '/api/confirmer' && req.method === 'POST')
+    return lire(req, res, async (b) => {
+      const s = sessionDe(b.sessionId);
+      if (!s) return inconnue();
+      if (b.action !== 'CREATE' || b.resource !== 'AGENDA_JARVIS' || typeof b.cible !== 'string') return json(400, { erreur: 'CONFIRMATION_NON_PRISE_EN_CHARGE' });
+      if (!ECRITURE) return json(400, { erreur: 'ECRITURE_ABSENTE' });
+      const v = ECRITURE.validerCible(b.cible);
+      if (!v || v.cle !== b.cible) return json(400, { erreur: 'CIBLE_INVALIDE' });
+      /* une carte proposee par le serveur, pas encore confirmee, de moins de
+       * 10 min. Double toucher, ou confirmation d'une carte jamais montree :
+       * refuses (sinon deux transactions, deux evenements). */
+      const pr = s.propositions.get(v.cle);
+      if (!pr || pr.etat !== 'PROPOSEE' || Date.now() - pr.ts > 10 * 60 * 1000)
+        return json(409, { erreur: pr && pr.etat !== 'PROPOSEE' ? 'DEJA_CONFIRMEE' : 'CARTE_INCONNUE_OU_EXPIREE' });
+      pr.etat = 'EN_COURS';   /* pose AVANT tout await : deux requetes simultanees n'en font qu'une */
+      const c = s.entree.confirmer('CREATE', v.cle);
+      if (!c.ok) { pr.etat = 'PROPOSEE'; return json(400, { erreur: c.motif }); }
+      const decision = await messageGouverne(String(b.sessionId), '(création confirmée : ' + propre(v.lisible, 150) + ')', null, null,
+        { action: 'CREATE', resource: 'AGENDA_JARVIS', target: v.cle, pourquoi: 'evenement confirme par un geste sur la carte' });
+      pr.etat = decision && decision.etape === 'COMPLET' ? 'CONFIRMEE' : 'PROPOSEE';   /* echec : la meme carte reste confirmable */
+      if (pr.etat === 'PROPOSEE') pr.ts = Date.now();
+      return json(200, { confirme: true, decision, ...etatDe(s) });
+    });
+
+  /* [S30] « Supprimer » : la compensation, en deux temps et verifiee (K2).
+   * Seulement pour un evenement cree dans CETTE session. */
+  if (u.pathname === '/api/compenser' && req.method === 'POST')
+    return lire(req, res, async (b) => {
+      const id = String(b.sessionId || '');
+      const s = sessionDe(id);
+      if (!s) return inconnue();
+      const tx = String(b.transactionId || '').slice(0, 60);
+      const c0 = s.creations.get(tx);
+      if (!c0 || !ECRITURE) return json(404, { erreur: 'CREATION_INTROUVABLE' });
+      const d = s.g.compensationDebut(tx);
+      if (d.etat !== 'COMPENSATING') return json(200, { etat: d.etat, motif: d.motif || null, ...etatDe(s) });
+      const r = await ECRITURE.supprimer(d.cible);
+      const f = s.g.compensationFin(tx, d.jeton, { verifie: r.verifie === true, resultat: { code: r.code } });
+      const message = f.etat === 'COMPENSE' ? 'Supprimé : ' + c0.lisible + " n'est plus dans l'agenda JARVIS (disparition vérifiée)."
+        : "La suppression n'est pas vérifiée : " + erreurEcriture(r.code) + '. Tu peux réessayer.';
+      memoriser(s, id, "Supprime l'événement « " + c0.lisible + ' ».', message);
+      noterVerdict(s, { decide: f.etat === 'COMPENSE' ? 'AUTORISE' : 'REFUSE', action: 'COMPENSER', target: c0.lisible, motif: f.etat === 'COMPENSE' ? null : r.code });
+      return json(200, { etat: f.etat, code: r.code, message, trace: s.g.trace(tx), ...etatDe(s) });
+    });
+
+  /* [S31] ELEVATION — Face ID (cles d'acces) ou code de secours. Le serveur
+   * verifie, la couche enregistre (capacite elever) : 15 min, cette session. */
+  if (u.pathname.startsWith('/api/elevation') && req.method === 'POST')
+    return lire(req, res, (b) => {
+      const s = sessionDe(b.sessionId);
+      if (!s) return inconnue();
+      if (!ELEVATION) return json(400, { erreur: 'ELEVATION_INDISPONIBLE' });
+      const hote = String(req.headers.host || '').slice(0, 260), ip = ipDe(req), sidE = String(b.sessionId);
+      const elever = (r) => { if (!r.ok) return json(200, { ok: false, motif: r.motif, ...etatDe(s) });
+        const e = s.entree.elever(ELEVATION.dureeMs, r.mode); return json(200, { ok: e.ok, mode: e.mode, jusqua: e.jusqua, ...etatDe(s) }); };
+      if (u.pathname === '/api/elevation/defi') {
+        const r = b.type === 'creation' ? ELEVATION.defiCreation(sidE, hote) : ELEVATION.defiAssertion(sidE, hote, ip);
+        return json(r.ok ? 200 : 400, r);
+      }
+      if (u.pathname === '/api/elevation/faceid') return elever(ELEVATION.verifierAssertion(sidE, hote, ip, b.reponse || {}));
+      if (u.pathname === '/api/elevation/code') return elever(ELEVATION.verifierCode(sidE, ip, b.code));
+      if (u.pathname === '/api/elevation/enroler') {
+        const r = ELEVATION.verifierCreation(sidE, hote, b.reponse || {});
+        return json(r.ok ? 200 : 400, r.ok ? { ok: true, identifiant: r.identifiant,
+          consigne: 'Ajoute cette valeur a la variable Render JARVIS_PASSKEYS (separees par des virgules), puis redemarre.' } : r);
+      }
+      return json(404, { erreur: 'INTROUVABLE' });
+    });
+  if (u.pathname === '/api/elevation' && req.method === 'GET') {
+    const s = sessionDe(sid());
+    if (!s) return inconnue();
+    return json(200, { disponible: !!ELEVATION, faceId: !!(ELEVATION && ELEVATION.faceId), code: !!(ELEVATION && ELEVATION.codeSecours),
+      exigee: ELEVATION_EXIGEE, ...s.g.etat().elevation });
+  }
 
   /* [S29] TRACABILITE — une transaction de CETTE session, en lecture seule :
    * frappe -> intention -> provenance -> plan -> decision -> confirmation ->
@@ -1235,7 +1447,7 @@ const serveur = http.createServer((req, res) => {
       const d = poids ? debitAutorise(ipDe(req), poids) : actionAutorisee(ipDe(req));   /* planification + reponse */
       if (!d.ok) return json(429, { decide: 'REFUSE', etape: 'DEBIT', motif: d.motif, reessayerDans: d.reessayerDans });
       return json(200, await messageGouverne(String(b.sessionId),
-        b.message.slice(0, LIMITES.maxCaracteresPrompt), b.action, b.cible));
+        b.message.slice(0, LIMITES.maxCaracteresPrompt), b.action, b.cible, undefined, { canal: b.canal === 'voix' ? 'voix' : 'clavier' }));
     });
 
   res.writeHead(404); res.end('Introuvable');
@@ -1251,5 +1463,7 @@ serveur.listen(PORT, () => {
   resultatsTests();   /* [S14] les 16 suites, une fois, au demarrage */
   console.log(CLE_ACCES ? 'Acces : PROTEGE par cle (instance personnelle)' : 'Acces : public (demo)');
   console.log(AGENDA ? 'Agenda : ACTIF (lecture seule, ' + FUSEAU + ')' : 'Agenda : inactif');
+  console.log(ECRITURE ? 'Ecriture : ACTIVE (agenda JARVIS dedie, sans invites)' : 'Ecriture : inactive');
+  console.log(ELEVATION_EXIGEE ? 'Elevation : EXIGEE pour l\'irreversible (' + [ELEVATION.faceId && 'Face ID', ELEVATION.codeSecours && 'code'].filter(Boolean).join(' + ') + ', 15 min)' : 'Elevation : non configuree');
   console.log('Sessions emises par le serveur (SESSION_INCONNUE sinon)');
 });

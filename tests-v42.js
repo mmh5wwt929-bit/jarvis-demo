@@ -181,7 +181,7 @@ async function serveur() {
 
   /* ---- etat annonce ---- */
   const h = await get('/health', '10.0.7.1');
-  await t('S14.10', '/health : v4.2 ou plus, couche 5.29.5 ou plus, et quel en-tete identifie le visiteur', () => ({ ok: /^v4\.[2-9](\.[0-9]+)?$/.test(h.passerelle) && /^5\.29\.([5-9]|1[0-9])$/.test(h.couche) && typeof h.ip === 'string', info: h.passerelle + ' ' + h.couche + ' ip=' + h.ip }));
+  await t('S14.10', '/health : v4.2 ou plus, couche 5.29.5 ou plus, et quel en-tete identifie le visiteur', () => ({ ok: /^v4\.[2-9](\.[0-9]+)?$/.test(h.passerelle) && /^5\.(29\.([5-9]|1[0-9])|3[0-9]\.\d+)$/.test(h.couche) && typeof h.ip === 'string', info: h.passerelle + ' ' + h.couche + ' ip=' + h.ip }));
   sid = await session('10.0.7.1');
   const i = await get('/api/integrite?sessionId=' + sid, '10.0.7.1');
   await t('S14.11', '/api/integrite : INTERNE_SEULEMENT, externe faux, ancres dites « meme serveur »', () => ({ ok: i.statut === 'INTERNE_SEULEMENT' && i.externe === false && i.coherent === true && typeof i.ancresMemeServeur === 'number' && i.ancresHorsProcessus === undefined, info: i.statut + ' externe=' + i.externe }));

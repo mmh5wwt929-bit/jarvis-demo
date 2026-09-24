@@ -119,6 +119,19 @@ button.lien{background:none;border:none;color:var(--sourd);font-size:12px;
   border:1px solid #3d3417;border-radius:7px}
 .retenue p{font-size:13px;color:#e3b341;margin-bottom:9px}
 .retenue .rang{display:flex;gap:7px}
+/* [S30-S32] carte de creation, Face ID, micro */
+.creation .evenement{margin:8px 0 4px;font-size:15px;font-weight:600;color:var(--texte,#e6edf3)}
+.creation .rang{display:flex;gap:7px;margin-top:10px}
+.elevation{margin-top:8px;padding:11px 13px;background:#101a2b;border:1px solid #1f3a5f;border-radius:8px}
+.elevation p{font-size:13px;margin-bottom:8px}
+.elevation .rang{display:flex;gap:7px;flex-wrap:wrap}
+.elevation input.code{width:9em;letter-spacing:.2em}
+.elevation .etat-elev{margin:8px 0 0;color:#e3b341}
+#micro{min-width:44px}
+#micro.ecoute{background:#5a1d1d;border-color:#f85149;color:#fff}
+#blocFaceId .rang{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+#blocFaceId textarea{width:100%;margin-top:8px;font-size:12px}
+#blocFaceId p{font-size:13px}
 
 /* ---------- SAISIE ---------- */
 .saisie{border-top:1px solid var(--regle);background:var(--ardoise);padding:12px 20px;flex-shrink:0}
@@ -241,7 +254,7 @@ textarea,input:not([type]),input[type=text]{-webkit-appearance:none;appearance:n
 
 <header>
   <div class="bandeau">
-    <div class="marque">JARVIS <span>noyau 5.28.3 · couche 5.29.12</span></div>
+    <div class="marque">JARVIS <span>noyau 5.28.3 · couche 5.30.0</span></div>
     <div class="mesures">
       <div class="mesure">autorité dépensée <b id="mLedger" class="mono">0 / 100</b></div>
       <div class="mesure">chaîne d'audit <b id="mAudit" class="mono">—</b></div>
@@ -275,6 +288,7 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
     <div class="saisie">
       <div class="rang">
         <textarea id="msg" rows="1" placeholder="Pose ta question, ou « retiens que … »"></textarea>
+        <button id="micro" type="button" hidden aria-label="Dicter (toucher pour parler, toucher pour arrêter)">🎤</button>
         <button class="primaire" id="envoyer">Envoyer</button>
       </div>
       <div class="rang" id="rangManuel" hidden>
@@ -298,6 +312,16 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
       <h2>Ce que JARVIS retient de toi <span class="mono" id="nbSouvenirs"></span></h2>
       <div class="registre" id="souvenirs"></div>
       <div class="actions-lecture"><button class="danger" id="toutOublier" hidden>tout effacer</button></div>
+    </div>
+    <div class="bloc" id="blocFaceId" hidden>
+      <h2>Face ID <span class="mono" id="etatFaceId"></span></h2>
+      <p>Une action irréversible se confirme avec Face ID (ou le code de secours) : valable 15 min, dans cette session. Face ID prouve que c'est toi ; il ne remplace jamais la vérification de ce que tu as demandé.</p>
+      <div class="rang"><button id="fidPreparer" type="button">Enregistrer Face ID sur cet appareil</button>
+        <button id="fidCreer" class="primaire" type="button" hidden>Créer la clé Face ID</button></div>
+      <p id="fidMessage"></p>
+      <div id="fidResultat" hidden><p>Copie cette valeur dans Render → variable <b>JARVIS_PASSKEYS</b> (après une virgule s'il y en a déjà une), puis redémarre le service. C'est une clé publique : elle ne permet rien seule.</p>
+        <textarea id="fidValeur" rows="3" readonly></textarea>
+        <div class="rang"><button id="fidCopier" type="button">Copier</button></div></div>
     </div>
 
     <div class="bloc">
@@ -502,6 +526,11 @@ function majEtat(d) {
     $('mCouv').style.color = c.promptAssembleParLaCouche ? 'var(--sur)' : 'var(--sourd)';
   }
   if (d.audit && d.audit.length) ajouterMaillons(d.audit);
+  if (d.elevation && $('etatFaceId')) {   /* [S31] */
+    const e = d.elevation;
+    $('etatFaceId').textContent = e.active ? 'actif · ' + Math.max(1, Math.round((e.jusqua - Date.now()) / 60000)) + ' min'
+      : e.exigee ? 'demandé pour l\'irréversible' : '';
+  }
 }
 
 function ajouterMaillons(entrees) {
@@ -553,13 +582,18 @@ function md(texte) {
 /* [S29] La trace en une ligne, construite depuis les etats (jamais depuis le
  * texte du modele), affichee en texte echappe. */
 function resumeTrace(t) {
-  const i = t.intention || {}, c = t.confirmation || {};
+  const i = t.intention || {}, c = t.confirmation || {}, e = t.effet || {};
   const source = i.nature === 'FRAPPE' ? 'ta frappe « ' + i.frappe + ' »'
-    : i.nature === 'CIBLE_RETAPEE' ? 'la cible retapée par toi « ' + i.frappe + ' »' : 'aucune frappe requise';
+    : i.nature === 'VOIX' ? 'ta voix « ' + i.frappe + ' »'
+    : i.nature === 'CIBLE_RETAPEE' ? 'la cible retapée par toi « ' + i.frappe + ' »'
+    : i.nature === 'CONFIRMATION_GESTE' ? 'ton toucher sur « Créer »' : 'aucune frappe requise';
+  const elev = c.elevation === 'FACE_ID' ? ' + Face ID' : c.elevation === 'CODE' ? ' + code de secours' : '';
   return 'Trace : ' + source + (i.reverifiee === true ? ' (revérifiée)' : i.reverifiee === false ? ' (NON revérifiée)' : '')
     + ' → autorisé (' + String((t.plan || {}).classe || '').toLowerCase() + ')'
-    + (c.mode === 'CLIC_APRES_FENETRE' ? ' → retenu 10 s → confirmé par ton clic' : c.mode === 'SANS_FENETRE' ? ' → exécuté sans fenêtre' : '')
-    + ' → ' + String((t.effet || {}).etat || '').toLowerCase() + '.';
+    + (c.mode === 'CLIC_APRES_FENETRE' ? ' → retenu 10 s → confirmé par ton clic' + elev : c.mode === 'SANS_FENETRE' ? ' → exécuté sans fenêtre' : '')
+    + (e.reel ? (e.reel.ok ? ' → effet réel confirmé' : ' → effet réel ÉCHOUÉ (' + e.reel.code + ')') : '')
+    + (e.compense ? ' → annulé (disparition vérifiée)' : '')
+    + ' → ' + String(e.etat || '').toLowerCase() + '.';
 }
 function tour(qui, texte, moi, riche) {
   const d = document.createElement('div');
@@ -576,6 +610,34 @@ function rendreDecision(d) {
   if (d.decide === 'SANS_OBJET') {
     if (d.reponse) tour(d.etape === 'MEMOIRE' ? 'JARVIS' : 'Claude', d.reponse, false, d.etape !== 'MEMOIRE');
     else tour('JARVIS', "Pas de réponse : " + (d.plan && d.plan.erreur || 'appel indisponible'), false);
+    return;
+  }
+  /* [S30] Creer un evenement : la carte montre l'evenement EXACT ; rien n'est
+   * ecrit avant le toucher sur « Creer ». */
+  if (d.decide === 'CONFIRMATION_REQUISE' && d.aConfirmer) {
+    const a = d.aConfirmer;
+    const hC = '<div class="decision attente creation"><div class="plan">Créer dans ton agenda JARVIS</div>'
+      + '<div class="evenement">' + esc(a.lisible) + '</div>'
+      + '<div class="verdict"><b>À confirmer</b><span class="code">annulable ensuite</span></div>'
+      + "<div class=\"signaux\"><div class=\"signal info\"><i>info</i><span>Aucun invité, aucune notification. Vérifie la date et l'heure : rien n'est écrit avant ton toucher.</span></div></div>"
+      + '<div class="rang"><button class="danger" data-ignorer="1">Ne pas créer</button>'
+      + '<button class="primaire" data-creer="' + esc(a.cible) + '">Créer</button></div></div>';
+    const bC = tour('JARVIS', '', false);
+    bC.querySelector('.quoi').outerHTML = hC;
+    $('fil').scrollTop = $('fil').scrollHeight;
+    return;
+  }
+  if (d.outil === 'agenda-jarvis') {
+    if (d.decide === 'AUTORISE' && d.etape === 'COMPLET' && d.evenement) {
+      const hE = '<div class="decision autorise creation"><div class="plan">Créé dans ton agenda JARVIS</div>'
+        + '<div class="evenement">' + esc(d.evenement.lisible) + '</div>'
+        + '<div class="verdict"><b>Fait</b><span class="code">confirmé par Google</span></div>'
+        + '<div class="rang"><button class="danger" data-compenser="' + esc(d.evenement.transactionId) + '">Supprimer</button></div></div>';
+      const bE = tour('JARVIS', '', false);
+      bE.querySelector('.quoi').outerHTML = hE;
+    } else if (d.reponse) tour('JARVIS', d.reponse, false);
+    if (d.trace) tour('JARVIS', resumeTrace(d.trace), false);
+    $('fil').scrollTop = $('fil').scrollHeight;
     return;
   }
   /* [S21] Lecture de l'agenda autorisee : une carte sobre et EXACTE. La note
@@ -719,13 +781,116 @@ function limiteAtteinte(d) {
 }
 
 /* ---------- gestes ---------- */
+/* [S31] confirmer une action retenue ; si le noyau exige Face ID, le proposer */
+async function finaliserJeton(jeton) {
+  const r = await api('/api/finaliser', { jeton });
+  if (limiteAtteinte(r)) return;
+  majEtat(r);
+  if (r.etat === 'ELEVATION_REQUISE') return demanderElevation(jeton, r.moyens || {});
+  tour('JARVIS', r.etat === 'EXECUTE' ? 'Envoyé.' : 'Pas encore : ' + (r.etat === 'TROP_TOT' ? 'la fenêtre court toujours.' : r.etat), false);
+  if (r.etat === 'EXECUTE' && r.trace) tour('JARVIS', resumeTrace(r.trace), false);   /* [S29] */
+  if (r.reponse) tour('Claude', r.reponse, false);
+}
+async function demanderElevation(jeton, moyens) {
+  const avecFaceId = moyens.faceId && FaceId.dispo();
+  const bloc = tour('JARVIS', '', false);
+  let h = '<div class="elevation" data-jeton="' + esc(jeton) + '"><p>Action irréversible : confirme que c\'est bien toi (valable 15 min).</p><div class="rang">';
+  if (avecFaceId) h += '<button class="primaire" data-faceid="1" disabled>Face ID</button>';
+  if (moyens.code) h += '<input class="code" type="password" inputmode="numeric" autocomplete="off" placeholder="code de secours" aria-label="Code de secours"><button data-code="1">Valider le code</button>';
+  if (!avecFaceId && !moyens.code) h += '<span>Aucun moyen disponible sur cet appareil.</span>';
+  h += '</div><p class="etat-elev"></p></div>';
+  bloc.querySelector('.quoi').outerHTML = h;
+  const boite = $('fil').lastElementChild.querySelector('.elevation');
+  if (avecFaceId) await FaceId.preparer(boite);
+  $('fil').scrollTop = $('fil').scrollHeight;
+}
+
+/* [S32] VOIX : toucher pour parler, toucher pour arreter ; une phrase a la
+ * fois, jamais d'ecoute permanente. Le texte arrive dans le champ : on relit,
+ * puis « Envoyer ». */
+const Voix = (() => {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  let rec = null, ecoute = false, dicte = false;
+  function init() {
+    if (!SR) return;
+    $('micro').hidden = false;
+    $('msg').addEventListener('input', () => { if (!$('msg').value.trim()) dicte = false; });
+  }
+  function arreter() { if (ecoute && rec) { try { rec.stop(); } catch (e) {} } }
+  function basculer() {
+    if (!SR) return;
+    if (ecoute) return arreter();
+    rec = new SR(); rec.lang = 'fr-FR'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+    const base = $('msg').value.trim() ? $('msg').value.trim() + ' ' : '';
+    rec.onresult = (e) => { let x = ''; for (const r of e.results) x += r[0].transcript; $('msg').value = base + x; dicte = true; };
+    rec.onend = () => { ecoute = false; $('micro').classList.remove('ecoute'); $('micro').textContent = '🎤'; };
+    rec.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed')
+      tour('JARVIS', 'Micro refusé : autorise-le pour ce site (Réglages → Safari → Micro), ou utilise la dictée du clavier.', false); };
+    try { rec.start(); ecoute = true; $('micro').classList.add('ecoute'); $('micro').textContent = '■'; } catch (e) { ecoute = false; }
+  }
+  return { init, basculer, arreter, dicte: () => dicte, oublier: () => { dicte = false; } };
+})();
+
+/* [S31] FACE ID (cles d'acces). La cle privee ne quitte jamais l'appareil. */
+const FaceId = (() => {
+  const dispo = () => !!(window.PublicKeyCredential && navigator.credentials);
+  const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const octets = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), c => c.charCodeAt(0));
+  async function preparer(boite) {
+    const r = await api('/api/elevation/defi', { type: 'assertion' });
+    const bouton = boite.querySelector('[data-faceid]');
+    if (r && r.ok) { boite._options = r.options; boite._depuis = Date.now(); if (bouton) bouton.disabled = false; }
+    else { boite._options = null; if (bouton) bouton.disabled = true;
+      boite.querySelector('.etat-elev').textContent = r && r.motif === 'TROP_D_ECHECS' ? "Trop d'échecs : attends 15 min." : 'Face ID indisponible.'; }
+  }
+  function obtenir(o) {
+    return navigator.credentials.get({ publicKey: { challenge: octets(o.challenge), rpId: o.rpId, timeout: o.timeout, userVerification: 'required',
+      allowCredentials: o.allowCredentials.map(c => ({ type: 'public-key', id: octets(c.id) })) } });
+  }
+  function envoyer(cred) {
+    const x = cred.response;
+    return api('/api/elevation/faceid', { reponse: { id: cred.id, clientDataJSON: b64(x.clientDataJSON),
+      authenticatorData: b64(x.authenticatorData), signature: b64(x.signature) } });
+  }
+  let optionsEnr = null;
+  async function preparerEnregistrement() {
+    if (!dispo()) { $('fidMessage').textContent = "Ce navigateur ne gère pas les clés d'accès."; return; }
+    const r = await api('/api/elevation/defi', { type: 'creation' });
+    if (!r || !r.ok) { $('fidMessage').textContent = 'Impossible pour le moment.'; return; }
+    optionsEnr = r.options; $('fidCreer').hidden = false;
+    $('fidMessage').textContent = 'Touche « Créer la clé Face ID » (dans les 2 minutes).';
+  }
+  function enregistrer() {
+    const o = optionsEnr; optionsEnr = null;
+    if (!o) return;
+    $('fidCreer').hidden = true;
+    navigator.credentials.create({ publicKey: { challenge: octets(o.challenge), rp: o.rp,
+      user: { id: octets(o.user.id), name: o.user.name, displayName: o.user.displayName },
+      pubKeyCredParams: o.pubKeyCredParams, timeout: o.timeout, attestation: o.attestation,
+      authenticatorSelection: o.authenticatorSelection,
+      excludeCredentials: (o.excludeCredentials || []).map(c => ({ type: 'public-key', id: octets(c.id) })) } })
+      .then(async (cred) => {
+        const r = await api('/api/elevation/enroler', { reponse: { id: cred.id,
+          clientDataJSON: b64(cred.response.clientDataJSON), attestationObject: b64(cred.response.attestationObject) } });
+        if (r && r.ok) { $('fidValeur').value = r.identifiant; $('fidResultat').hidden = false; $('fidMessage').textContent = 'Clé créée sur cet appareil.'; }
+        else $('fidMessage').textContent = 'Enregistrement refusé' + (r && r.motif ? ' (' + r.motif + ')' : '') + '.';
+      })
+      .catch(() => { $('fidMessage').textContent = 'Création annulée ou impossible (une clé existe peut-être déjà pour ce site).'; });
+  }
+  return { dispo, preparer, obtenir, envoyer, preparerEnregistrement, enregistrer };
+})();
+
 async function envoyer() {
   const m = $('msg').value.trim(); if (!m) return;
+  /* [S32] texte dicte (meme retouche au clavier) : envoye comme VOIX. La
+   * couche ne le traite pas comme une frappe (un son peut venir d'ailleurs). */
+  const voix = Voix.dicte(); Voix.arreter(); Voix.oublier();
   $('envoyer').disabled = true;
-  tour('Toi', m, true);
+  tour('Toi', (voix ? '🎤 ' : '') + m, true);
   $('msg').value = '';
   try {
     const corps = { message:m, souvenirs: Memoire.liste() };
+    if (voix) corps.canal = 'voix';
     if (!$('rangManuel').hidden && $('action').value) {
       corps.action = $('action').value;
       corps.cible  = $('cible').value || 'CONVERSATION';
@@ -793,14 +958,64 @@ document.addEventListener('click', async (ev) => {
     if (limiteAtteinte(r)) return;
     majEtat(r); tour('JARVIS', r.message || "Action annulée. Elle n'a jamais eu lieu.", false);
   }
-  if (t.dataset.finaliser) {
-    const r = await api('/api/finaliser', { jeton:t.dataset.finaliser });
-    if (limiteAtteinte(r)) return;
-    majEtat(r);
-    tour('JARVIS', r.etat === 'EXECUTE' ? 'Envoyé.' : 'Pas encore : ' + (r.etat === 'TROP_TOT' ? 'la fenêtre court toujours.' : r.etat), false);
-    if (r.etat === 'EXECUTE' && r.trace) tour('JARVIS', resumeTrace(r.trace), false);   /* [S29] */
-    if (r.reponse) tour('Claude', r.reponse, false);
+  if (t.dataset.finaliser) await finaliserJeton(t.dataset.finaliser);
+
+  /* [S30] « Creer » : le geste qui confirme l'evenement montre */
+  if (t.dataset.creer) {
+    const carte = t.closest('.creation');
+    for (const b of carte.querySelectorAll('button')) b.disabled = true;
+    const r = await api('/api/confirmer', { action: 'CREATE', resource: 'AGENDA_JARVIS', cible: t.dataset.creer });
+    if (limiteAtteinte(r)) { for (const b of carte.querySelectorAll('button')) b.disabled = false; return; }
+    if (r && r.decision) { majEtat(r.decision); rendreDecision(r.decision);
+      if (r.decision.etape !== 'COMPLET') for (const b of carte.querySelectorAll('button')) b.disabled = false; }
+    else tour('JARVIS', r && r.erreur === 'DEJA_CONFIRMEE' ? 'Déjà confirmé : un seul événement.' : r && r.erreur === 'CARTE_INCONNUE_OU_EXPIREE'
+      ? 'Cette proposition a expiré (10 min) ou vient d\'une autre session : redemande-la.' : 'Création impossible : ' + ((r && r.erreur) || 'erreur'), false);
   }
+  if (t.dataset.ignorer) {
+    for (const b of t.closest('.creation').querySelectorAll('button')) b.disabled = true;
+    tour('JARVIS', "Rien n'a été créé.", false);
+  }
+  /* [S30] « Supprimer » : la compensation, verifiee chez Google */
+  if (t.dataset.compenser) {
+    t.disabled = true;
+    const r = await api('/api/compenser', { transactionId: t.dataset.compenser });
+    if (limiteAtteinte(r)) { t.disabled = false; return; }
+    majEtat(r);
+    tour('JARVIS', r.message || (r.erreur === 'CREATION_INTROUVABLE' ? 'Cet événement vient d\'une session terminée : supprime-le dans Google Agenda.'
+      : r.etat === 'REFUSE' ? 'Déjà annulé, ou rien à annuler (' + (r.motif || '') + ').' : 'Suppression impossible.'), false);
+    if (r.trace) tour('JARVIS', resumeTrace(r.trace), false);
+    if (r.etat === 'COMPENSE' || r.etat === 'REFUSE') t.textContent = r.etat === 'COMPENSE' ? 'Supprimé' : 'Supprimer';
+    else { t.disabled = false; t.textContent = 'Réessayer la suppression'; }
+  }
+  /* [S31] Face ID : navigator.credentials.get est appele SANS attente avant,
+   * dans le geste meme (Safari l'exige) ; le defi a ete prepare a l'avance. */
+  if (t.dataset.faceid) {
+    const boite = t.closest('.elevation'), etat = boite.querySelector('.etat-elev');
+    const o = boite._options, frais = o && Date.now() - (boite._depuis || 0) < 110000;
+    boite._options = null; t.disabled = true;
+    if (!frais) { etat.textContent = 'Préparation…'; await FaceId.preparer(boite); etat.textContent = boite._options ? 'Touche à nouveau « Face ID ».' : 'Face ID indisponible.'; return; }
+    let cred = null;
+    try { cred = await FaceId.obtenir(o); } catch (e) { etat.textContent = 'Face ID annulé ou indisponible.'; await FaceId.preparer(boite); return; }
+    const r = await FaceId.envoyer(cred);
+    if (!r || !r.ok) { etat.textContent = 'Face ID refusé' + (r && r.motif === 'TROP_D_ECHECS' ? ' : trop d\'échecs, attends 15 min.' : '.'); await FaceId.preparer(boite); return; }
+    majEtat(r); etat.textContent = 'Face ID validé pour 15 min.';
+    await finaliserJeton(boite.dataset.jeton);
+  }
+  if (t.dataset.code) {
+    const boite = t.closest('.elevation'), champ = boite.querySelector('input.code'), etat = boite.querySelector('.etat-elev');
+    if (!champ.value) { champ.focus(); return; }
+    t.disabled = true;
+    const r = await api('/api/elevation/code', { code: champ.value });
+    champ.value = '';
+    t.disabled = false;
+    if (!r || !r.ok) { etat.textContent = r && r.motif === 'TROP_D_ECHECS' ? "Trop d'échecs : attends 15 min." : 'Code refusé.'; return; }
+    majEtat(r); etat.textContent = 'Code validé pour 15 min.';
+    await finaliserJeton(boite.dataset.jeton);
+  }
+  if (t.id === 'micro') Voix.basculer();
+  if (t.id === 'fidPreparer') await FaceId.preparerEnregistrement();
+  if (t.id === 'fidCreer') FaceId.enregistrer();
+  if (t.id === 'fidCopier') { try { await navigator.clipboard.writeText($('fidValeur').value); t.textContent = 'Copié'; } catch (e) { $('fidValeur').select(); } }
 
   if (t.id === 'lancerM') {
     t.disabled = true;
@@ -897,6 +1112,14 @@ document.addEventListener('click', async (ev) => {
 });
 
 $('envoyer').addEventListener('click', envoyer);
+Voix.init();   /* [S32] micro visible seulement si le navigateur sait dicter */
+/* [S31] bloc Face ID : seulement sur une instance ou l'elevation existe */
+(async () => {
+  try {
+    const e = await api('/api/elevation');
+    if (e && e.disponible) { $('blocFaceId').hidden = false; if (!FaceId.dispo()) $('fidPreparer').hidden = true; majEtat({ elevation: e }); }
+  } catch (x) { /* instance publique ou hors ligne : rien a montrer */ }
+})();
 $('msg').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); envoyer(); }
 });
