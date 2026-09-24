@@ -119,9 +119,9 @@ const t = async (id, nom, f) => { let r; try { r = await f(); } catch (e) { r = 
   await dort(400);
   const reelNow = Date.now; let decalage = 0; Date.now = () => reelNow() + decalage;
 
-  await t('H1', '/health : v4.6.0, couche 5.30.0, ecriture active, elevation Face ID + code', async () => {
+  await t('H1', '/health : v4.6.x, couche 5.30.0, ecriture active, elevation Face ID + code', async () => {
     const h = await appel('/health');
-    return { ok: h.passerelle === 'v4.6.0' && h.couche === '5.30.0' && h.ecriture === 'actif' && h.elevation === 'faceid+code', info: [h.passerelle, h.couche, h.ecriture, h.elevation].join(' ') };
+    return { ok: /^v4\.6\.\d+$/.test(h.passerelle) && h.couche === '5.30.0' && h.ecriture === 'actif' && h.elevation === 'faceid+code', info: [h.passerelle, h.couche, h.ecriture, h.elevation].join(' ') };
   });
 
   /* ======================= CREATION D'EVENEMENT ======================= */

@@ -605,11 +605,19 @@ function tour(qui, texte, moi, riche) {
   return d;
 }
 
+/* [S32] l'IA n'a pas repondu a temps : le dire en francais, pas en code */
+function sansReponse(d) {
+  const m = (d && d.motif) || (d && d.plan && d.plan.erreur) || '';
+  if (m === 'DELAI_IA_DEPASSE')
+    return "L'IA n'a pas répondu à temps : rien n'a été préparé ni soumis au noyau. Réessaie dans un moment.";
+  return 'Pas de réponse : ' + (m || 'appel indisponible');
+}
+
 function rendreDecision(d) {
   /* Conversation ordinaire : aucune action a gouverner, aucune carte. */
   if (d.decide === 'SANS_OBJET') {
     if (d.reponse) tour(d.etape === 'MEMOIRE' ? 'JARVIS' : 'Claude', d.reponse, false, d.etape !== 'MEMOIRE');
-    else tour('JARVIS', "Pas de réponse : " + (d.plan && d.plan.erreur || 'appel indisponible'), false);
+    else tour('JARVIS', sansReponse(d), false);
     return;
   }
   /* [S30] Creer un evenement : la carte montre l'evenement EXACT ; rien n'est

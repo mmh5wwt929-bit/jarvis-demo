@@ -160,6 +160,11 @@
  *   s'execute pas, rien ne part ailleurs que vers ce serveur), interdiction
  *   d'etre encadree (clic piege sur "Confirmer"), nosniff, pas de referent.
  * - COUT : reponses 700 jetons par defaut (plafond de depense de 5 $/mois).
+ *
+ * v4.6.1 — [S32] delai total de JARVIS_DELAI_IA secondes (40 par defaut) sur
+ *   chaque appel a l'IA : avant, un appel bloque laissait la requete pendue
+ *   sans fin. [S34] manifeste : /health dit si les fichiers qui tournent sont
+ *   ceux livres (voir jarvis-manifeste.js).
  * ========================================================================== */
 
 const http = require('http');
@@ -177,6 +182,10 @@ const M = require('./jarvis-memoire.js');                  /* [S12] */
 const AG = require('./jarvis-agenda.js');                   /* [S19] */
 const EC = require('./jarvis-ecriture.js');                 /* [S30] */
 const EL = require('./jarvis-elevation.js');                /* [S31] */
+const MF = require('./jarvis-manifeste.js');                /* [S34] */
+/* [S34] empreintes du code CHARGE : calculees une fois, jamais par requete.
+ * Un manifeste absent ou illisible ne bloque pas le demarrage : /health le dit. */
+const MANIFESTE = (() => { try { return MF.verifier(__dirname); } catch { return null; } })();
 /* Entier borne depuis l'environnement : une valeur absurde retombe au defaut. */
 const nombreEnv = (nom, defaut, min, max) => { const n = parseInt(process.env[nom], 10);
   return Number.isFinite(n) && n >= min && n <= max ? n : defaut; };
@@ -227,6 +236,13 @@ const PORT = process.env.PORT || 3000;
  * Pour une demo a un prospect : ANTHROPIC_MODELE=claude-sonnet-5 */
 const MODELE = process.env.ANTHROPIC_MODELE || 'claude-haiku-4-5-20251001';
 const MODELE_PLAN = process.env.ANTHROPIC_MODELE_PLAN || 'claude-haiku-4-5-20251001';
+/* [S32] delai TOTAL d'un appel a l'IA, en secondes : 40 par defaut, borne a
+ * 1..120 ; une valeur illisible garde 40. /health l'affiche. */
+const DELAI_IA = (() => {
+  const v = String(process.env.JARVIS_DELAI_IA == null ? '' : process.env.JARVIS_DELAI_IA).trim();
+  const n = v === '' ? NaN : Number(v);
+  return Number.isFinite(n) ? Math.min(120, Math.max(1, n)) : 40;
+})();
 
 if (!API_KEY) { console.error('ERREUR : ANTHROPIC_API_KEY absente'); process.exit(1); }
 
@@ -451,26 +467,41 @@ function appelAnthropic(entree, maxTokens, modele, systeme) {
     const corps = { model: modele || MODELE, max_tokens: maxTokens || LIMITES.maxTokensReponse, messages };
     if (systeme) corps.system = systeme;
     const charge = JSON.stringify(corps);
-    const r = https.request({
-      hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'content-length': Buffer.byteLength(charge),
-        'x-api-key': API_KEY,
-        'anthropic-version': '2023-06-01'
-      }
-    }, (res) => {
-      let d = ''; res.on('data', c => d += c);
-      res.on('end', () => {
-        if (res.statusCode >= 400) return resolve({ ok: false, erreur: 'API_' + res.statusCode });
-        try {
-          const p = JSON.parse(d);
-          resolve({ ok: true, texte: (p.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n'), usage: p.usage });
-        } catch { resolve({ ok: false, erreur: 'REPONSE_ILLISIBLE' }); }
+    /* [S32] une seule issue, au premier des trois : reponse complete, erreur,
+     * ou delai TOTAL depasse (un delai d'inactivite ne suffirait pas : des
+     * octets au compte-gouttes le repousseraient sans fin). Au delai, la
+     * connexion est coupee ; une reponse tardive est ignoree. */
+    let fini = false, r = null;
+    const finir = (v) => { if (fini) return; fini = true; clearTimeout(minuteur); resolve(v); };
+    const minuteur = setTimeout(() => {
+      finir({ ok: false, erreur: 'DELAI_IA_DEPASSE' });
+      try { if (r) r.destroy(); } catch { /* deja fermee */ }
+    }, DELAI_IA * 1000);
+    try {
+      r = https.request({
+        hostname: 'api.anthropic.com', path: '/v1/messages', method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'content-length': Buffer.byteLength(charge),
+          'x-api-key': API_KEY,
+          'anthropic-version': '2023-06-01'
+        }
+      }, (res) => {
+        let d = ''; res.on('data', c => d += c);
+        res.on('end', () => {
+          if (res.statusCode >= 400) return finir({ ok: false, erreur: 'API_' + res.statusCode });
+          try {
+            const p = JSON.parse(d);
+            finir({ ok: true, texte: (p.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n'), usage: p.usage });
+          } catch { finir({ ok: false, erreur: 'REPONSE_ILLISIBLE' }); }
+        });
+        /* [S32] reponse coupee en route : on le dit tout de suite */
+        res.on('error', e => finir({ ok: false, erreur: 'RESEAU: ' + (e && e.message) }));
+        res.on('close', () => { if (res.complete === false) finir({ ok: false, erreur: 'RESEAU: reponse interrompue' }); });
       });
-    });
-    r.on('error', e => resolve({ ok: false, erreur: 'RESEAU: ' + e.message }));
-    r.write(charge); r.end();
+      r.on('error', e => finir({ ok: false, erreur: 'RESEAU: ' + (e && e.message) }));
+      r.write(charge); r.end();
+    } catch (e) { finir({ ok: false, erreur: 'RESEAU: ' + (e && e.message) }); }
   });
 }
 
@@ -914,6 +945,13 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
 
   /* Aucune action a gouverner : l'assistant repond, simplement. */
   if (plan.action === 'AUCUNE') {
+    /* [S32] l'IA n'a pas repondu a temps pour PREPARER : rien n'a ete soumis
+     * au noyau. Pas de second appel, qui attendrait autant pour rien ; la
+     * page le dit en francais. */
+    if (plan.erreur === 'DELAI_IA_DEPASSE')
+      return { decide: 'SANS_OBJET', etape: 'CONVERSATION', motif: 'DELAI_IA_DEPASSE', plan, reponse: null,
+        note: g.note({ action: 'READ', resource: 'LOCAL', target: 'CONVERSATION' }),
+        classe: 'REVERSIBLE', audit: g.auditDepuis(avant), ...etatDe(s) };
     /* [S22] Vu en ligne : « Envoie la facture à …@yahoo.fr » (verbe et cible
      * tapes) n'a pas ete prepare, et le modele de conversation a INVENTE un
      * refus du noyau et deux regles fausses (« le plancher baissera avec le
@@ -928,7 +966,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
         + "(envoyer, supprimer, payer, lire son agenda…), dis simplement que tu ne l'as pas préparée et invite-la à la reformuler en une phrase "
         + "avec le verbe et la cible, par exemple « envoie la facture à nom@exemple.fr ». Sinon, réponds normalement."));
     if (rep.ok) memoriser(s, sessionId, texte, rep.texte);
-    return { decide: 'SANS_OBJET', etape: 'CONVERSATION', motif: null, plan,
+    return { decide: 'SANS_OBJET', etape: 'CONVERSATION', motif: rep.ok ? null : rep.erreur /* [S32] */, plan,
       reponse: rep.ok ? rep.texte : null, note: g.note({ action: 'READ', resource: 'LOCAL', target: 'CONVERSATION' }),
       classe: 'REVERSIBLE', audit: g.auditDepuis(avant), ...etatDe(s) };
   }
@@ -1170,13 +1208,16 @@ const serveur = http.createServer((req, res) => {
   const inconnue = () => json(401, { erreur: 'SESSION_INCONNUE' });
 
   if (u.pathname === '/health')
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.6.0',
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.6.1',
       agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : 'inactif',   /* [S30] */
       elevation: !ELEVATION || !ELEVATION.actif ? 'inactif' : [ELEVATION.faceId ? 'faceid' : null, ELEVATION.codeSecours ? 'code' : null].filter(Boolean).join('+'),
       acces: CLE_ACCES ? 'protege' : 'public', gouvernance: 'active', ip: sourceIp(req),
       /* [S17] l'adresse que le serveur attribue a CELUI qui demande (la sienne,
        * a lui seul) : permet de verifier en ligne qu'on ne peut pas l'inventer */
-      ipDepuis: IP_DEPUIS, tonIp: ipDe(req) });
+      ipDepuis: IP_DEPUIS, tonIp: ipDe(req),
+      /* [S34] les fichiers qui tournent sont-ils ceux livres ? [S32] delai IA */
+      manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
+      delaiIa: DELAI_IA + ' s', node: String(process.versions.node).split('.')[0] });
 
   if (u.pathname === '/' || u.pathname === '') {
     try {
