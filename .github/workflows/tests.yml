@@ -1,0 +1,30 @@
+name: tests
+on:
+  push:
+  pull_request:
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Manifeste (les fichiers deposes sont ceux livres)
+        run: node jarvis-manifeste.js --verifier
+      - name: jsdom pour les tests de la page (jamais en production)
+        run: npm install --no-save --no-audit --no-fund jsdom
+      - name: Toutes les suites
+        run: |
+          echec=0
+          for f in tests-*.js; do
+            echo "::group::$f"
+            if ! timeout 300 node "$f"; then echo "::error::$f en echec"; echec=1; fi
+            echo "::endgroup::"
+          done
+          exit $echec
