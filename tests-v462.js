@@ -51,7 +51,9 @@ const lancer = async (env = {}, plans = []) => {
   let sante = null;
   for (let i = 0; i < 150 && !sante && enfant.exitCode === null; i++) {
     await dort(100);
-    try { sante = await (await fetch('http://localhost:' + p + '/health', { signal: AbortSignal.timeout(1000) })).json(); } catch { /* pas encore */ }
+    /* [S37] v4.6.3 : sur une instance protegee, le detail de /health demande la cle */
+    try { sante = await (await fetch('http://localhost:' + p + '/health', { signal: AbortSignal.timeout(1000),
+      headers: env.JARVIS_CLE_ACCES ? { 'X-Jarvis-Cle': env.JARVIS_CLE_ACCES } : {} })).json(); } catch { /* pas encore */ }
   }
   const appel = async (chemin, corps) => {
     const r = await fetch('http://localhost:' + p + chemin, { method: corps ? 'POST' : 'GET', body: corps ? JSON.stringify(corps) : undefined,
@@ -97,7 +99,7 @@ const B = 'http://localhost:' + BASE;
   const envoi = { action: 'SEND', resource: 'EMAIL', target: 'pierre@exemple.fr' };
   const mal = await lancer({ JARVIS_CLE_ACCES: CLE, JARVIS_CODE_SECOURS: 'abcdefghijkl' }, [envoi]);
   await t('C2', "code avec des lettres : /health « erreur-config » (plus « inactif »), le journal le crie", async () =>
-    ({ ok: mal.sante && mal.sante.passerelle === 'v4.6.2' && mal.sante.elevation === 'erreur-config' && /MAL CONFIGUREE/.test(mal.sortie()) && /12 a 64 chiffres/.test(mal.sortie()),
+    ({ ok: mal.sante && /^v4\.6\.[2-9]$/.test(mal.sante.passerelle) && mal.sante.elevation === 'erreur-config' && /MAL CONFIGUREE/.test(mal.sortie()) && /12 a 64 chiffres/.test(mal.sortie()),
        info: mal.sante && (mal.sante.passerelle + ' ' + mal.sante.elevation) }));
 
   await t('C3', "code illisible : l'envoi irréversible reste BLOQUÉ (avant v4.6.2 il partait sans code ni Face ID)", async () => {

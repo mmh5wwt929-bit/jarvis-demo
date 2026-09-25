@@ -177,6 +177,8 @@ button.danger{border-color:#5c2321;color:#ff7b72}
 footer{border-top:1px solid var(--regle);background:var(--ardoise);
   padding:9px 20px;font-size:11.5px;color:var(--sourd);flex-shrink:0;
   display:flex;gap:16px;flex-wrap:wrap}
+.lien-sante{background:none;border:0;padding:0;color:var(--sourd);font:inherit;text-decoration:underline;cursor:pointer}
+#sante{flex-basis:100%;white-space:pre-wrap;word-break:break-all;margin:4px 0 0;font-size:11px}
 
 /* ---------- PARCOURS GUIDÉ ---------- */
 #jtLancer{margin-top:11px}
@@ -381,6 +383,8 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
   <span>G4 ancrage externe</span><span>G5 copilote</span>
   <span>Réponses : Claude (Anthropic) · rien n'est journalisé, la session s'oublie après 30 min</span>
   <span class="contact" id="contact" hidden></span>
+  <button class="lien-sante" data-sante="1" type="button">état du serveur</button>
+  <pre id="sante" hidden></pre>
 </footer>
 
 <script>
@@ -528,7 +532,11 @@ function majEtat(d) {
   if (d.audit && d.audit.length) ajouterMaillons(d.audit);
   if (d.elevation && $('etatFaceId')) {   /* [S31] */
     const e = d.elevation;
-    $('etatFaceId').textContent = e.active ? 'actif · ' + Math.max(1, Math.round((e.jusqua - Date.now()) / 60000)) + ' min'
+    /* [S38] dire PAR QUOI l'identite a ete confirmee : vu le 25 sept, « Face ID
+     * actif » s'affichait apres une validation par le code de secours */
+    $('etatFaceId').textContent = e.active
+      ? (e.mode === 'CODE' ? 'identité confirmée par le code' : e.mode === 'FACE_ID' ? 'actif' : 'identité confirmée')
+        + ' · ' + Math.max(1, Math.round((e.jusqua - Date.now()) / 60000)) + ' min'
       : e.exigee ? 'demandé pour l\'irréversible' : '';
   }
 }
@@ -616,7 +624,8 @@ function sansReponse(d) {
 function rendreDecision(d) {
   /* Conversation ordinaire : aucune action a gouverner, aucune carte. */
   if (d.decide === 'SANS_OBJET') {
-    if (d.reponse) tour(d.etape === 'MEMOIRE' ? 'JARVIS' : 'Claude', d.reponse, false, d.etape !== 'MEMOIRE');
+    const deJarvis = d.etape === 'MEMOIRE' || d.etape === 'DESTINATAIRE';   /* [S36] */
+    if (d.reponse) tour(deJarvis ? 'JARVIS' : 'Claude', d.reponse, false, !deJarvis);
     else tour('JARVIS', sansReponse(d), false);
     return;
   }
@@ -777,11 +786,13 @@ Memoire.afficher();
 /* [S14] les limites, dites en français plutôt qu'en code */
 function messageLimite(d) {
   const m = d && (d.motif || d.erreur);
+  /* [S39] chez soi (cle d'acces), ce n'est pas « la demo » */
+  const demo = Object.keys(Cle.entetes()).length ? '' : ' de la démo';
   const min = Math.max(1, Math.ceil(((d && d.reessayerDans) || 60) / 60));
   if (m === 'LIMITE_IP_HORAIRE')
-    return "Limite horaire de la démo atteinte depuis ta connexion : elle protège le budget de l'IA. Réessaie dans " + min + ' min.';
+    return 'Limite horaire' + demo + " atteinte depuis ta connexion : elle protège le budget de l'IA. Réessaie dans " + min + ' min.';
   if (m === 'PLAFOND_GLOBAL_JOURNALIER')
-    return "Le budget IA du jour de la démo est épuisé, pour tout le monde. Reviens demain.";
+    return 'Le budget IA du jour' + demo + ' est épuisé' + (demo ? ', pour tout le monde' : '') + '. Reviens demain.';
   if (m === 'LIMITE_ACTIONS_HORAIRE')
     return "Trop d'actions en une heure depuis ta connexion. Réessaie dans " + min + ' min.';
   return null;
@@ -983,6 +994,19 @@ const LECTURES = {
 document.addEventListener('click', async (ev) => {
   const t = ev.target.closest('button'); if (!t) return;
 
+  /* [S37] le detail de /health : /api/health, avec la cle (instance perso) */
+  if (t.dataset.sante) {
+    const p = $('sante');
+    if (!p.hidden) { p.hidden = true; return; }
+    t.disabled = true;
+    try {
+      const r = await versServeur(API + '/api/health');
+      p.textContent = JSON.stringify(await r.json(), null, 1);
+    } catch (e) { p.textContent = 'Serveur injoignable.'; }
+    p.hidden = false; t.disabled = false;
+    return;
+  }
+
   if (t.dataset.lire) {
     const l = LECTURES[t.dataset.lire];
     const r = await api('/api/ingest', l);
@@ -1016,6 +1040,11 @@ document.addEventListener('click', async (ev) => {
     t.disabled = true;
     const r = await api('/api/reformuler', corps);
     if (limiteAtteinte(r)) { t.disabled = false; return; }
+    /* [S36] adresse refusee avant le noyau : rien n'est consomme, on corrige */
+    if (r && (r.erreur === 'ADRESSE_INVALIDE' || r.erreur === 'DESTINATAIRE_MANQUANT')) {
+      tour('JARVIS', r.message || 'Adresse e-mail invalide.', false);
+      t.disabled = false; if (champ) champ.focus(); return;
+    }
     /* [S20] l'action repart directement avec la cible tapee : on affiche sa decision */
     tour('JARVIS', 'Cible confirmée au clavier : ' + c + '.', false);
     if (r && r.decision) { majEtat(r.decision); rendreDecision(r.decision); }

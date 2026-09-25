@@ -171,6 +171,23 @@
  *   mais illisible ne desactive plus la protection. L'irreversible reste
  *   bloque, /health dit « erreur-config ». Avant, l'elevation s'eteignait en
  *   silence et l'irreversible passait sans Face ID ni code.
+ *
+ * v4.6.3 — vu en ligne le 25 sept par Alsid :
+ *   [S36] DESTINATAIRE CONTROLE : « Paiement vers alsid » est parti (simule)
+ *   avec clic + Face ID, et « oui paie la facture » passait aussi comme
+ *   destinataire. SEND, PAY et GRANT n'acceptent plus qu'une adresse e-mail
+ *   complete (ASCII, nom@domaine.tld). Cible absente (le planificateur mettait
+ *   « CONVERSATION » par defaut) : JARVIS demande « a qui ? » sans rien
+ *   soumettre au noyau. Controle au plan ET a la cible retapee.
+ *   [S37] /HEALTH DISCRET sur une instance protegee : sans la cle, il ne dit
+ *   plus ce qui est branche (agenda, ecriture, elevation), seulement un
+ *   verdict « config » compare a JARVIS_CONFIG_ATTENDUE. Le detail complet :
+ *   /api/health (derriere la cle), ou /health avec l'en-tete X-Jarvis-Cle.
+ *   [S38] la page dit par QUOI l'identite a ete confirmee (Face ID ou code).
+ *   [S39] limite horaire : 60 appels IA/h par defaut sur une instance
+ *   protegee (24 sur la demo) ; le message ne parle plus de « demo » chez soi.
+ *   Limite documentee : la dictee du CLAVIER iOS arrive comme une frappe, la
+ *   page ne peut pas la distinguer ; seul le bouton 🎤 est traite comme voix.
  * ========================================================================== */
 
 const http = require('http');
@@ -296,10 +313,49 @@ if (!ELEVATION && (VAR_ENV('JARVIS_CODE_SECOURS') || VAR_ENV('JARVIS_PASSKEYS'))
 const ELEVATION_MAL_CONFIGUREE = !!(ELEVATION && !ELEVATION.actif && (CODE_ILLISIBLE || CLES_ILLISIBLES));
 const ELEVATION_EXIGEE = !!(ELEVATION && ELEVATION.actif) || ELEVATION_MAL_CONFIGUREE;
 
+/* [S37] CE QUI EST BRANCHE, compare a ce qui DOIT l'etre. JARVIS_CONFIG_ATTENDUE
+ * liste les modules attendus sur cette instance, separes par des virgules :
+ * agenda, ecriture, faceid, code. /health sans cle n'en dit qu'un verdict :
+ *   ok            : exactement ce qui est attendu (ni manque, ni en trop) ;
+ *   ecart         : un module manque, est en trop, ou est mal configure ;
+ *   non-declaree  : variable absente ;
+ *   erreur-config : variable illisible (mot inconnu). Ferme par defaut : une
+ *                   faute de frappe ne doit jamais afficher « ok ».
+ * Un seul bit s'echappe (« quelque chose ne va pas »), jamais QUOI. */
+const MODULES_CONFIG = Object.freeze(['agenda', 'ecriture', 'faceid', 'code']);
+const CONFIG_ATTENDUE = (() => {
+  const v = String(process.env.JARVIS_CONFIG_ATTENDUE || '').trim();
+  if (!v) return null;
+  const mots = v.toLowerCase().split(',').map(x => x.trim()).filter(Boolean);
+  if (!mots.length || mots.some(m => !MODULES_CONFIG.includes(m))) return { illisible: true };
+  return { illisible: false, modules: new Set(mots) };
+})();
+if (CONFIG_ATTENDUE && CONFIG_ATTENDUE.illisible)
+  console.error('JARVIS_CONFIG_ATTENDUE illisible : mots admis ' + MODULES_CONFIG.join(', ') + '.');
+function modulesActifs() {
+  const m = new Set();
+  if (AGENDA) m.add('agenda');
+  if (ECRITURE) m.add('ecriture');
+  if (ELEVATION && ELEVATION.faceId) m.add('faceid');
+  if (ELEVATION && ELEVATION.codeSecours) m.add('code');
+  return m;
+}
+function verdictConfig() {
+  if (!CONFIG_ATTENDUE) return 'non-declaree';
+  if (CONFIG_ATTENDUE.illisible) return 'erreur-config';
+  if (ELEVATION_MAL_CONFIGUREE || CODE_ILLISIBLE || CLES_ILLISIBLES) return 'ecart';
+  const actifs = modulesActifs(), attendus = CONFIG_ATTENDUE.modules;
+  if (actifs.size !== attendus.size) return 'ecart';
+  for (const x of attendus) if (!actifs.has(x)) return 'ecart';
+  return 'ok';
+}
+
 const LIMITES = {
   /* Comptes en APPELS ANTHROPIC, pas en messages : un message du chat en vaut
-   * deux (planification puis reponse). 24 appels/h = 12 messages/h par IP. */
-  appelsParIpParHeure: nombreEnv('JARVIS_APPELS_HEURE', 24, 2, 2000),
+   * deux (planification puis reponse). 24 appels/h = 12 messages/h par IP.
+   * [S39] Vu le 25 sept : le proprietaire, bloque 44 min en plein test sur
+   * SON instance. Instance protegee (cle) : 60 appels/h par defaut. */
+  appelsParIpParHeure: nombreEnv('JARVIS_APPELS_HEURE', CLE_ACCES ? 60 : 24, 2, 2000),   /* [S39] */
   globalParJour: nombreEnv('JARVIS_APPELS_JOUR', 300, 2, 100000),
   /* [S12] assistant : reponses plus longues, textes colles a resumer */
   maxTokensReponse: nombreEnv('JARVIS_MAX_TOKENS', 700, 200, 4000), maxCaracteresPrompt: 3000,
@@ -593,7 +649,7 @@ function systemeDe(s, ceTour) {
     M.blocPourPrompt(s.souvenirs || []),
     "",
     "LES VRAIES RÈGLES DU NOYAU (ne les contredis jamais, n'en invente aucune)",
-    "1. Une action sensible (envoyer, supprimer, payer) passe quand la personne tape elle-même, dans le MÊME message, le verbe ET la cible, par exemple « envoie la facture à nom@exemple.fr » : elle est alors retenue 10 secondes, puis confirmée d'un clic, ou annulée.",
+    "1. Une action sensible (envoyer, supprimer, payer) passe quand la personne tape elle-même, dans le MÊME message, le verbe ET la cible, par exemple « envoie la facture à nom@exemple.fr » : elle est alors retenue 10 secondes, puis confirmée d'un clic, ou annulée. La cible d'un envoi ou d'un paiement doit être une adresse e-mail complète (nom@domaine.fr) : un prénom seul est refusé avant le noyau.",
     "2. Sinon, la personne retape la cible dans le cadre prévu, puis touche « Confirmer » : l'action est alors retenue de la même façon.",
     "3. Le plancher de confiance ne redescend JAMAIS avec le temps : seule une nouvelle session le remet à zéro. Lire du contenu externe ne bloque pas les actions : cela oblige seulement la personne à les taper elle-même.",
     "4. Tu ne sais qu'un refus ou une autorisation a eu lieu que si « CE TOUR-CI » le dit. Sinon, ne parle ni de refus, ni d'autorisation du noyau.",
@@ -658,6 +714,40 @@ const messagesAvec = (s, sessionId, texte) =>
  * ======================================================================== */
 const ACTIONS_CONNUES = ['READ','LIST','SUMMARIZE','SEARCH','WRITE','CREATE','RENAME','MOVE',
                          'SEND','DELETE','PAY','PUBLISH','GRANT','DEPLOY','AUCUNE'];
+
+/* [S36] DESTINATAIRE CONTROLE. Vu en ligne le 25 sept : « Paiement vers alsid »
+ * execute (simule) avec clic + Face ID ; « oui paie la facture » accepte comme
+ * destinataire ; une adresse dictee est arrivee en « alcide.:-)j@yahoo.fr ».
+ * La couche prouve QUI a choisi la cible, pas qu'elle a un sens : c'est le
+ * contrat de l'outil, verifie ici. Une action vers une personne n'accepte
+ * qu'une adresse e-mail complete, en ASCII (pas de caractere sosie : un
+ * domaine international s'ecrit en xn--). On VALIDE sans jamais transformer :
+ * la cible executee reste la chaine tapee, verifiee par la couche [C4]. */
+const ACTIONS_VERS_PERSONNE = new Set(['SEND', 'PAY', 'GRANT']);
+function adresseValide(x) {
+  if (typeof x !== 'string' || x.length > 254) return false;
+  const m = /^([A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*)@([A-Za-z0-9.-]+)$/.exec(x);
+  if (!m || m[1].length > 64) return false;
+  const etiquettes = m[2].split('.');
+  if (etiquettes.length < 2) return false;
+  if (!etiquettes.every(e => /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(e))) return false;
+  return /^(?:[A-Za-z]{2,24}|xn--[A-Za-z0-9-]{1,59})$/.test(etiquettes[etiquettes.length - 1]);
+}
+/* montree telle que tapee (espaces compris), sans caracteres de controle ni
+ * d'inversion de sens d'ecriture ; la page l'affiche en texte, jamais en HTML */
+const lisible = (v, max) => String(v).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, '').slice(0, max);
+/* null si la cible convient ; sinon { motif, texte } a dire a la personne. */
+function destinataireRefuse(action, target) {
+  if (!ACTIONS_VERS_PERSONNE.has(String(action || '').toUpperCase())) return null;
+  const t = String(target == null ? '' : target).trim();
+  if (!t || t.toUpperCase() === 'CONVERSATION')
+    return { motif: 'DESTINATAIRE_MANQUANT', texte: "À qui ? Je n'ai pas de destinataire, donc rien n'a été préparé. "
+      + "Retape ta demande au clavier avec l'adresse e-mail complète, par exemple « envoie la facture à nom@exemple.fr »." };
+  if (!adresseValide(t))
+    return { motif: 'ADRESSE_INVALIDE', texte: "« " + lisible(t, 80) + " » n'est pas une adresse e-mail complète : un envoi ou un paiement "
+      + "ne part que vers une adresse du type nom@domaine.fr. Rien n'a été préparé." };
+  return null;
+}
 
 /* [S19] Les outils reels, declares au planificateur par la couche [O1] : des
  * constantes du serveur (et la date du jour), jamais un contenu lu. */
@@ -1005,6 +1095,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
    * Avant demander(), qui sinon aurait deja confirme la cible par C3. */
   const avis = s.vig.evaluer({ action: acte, target: plan.target, classe: classeDe(acte),
     plancher: g.etat().plancher, texte, manuel: !!plan.manuel });
+
   if (avis.exigerReformulation) {
     const note = g.note({ action: acte, resource: plan.resource, target: plan.target });
     note.signaux.unshift(...avis.signaux);
@@ -1014,6 +1105,19 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
     return { decide: 'REFUSE', etape: 'VIGILANCE_INTENTION', motif: 'REFORMULATION_REQUISE',
       aReformuler: { action: acte, cible: plan.target, resource: plan.resource }, reponse: null,
       plan, note, classe: classeDe(acte), audit: g.auditDepuis(avant), ...etatDe(s) };
+  }
+
+  /* [S36] une action vers une personne sans adresse valable ne va pas plus
+   * loin : rien n'est soumis au noyau. APRES la vigilance : une action que la
+   * personne n'a pas voulue (verbe venu d'un contenu lu) garde son refus et
+   * ses alertes ; on ne lui demande jamais « a qui ? » pour elle. */
+  const refusDest = destinataireRefuse(acte, plan.target);
+  if (refusDest) {
+    noterVerdict(s, { decide: 'REFUSE', action: acte, target: propre(plan.target, 80), motif: refusDest.motif });
+    memoriser(s, sessionId, texte, refusDest.texte);
+    return { decide: 'SANS_OBJET', etape: 'DESTINATAIRE', motif: refusDest.motif, reponse: refusDest.texte, plan,
+      note: g.note({ action: 'READ', resource: 'LOCAL', target: 'CONVERSATION' }), classe: classeDe(acte),
+      audit: g.auditDepuis(avant), ...etatDe(s) };
   }
 
   const options = { sceauContexte: plan.sceauContexte, manuel: !!plan.manuel };
@@ -1220,8 +1324,24 @@ const serveur = http.createServer((req, res) => {
   const sid = () => String(u.query.sessionId || '');
   const inconnue = () => json(401, { erreur: 'SESSION_INCONNUE' });
 
-  if (u.pathname === '/health')
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.6.2',
+  /* [S37] le detail complet : derriere la cle (instance protegee), ou tel quel
+   * sur la demo publique. Sans cle, une instance protegee ne dit que ses
+   * versions (publiques : le depot l'est) et un verdict de configuration. */
+  if (u.pathname === '/health' || (u.pathname === '/api/health' && req.method === 'GET')) {
+    const verdict = CLE_ACCES ? verdictConfig() : undefined;
+    let detail = !CLE_ACCES;
+    if (CLE_ACCES && (u.pathname === '/api/health' || req.headers['x-jarvis-cle'] !== undefined)) {
+      /* seule une cle PRESENTE est verifiee (et comptee si fausse) : une simple
+       * visite de /health n'use jamais le compteur d'essais du proprietaire */
+      const c = cleAcceptee(req);
+      if (!c.ok) return json(c.code, { erreur: c.erreur });
+      detail = true;
+    }
+    if (!detail)
+      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.6.3',
+        acces: 'protege', config: verdict, manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
+        node: String(process.versions.node).split('.')[0] });
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.6.3',
       agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : 'inactif',   /* [S30] */
       elevation: ELEVATION_MAL_CONFIGUREE ? 'erreur-config' : !ELEVATION || !ELEVATION.actif ? 'inactif'   /* [S35] */
         : [ELEVATION.faceId ? 'faceid' : null, ELEVATION.codeSecours ? 'code' : null,
@@ -1232,7 +1352,9 @@ const serveur = http.createServer((req, res) => {
       ipDepuis: IP_DEPUIS, tonIp: ipDe(req),
       /* [S34] les fichiers qui tournent sont-ils ceux livres ? [S32] delai IA */
       manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
-      delaiIa: DELAI_IA + ' s', node: String(process.versions.node).split('.')[0] });
+      delaiIa: DELAI_IA + ' s', node: String(process.versions.node).split('.')[0],
+      ...(CLE_ACCES ? { config: verdict } : {}) });
+  }
 
   if (u.pathname === '/' || u.pathname === '') {
     try {
@@ -1304,6 +1426,10 @@ const serveur = http.createServer((req, res) => {
       const action = b.action.trim().toUpperCase().slice(0, 40);
       if (!ACTIONS_CONNUES.includes(action) || action === 'AUCUNE') return json(400, { erreur: 'ACTION_INCONNUE' });
       const cible = b.cible.trim().slice(0, 300);
+      /* [S36] la cible retapee aussi : controlee AVANT de consommer la preuve,
+       * pour qu'une faute de frappe se corrige dans la meme carte */
+      const refusDest = destinataireRefuse(action, cible);
+      if (refusDest) return json(400, { erreur: refusDest.motif, message: refusDest.texte });
       const resource = typeof b.resource === 'string' && b.resource.trim() ? b.resource.trim().slice(0, 60) : 'LOCAL';
       const d = debitAutorise(ipDe(req), 1);   /* une reponse du modele au plus : comptee comme /api/chat */
       if (!d.ok) return json(429, { decide: 'REFUSE', etape: 'DEBIT', motif: d.motif, reessayerDans: d.reessayerDans });

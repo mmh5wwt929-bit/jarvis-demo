@@ -246,7 +246,8 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   const q6 = await appel('/api/reformuler', { sessionId: sid2, action: 'SEND', cible: '   ' });
   IP = '87.88.3.3';
   const sid3 = (await appel('/api/session', {})).sessionId;
-  let q7; for (let i = 0; i < 40; i++) { q7 = await appel('/api/reformuler', { sessionId: sid3, action: 'READ', cible: 'x' + i, resource: 'LOCAL' }); if (q7.status === 429) break; }
+  /* [S39] instance protegee : 60 appels/h par defaut (24 avant) -> 100 essais */
+  let q7; for (let i = 0; i < 100; i++) { q7 = await appel('/api/reformuler', { sessionId: sid3, action: 'READ', cible: 'x' + i, resource: 'LOCAL' }); if (q7.status === 429) break; }
   await t('V21', 'confirmation avec action vide, inconnue, ou cible blanche : refusee', async () =>
     ({ ok: q4.status === 400 && q5.status === 400 && q6.status === 400, info: [q4.erreur, q5.erreur, q6.erreur].join(' ') }));
   await t('V21b', 'la confirmation compte dans le budget IA : pas de contournement de la limite horaire', async () =>
