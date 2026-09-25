@@ -114,15 +114,19 @@ const session = async () => (await appel('/api/session', {})).sessionId;
   /* la cible retapee : controlee avant de consommer la preuve */
   const mauvaises = ['alsid', 'oui paie la facture', 'alcide.:-)j@yahoo.fr', 'a@b', 'nom@exemple', '.nom@exemple.fr', 'nom..x@exemple.fr',
     'nom@-exemple.fr', 'nom@exemple.f', 'аlsid@yahoo.fr' /* a cyrillique */, 'nom@exemple.fr\u200b', 'nom@exemple.fr\u202e', 'a b@exemple.fr'];
+  /* [S40 - v4.6.4] une carte « retape la cible » (jeton serveur) pour un paiement */
+  plans.push({ action: 'PAY', resource: 'BANQUE', target: 'facture 4471' });
+  const cartePay = await appel('/api/chat', { sessionId: sid, message: "d'accord" });
+  const jPay = (cartePay.aReformuler || {}).jeton;
   const reps = [];
-  for (const c of mauvaises) reps.push(await appel('/api/reformuler', { sessionId: sid, action: 'PAY', cible: c, resource: 'BANQUE' }));
+  for (const c of mauvaises) reps.push(await appel('/api/reformuler', { sessionId: sid, jeton: jPay, cible: c }));
   await t('D3', 'cible retapée : prénom, phrase, adresse dictée cassée, sans domaine, points, tiret, sosie cyrillique, caractère invisible : 13/13 refusés', async () => {
     const passees = mauvaises.filter((c, i) => !(reps[i].status === 400 && reps[i].erreur === 'ADRESSE_INVALIDE' && !reps[i].decision));
     return { ok: passees.length === 0, info: passees.length ? 'passées : ' + passees.map(x => JSON.stringify(x)).join(', ') : '13 refus ADRESSE_INVALIDE' };
   });
 
-  const bonne = await appel('/api/reformuler', { sessionId: sid, action: 'PAY', cible: 'alsid.smailji@yahoo.fr', resource: 'BANQUE' });
-  await t('D4', "après les refus, la bonne adresse passe dans la même session : la preuve clavier n'a pas été gâchée", async () =>
+  const bonne = await appel('/api/reformuler', { sessionId: sid, jeton: jPay, cible: 'alsid.smailji@yahoo.fr' });
+  await t('D4', "après les refus, la bonne adresse passe dans la même carte : ni la preuve clavier ni le jeton n'ont été gâchés", async () =>
     ({ ok: bonne.status === 200 && bonne.decision && bonne.decision.decide === 'EN_ATTENTE' && !!bonne.decision.jetonAnnulation
          && mauvaises.every((c, i) => reps[i].status === 400),
        info: bonne.status + ' ' + (bonne.decision && bonne.decision.decide) }));
@@ -155,7 +159,7 @@ const session = async () => (await appel('/api/session', {})).sessionId;
   const nu = await (await fetch(B + '/health', { headers: { 'CF-Connecting-IP': '81.2.2.2' } })).json();
   await t('H1', 'instance protégée, /health SANS clé : ni agenda, ni écriture, ni élévation, ni IP ; versions, manifeste et verdict gardés', async () => {
     const tus = ['agenda', 'ecriture', 'elevation', 'tonIp', 'ip', 'ipDepuis', 'delaiIa'].filter(k => k in nu);
-    return { ok: tus.length === 0 && nu.passerelle === 'v4.6.3' && nu.acces === 'protege' && nu.config === 'non-declaree'
+    return { ok: tus.length === 0 && /^v4\.6\.[3-9]$/.test(nu.passerelle) && nu.acces === 'protege' && nu.config === 'non-declaree'
                && typeof nu.empreinte === 'string' && typeof nu.manifeste === 'string',
              info: tus.length ? 'dit encore : ' + tus.join(', ') : Object.keys(nu).join(',') };
   });
@@ -200,7 +204,7 @@ const session = async () => (await appel('/api/session', {})).sessionId;
   const demo = await lancer({ JARVIS_CODE_SECOURS: CODE });
   const hd = await (await demo.brut('/health')).json();
   await t('H5', 'contre-épreuve : la démo publique garde son /health détaillé (rien à cacher), sans champ « config »', async () =>
-    ({ ok: hd.acces === 'public' && hd.elevation === 'inactif' && hd.agenda === 'inactif' && !('config' in hd) && hd.passerelle === 'v4.6.3',
+    ({ ok: hd.acces === 'public' && hd.elevation === 'inactif' && hd.agenda === 'inactif' && !('config' in hd) && /^v4\.6\.[3-9]$/.test(hd.passerelle),
        info: hd.acces + ' ' + hd.elevation + ' ' + ('config' in hd ? 'config!' : '') }));
 
   /* ====================== [S39] LIMITE HORAIRE ====================== */
@@ -208,8 +212,9 @@ const session = async () => (await appel('/api/session', {})).sessionId;
     const sidL = (await s.appel('/api/session', {}, entetes)).sessionId;
     let n = 0;
     for (let i = 0; i < 80; i++) {
-      const r = await s.appel('/api/reformuler', { sessionId: sidL, action: 'READ', cible: 'x' + i, resource: 'LOCAL' }, entetes);
-      if (r.status === 429) break; n++;
+      /* [S40] la confirmation demande une carte : on compte les messages (2 appels chacun) */
+      const r = await s.appel('/api/chat', { sessionId: sidL, message: 'bonjour ' + i }, entetes);
+      if (r.status === 429) break; n += 2;
     }
     return n;
   };
@@ -272,7 +277,7 @@ const session = async () => (await appel('/api/session', {})).sessionId;
   const sante = $('sante');
   await t('P5', "« état du serveur » (pied de page) : le détail complet, avec la clé de la page", async () => {
     let j = null; try { j = JSON.parse(sante.textContent); } catch { /* illisible */ }
-    return { ok: !!lienSante && !sante.hidden && j && j.elevation === 'code' && j.passerelle === 'v4.6.3', info: lienSante ? String(sante.textContent).slice(0, 60) : 'pas de lien' };
+    return { ok: !!lienSante && !sante.hidden && j && j.elevation === 'code' && /^v4\.6\.[3-9]$/.test(j.passerelle), info: lienSante ? String(sante.textContent).slice(0, 60) : 'pas de lien' };
   });
 
   const chezSoi = w.messageLimite({ motif: 'LIMITE_IP_HORAIRE', reessayerDans: 600 }), jourSoi = w.messageLimite({ motif: 'PLAFOND_GLOBAL_JOURNALIER' });

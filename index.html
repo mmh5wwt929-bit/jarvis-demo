@@ -256,7 +256,7 @@ textarea,input:not([type]),input[type=text]{-webkit-appearance:none;appearance:n
 
 <header>
   <div class="bandeau">
-    <div class="marque">JARVIS <span>noyau 5.28.3 · couche 5.30.0</span></div>
+    <div class="marque">JARVIS <span>noyau 5.28.3 · couche 5.30.1</span></div>
     <div class="mesures">
       <div class="mesure">autorité dépensée <b id="mLedger" class="mono">0 / 100</b></div>
       <div class="mesure">chaîne d'audit <b id="mAudit" class="mono">—</b></div>
@@ -589,6 +589,7 @@ function md(texte) {
 
 /* [S29] La trace en une ligne, construite depuis les etats (jamais depuis le
  * texte du modele), affichee en texte echappe. */
+const CLASSES = { IRREVERSIBLE: 'irréversible', REVERSIBLE: 'réversible', COMPENSABLE: 'compensable' };   /* [S42] */
 function resumeTrace(t) {
   const i = t.intention || {}, c = t.confirmation || {}, e = t.effet || {};
   const source = i.nature === 'FRAPPE' ? 'ta frappe « ' + i.frappe + ' »'
@@ -597,11 +598,19 @@ function resumeTrace(t) {
     : i.nature === 'CONFIRMATION_GESTE' ? 'ton toucher sur « Créer »' : 'aucune frappe requise';
   const elev = c.elevation === 'FACE_ID' ? ' + Face ID' : c.elevation === 'CODE' ? ' + code de secours' : '';
   return 'Trace : ' + source + (i.reverifiee === true ? ' (revérifiée)' : i.reverifiee === false ? ' (NON revérifiée)' : '')
-    + ' → autorisé (' + String((t.plan || {}).classe || '').toLowerCase() + ')'
+    + ' → autorisé (' + (CLASSES[(t.plan || {}).classe] || String((t.plan || {}).classe || '').toLowerCase()) + ')'   /* [S42] */
     + (c.mode === 'CLIC_APRES_FENETRE' ? ' → retenu 10 s → confirmé par ton clic' + elev : c.mode === 'SANS_FENETRE' ? ' → exécuté sans fenêtre' : '')
     + (e.reel ? (e.reel.ok ? ' → effet réel confirmé' : ' → effet réel ÉCHOUÉ (' + e.reel.code + ')') : '')
     + (e.compense ? ' → annulé (disparition vérifiée)' : '')
     + ' → ' + String(e.etat || '').toLowerCase() + '.';
+}
+/* [S42] Vu en ligne le 25 sept : une action relancee par TA cible retapee
+ * s'affichait « Claude veut envoyer ». La carte dit qui lance l'action. */
+function quiLance(d, p) {
+  if (d.etape === 'MEMOIRE') return 'Tu veux';
+  if (p.confirme) return 'Tu relances :';
+  if (p.manuel) return 'Tu imposes :';
+  return 'Claude veut';
 }
 function tour(qui, texte, moi, riche) {
   const d = document.createElement('div');
@@ -687,7 +696,7 @@ function rendreDecision(d) {
   const n = d.note || {};
   const p = d.plan || {};
   let h = '<div class="decision ' + etat + '">'
-        + (p.action ? '<div class="plan">' + (d.etape === 'MEMOIRE' ? 'Tu veux' : 'Claude veut') + ' <span class="acte">'
+        + (p.action ? '<div class="plan">' + quiLance(d, p) + ' <span class="acte">'
             + esc(ACTES[p.action] || p.action.toLowerCase()) + '</span>'
             + (p.target ? ' — <span class="mono">' + esc(p.target) + '</span>' : '')
             + (p.pourquoi ? '<div class="pourquoi">' + esc(p.pourquoi) + '</div>' : '')
@@ -713,7 +722,9 @@ function rendreDecision(d) {
     /* Le champ reste VIDE : pre-rempli avec la cible proposee — y compris celle
      * d'un pirate — un simple clic suffisait, et la frappe humaine n'etait plus
      * qu'une formalite. */
-    h += '<div class="reformuler" data-action="' + esc(d.aReformuler.action) + '" data-ressource="' + esc(d.aReformuler.resource || '') + '">'
+    /* [S40] la carte ne porte que le jeton du serveur : l'action et la
+     * ressource restent cote serveur, la page ne peut plus les choisir */
+    h += '<div class="reformuler" data-jeton="' + esc(d.aReformuler.jeton || '') + '">'
       +  '<p>' + (d.etape === 'VIGILANCE_INTENTION' ? 'Tu n\'as pas demandé cette action' : 'Action irréversible')
       +  ' : si tu la veux vraiment, retape la cible toi-même. Un texte injecté ne traverse pas un clavier.</p>'
       +  '<div class="rang"><input class="cible" value="" placeholder="cible, tapée à la main" aria-label="Cible retapée"'
@@ -850,6 +861,7 @@ async function finaliserJeton(jeton) {
   if (r.etat === 'ELEVATION_REQUISE') { rendre(); return demanderElevation(jeton, r.moyens || {}); }
   if (r.etat === 'TROP_TOT') { rendre(); return direDansRetenue(jeton, 'Pas encore : la fenêtre court toujours.'); }
   if (r.etat === 'INTROUVABLE') return clore(jeton, 'Déjà traitée (envoyée ou annulée) : plus rien à confirmer.');
+  if (r.etat === 'PERIME') return clore(jeton, r.message || TEXTE_PERIMEE);   /* [S40] */
   if (r.etat === 'EXECUTE') {
     clore(jeton, 'Envoyé.');
     tour('JARVIS', 'Envoyé.', false);
@@ -857,10 +869,32 @@ async function finaliserJeton(jeton) {
     if (r.reponse) tour('Claude', r.reponse, false);
     return;
   }
-  const refus = 'Refusée au dernier contrôle' + (r.motif ? ' (' + r.motif + ')' : '') + ' : rien n\'est parti.';
+  /* [S40] l'autorisation vit 5 min : passe ce delai, on le dit en clair */
+  const refus = r.motif === 'AUTORISATION_EXPIREE'
+    ? 'Périmée : plus de 5 min ont passé depuis ta demande. Rien n\'est parti ; redemande-la si tu la veux toujours.'
+    : 'Refusée au dernier contrôle' + (r.motif ? ' (' + r.motif + ')' : '') + ' : rien n\'est parti.';
   clore(jeton, refus);
   tour('JARVIS', refus, false);
   if (r.reponse) tour('Claude', r.reponse, false);
+}
+/* [S40] Une intention perimee ne se ressuscite pas. Vu en ligne le 25 sept :
+ * une vieille carte « retape la cible », plus haut dans le fil, a relance un
+ * envoi apres d'autres messages. Un nouveau message eteint toutes les cartes
+ * encore ouvertes ; le serveur, seul juge, les refuse de toute facon. */
+const TEXTE_PERIMEE = "Périmée : tu as envoyé un autre message, l'action a été annulée. Rien n'est parti.";
+function perimerCarte(boite, texte) {
+  boite.dataset.perimee = '1';
+  for (const x of boite.querySelectorAll('button, input')) x.disabled = true;
+  const p = boite.querySelector('p');
+  if (p) p.textContent = texte || "Carte périmée : la conversation a continué depuis. Redemande ton action si tu la veux toujours.";
+}
+function perimerTout() {
+  for (const b of document.querySelectorAll('#fil .reformuler'))
+    if (!b.dataset.perimee && !b.dataset.utilisee) perimerCarte(b);
+  for (const b of document.querySelectorAll('#fil button[data-finaliser]')) {
+    const jeton = b.dataset.finaliser, boite = b.closest('.retenue');
+    if (boite && !boite.dataset.close && !confirmationsFaites.has(jeton)) clore(jeton, TEXTE_PERIMEE);
+  }
 }
 /* [S35] identité prouvée : la carte est terminée, ses commandes s'éteignent */
 function fermerCarte(boite) {
@@ -965,6 +999,7 @@ async function envoyer() {
    * couche ne le traite pas comme une frappe (un son peut venir d'ailleurs). */
   const voix = Voix.dicte(); Voix.arreter(); Voix.oublier();
   $('envoyer').disabled = true;
+  perimerTout();   /* [S40] le serveur fait de meme a la reception du message */
   tour('Toi', (voix ? '🎤 ' : '') + m, true);
   $('msg').value = '';
   try {
@@ -1035,17 +1070,20 @@ document.addEventListener('click', async (ev) => {
     const champ = boite && boite.querySelector('input.cible');
     const c = champ ? champ.value.trim() : '';
     if (!c) { if (champ) champ.focus(); return; }
-    const corps = { action: boite.dataset.action, cible: c };
-    if (boite.dataset.ressource) corps.resource = boite.dataset.ressource;
+    if (boite.dataset.perimee || boite.dataset.utilisee) return;
+    const corps = { jeton: boite.dataset.jeton || '', cible: c };   /* [S40] */
     t.disabled = true;
     const r = await api('/api/reformuler', corps);
     if (limiteAtteinte(r)) { t.disabled = false; return; }
+    /* [S40] carte perimee (un autre message est parti, ou plus de 2 min) */
+    if (r && r.erreur === 'CARTE_PERIMEE') return perimerCarte(boite, r.message);
     /* [S36] adresse refusee avant le noyau : rien n'est consomme, on corrige */
     if (r && (r.erreur === 'ADRESSE_INVALIDE' || r.erreur === 'DESTINATAIRE_MANQUANT')) {
       tour('JARVIS', r.message || 'Adresse e-mail invalide.', false);
       t.disabled = false; if (champ) champ.focus(); return;
     }
     /* [S20] l'action repart directement avec la cible tapee : on affiche sa decision */
+    boite.dataset.utilisee = '1'; if (champ) champ.disabled = true;   /* [S40] une carte sert une fois */
     tour('JARVIS', 'Cible confirmée au clavier : ' + c + '.', false);
     if (r && r.decision) { majEtat(r.decision); rendreDecision(r.decision); }
     else { majEtat(r); if (r && r.erreur) tour('JARVIS', 'Confirmation impossible : ' + r.erreur, false); }

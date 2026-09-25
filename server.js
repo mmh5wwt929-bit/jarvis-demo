@@ -188,6 +188,17 @@
  *   protegee (24 sur la demo) ; le message ne parle plus de « demo » chez soi.
  *   Limite documentee : la dictee du CLAVIER iOS arrive comme une frappe, la
  *   page ne peut pas la distinguer ; seul le bouton 🎤 est traite comme voix.
+ *
+ * v4.6.4 — vu en ligne le 25 sept (11h13) par Alsid :
+ *   [S40] CARTES PERIMEES : une vieille carte « retape la cible », restee
+ *   active plus haut dans le fil, a relance un envoi apres d'autres messages.
+ *   Chaque carte a desormais un jeton serveur a usage unique (2 min) qui porte
+ *   l'action ; un nouveau message perime les cartes et annule les actions
+ *   encore retenues (« Confirmer l'envoi » -> « perimee », rien ne part).
+ *   [S41] cible INVENTEE par le modele (« micro » pour « 🎤 Paye la facture »)
+ *   : si elle n'est ni une adresse ni dans les mots de la personne -> « A qui ? ».
+ *   [S42] la carte dit QUI lance l'action (« Tu relances », « Tu imposes »,
+ *   « Claude veut ») ; accents retablis dans les textes affiches (couche 5.30.1).
  * ========================================================================== */
 
 const http = require('http');
@@ -366,6 +377,9 @@ const LIMITES = {
   historiqueMax: 16, historiqueCaracteres: 2000,
   /* [S7] creation de sessions par IP : borne l'eviction des sessions des autres */
   sessionsParIpParHeure: 60,
+  /* [S40] une carte « retape la cible » vit 2 min au plus, et seulement
+   * jusqu'au message suivant */
+  reformulationMs: 2 * 60 * 1000, reformulationsParSession: 8,
   /* [S14] actions qui n'appellent pas Claude : gratuites, mais plus illimitees */
   actionsParIpParHeure: nombreEnv('JARVIS_ACTIONS_HEURE', 150, 20, 5000)
 };
@@ -500,7 +514,8 @@ function creerSession() {
    * `entree` ne sert qu'aux deux routes ou la personne tape elle-meme. */
   const { session: g, entree } = creerSessionGouvernee({ plafond: 100, puitsAncrage, exigerElevation: ELEVATION_EXIGEE });   /* [S31] */
   const s = { g, entree, vue: Date.now(), enAttente: new Map(),
-              historique: [], verdicts: [], vig: new Vigilance(), souvenirs: [], creations: new Map(), propositions: new Map() };   /* [S10] [S12] [S30] */
+              historique: [], verdicts: [], vig: new Vigilance(), souvenirs: [], creations: new Map(), propositions: new Map(),
+              reformulations: new Map() };   /* [S10] [S12] [S30] [S40] */
   sessions.set(id, s);
   return { id, s };
 }
@@ -683,6 +698,44 @@ function noterVerdict(s, v) {
   if (s.verdicts.length > 4) s.verdicts.shift();
 }
 
+/* [S40] UNE INTENTION PERIMEE NE SE RESSUSCITE PAS. Vu en ligne le 25 sept
+ * (11h13) : une vieille carte « retape la cible », restee active plus haut
+ * dans le fil, a relance un envoi alors que la conversation etait passee a
+ * autre chose ; Alsid a cru a une action partie toute seule. Prouve sur la
+ * v4.6.3 : (1) /api/reformuler prenait l'ACTION envoyee par la page, sans
+ * savoir a quelle proposition refusee elle repondait (PAY accepte sans aucun
+ * refus prealable) ; (2) une action retenue restait confirmable apres
+ * d'autres messages (jusqu'a l'expiration de l'autorisation, 5 min).
+ * Desormais :
+ *  - chaque carte « retape la cible » recoit un jeton serveur a usage unique
+ *    qui PORTE l'action et la ressource (la page n'envoie plus que le jeton et
+ *    la cible tapee) ; il vit 2 min au plus ;
+ *  - un nouveau message dans la session perime toutes les cartes « retape la
+ *    cible » et annule, dans la couche, toutes les actions encore retenues ;
+ *    leur « Confirmer » repond alors « perimee », rien ne part. */
+const TEXTE_CARTE_PERIMEE = "Carte périmée : la conversation a continué depuis (ou plus de 2 min ont passé). "
+  + "Rien n'a été préparé. Redemande ton action si tu la veux toujours.";
+const TEXTE_ACTION_PERIMEE = "Périmée : tu as envoyé un autre message, l'action a été annulée. Rien n'est parti.";
+function emettreReformulation(s, a) {
+  if (!a || typeof a !== 'object' || typeof a.action !== 'string') return null;
+  const jeton = 'rf_' + crypto.randomUUID();
+  s.reformulations.set(jeton, Object.freeze({ action: a.action, resource: typeof a.resource === 'string' && a.resource ? a.resource : 'LOCAL',
+    nee: performance.now() }));
+  while (s.reformulations.size > LIMITES.reformulationsParSession) s.reformulations.delete(s.reformulations.keys().next().value);
+  return { action: a.action, cible: a.cible, resource: a.resource, jeton };
+}
+function perimerCartes(s) {
+  s.reformulations.clear();
+  for (const [jeton, att] of s.enAttente) {
+    if (!att || att.annule) continue;
+    const r = s.g.annuler(jeton, 'PERIMEE_NOUVEAU_MESSAGE');
+    if (r && r.etat === 'ANNULE') {
+      att.annule = true; att.perime = true;
+      noterVerdict(s, { decide: 'ANNULE', action: att.action, target: att.target, motif: 'PERIMEE_NOUVEAU_MESSAGE' });
+    }
+  }
+}
+
 function memoriser(s, sessionId, question, reponse) {
   if (!sessionId || sessionId === 'anon') return;
   const n = LIMITES.historiqueCaracteres;
@@ -736,11 +789,25 @@ function adresseValide(x) {
 /* montree telle que tapee (espaces compris), sans caracteres de controle ni
  * d'inversion de sens d'ecriture ; la page l'affiche en texte, jamais en HTML */
 const lisible = (v, max) => String(v).replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2066-\u2069\ufeff]/g, '').slice(0, max);
+/* [S41] Vu en ligne le 25 sept : « 🎤 Paye la facture » -> « « micro » n'est
+ * pas une adresse e-mail complete ». Le modele avait INVENTE la cible « micro »
+ * (absente de ce que la personne a dit) et la page la citait comme si elle
+ * venait d'elle. Une cible qui n'est pas une adresse valable ET qui ne figure
+ * pas dans les mots de la personne n'est pas une cible : c'est « A qui ? ».
+ * Seulement pour un plan du modele ; la cible imposee a la main ou retapee
+ * dans la carte EST la frappe de la personne (motsDeLaPersonne = null). */
+const sansAccents = (v) => String(v == null ? '' : v).normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase().replace(/[\s\u00a0]+/g, ' ').trim();
+function dansLesMots(cible, mots) {
+  const c = sansAccents(cible).replace(/^["'«»“”‘’\s]+|["'«»“”‘’\s.,;:!?]+$/g, '');
+  return c.length > 0 && sansAccents(mots).includes(c);
+}
 /* null si la cible convient ; sinon { motif, texte } a dire a la personne. */
-function destinataireRefuse(action, target) {
+function destinataireRefuse(action, target, motsDeLaPersonne) {
   if (!ACTIONS_VERS_PERSONNE.has(String(action || '').toUpperCase())) return null;
   const t = String(target == null ? '' : target).trim();
-  if (!t || t.toUpperCase() === 'CONVERSATION')
+  if (!t || t.toUpperCase() === 'CONVERSATION'
+      || (motsDeLaPersonne != null && !adresseValide(t) && !dansLesMots(t, motsDeLaPersonne)))   /* [S41] */
     return { motif: 'DESTINATAIRE_MANQUANT', texte: "À qui ? Je n'ai pas de destinataire, donc rien n'a été préparé. "
       + "Retape ta demande au clavier avec l'adresse e-mail complète, par exemple « envoie la facture à nom@exemple.fr »." };
   if (!adresseValide(t))
@@ -1041,9 +1108,9 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
   /* L'assistant decide. Le mode manuel reste possible pour les demonstrations. */
   const plan = confirme
     ? { action: confirme.action, resource: confirme.resource, target: confirme.target,
-        pourquoi: confirme.pourquoi || 'cible retapee au clavier par la personne', manuel: true, confirme: true }   /* [S20] */
+        pourquoi: confirme.pourquoi || 'cible retapée au clavier par toi', manuel: true, confirme: true }   /* [S20] [S42] */
     : actionForcee
-    ? { action: actionForcee, resource: 'LOCAL', target: cibleForcee || 'CONVERSATION', pourquoi: 'action imposee', manuel: true }
+    ? { action: actionForcee, resource: 'LOCAL', target: cibleForcee || 'CONVERSATION', pourquoi: 'action imposée à la main', manuel: true }   /* [S42] */
     : await planifier(g, texte);
 
   /* Aucune action a gouverner : l'assistant repond, simplement. */
@@ -1103,7 +1170,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
     memoriser(s, sessionId, texte, "Action retenue par la vigilance : " + propre(acte, 30) + ' vers '
       + propre(plan.target) + '. ' + avis.signaux[0].texte + " La personne doit retaper la cible si elle la veut vraiment.");
     return { decide: 'REFUSE', etape: 'VIGILANCE_INTENTION', motif: 'REFORMULATION_REQUISE',
-      aReformuler: { action: acte, cible: plan.target, resource: plan.resource }, reponse: null,
+      aReformuler: emettreReformulation(s, { action: acte, cible: plan.target, resource: plan.resource }), reponse: null,   /* [S40] */
       plan, note, classe: classeDe(acte), audit: g.auditDepuis(avant), ...etatDe(s) };
   }
 
@@ -1111,7 +1178,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
    * loin : rien n'est soumis au noyau. APRES la vigilance : une action que la
    * personne n'a pas voulue (verbe venu d'un contenu lu) garde son refus et
    * ses alertes ; on ne lui demande jamais « a qui ? » pour elle. */
-  const refusDest = destinataireRefuse(acte, plan.target);
+  const refusDest = destinataireRefuse(acte, plan.target, plan.manuel ? null : texte);   /* [S41] */
   if (refusDest) {
     noterVerdict(s, { decide: 'REFUSE', action: acte, target: propre(plan.target, 80), motif: refusDest.motif });
     memoriser(s, sessionId, texte, refusDest.texte);
@@ -1161,7 +1228,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
     memoriser(s, sessionId, texte, 'Le noyau a refusé cette action : ' + propre(acte, 30) + ' vers '
       + propre(plan.target) + ', motif ' + propre(demande.motif, 40) + '.');
     return sortie({ decide: 'REFUSE', etape: demande.etape, motif: demande.motif,
-      aReformuler: demande.aReformuler || null, reponse: null });
+      aReformuler: emettreReformulation(s, demande.aReformuler), reponse: null });   /* [S40] */
   }
 
   if (demande.fenetreAnnulationMs > 0) {
@@ -1338,10 +1405,10 @@ const serveur = http.createServer((req, res) => {
       detail = true;
     }
     if (!detail)
-      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.6.3',
+      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.6.4',
         acces: 'protege', config: verdict, manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
         node: String(process.versions.node).split('.')[0] });
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.6.3',
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.6.4',
       agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : 'inactif',   /* [S30] */
       elevation: ELEVATION_MAL_CONFIGUREE ? 'erreur-config' : !ELEVATION || !ELEVATION.actif ? 'inactif'   /* [S35] */
         : [ELEVATION.faceId ? 'faceid' : null, ELEVATION.codeSecours ? 'code' : null,
@@ -1419,20 +1486,30 @@ const serveur = http.createServer((req, res) => {
    * demande ulterieure. */
   if (u.pathname === '/api/reformuler' && req.method === 'POST')
     return lire(req, res, async (b) => {
-      if (typeof b.action !== 'string' || typeof b.cible !== 'string' || !b.action || !b.cible.trim())
-        return json(400, { erreur: 'ACTION_ET_CIBLE_REQUISES' });
+      /* [S40] la page n'envoie plus l'action : seulement le jeton de SA carte
+       * et la cible tapee. Action et ressource viennent du serveur. */
+      if (typeof b.jeton !== 'string' || !b.jeton || b.jeton.length > 80 || typeof b.cible !== 'string' || !b.cible.trim())
+        return json(400, { erreur: 'JETON_ET_CIBLE_REQUIS' });
       const s = sessionDe(b.sessionId);
       if (!s) return inconnue();
-      const action = b.action.trim().toUpperCase().slice(0, 40);
+      const carte = s.reformulations.get(b.jeton);
+      if (!carte || performance.now() - carte.nee > LIMITES.reformulationMs) {
+        s.reformulations.delete(b.jeton);
+        return json(409, { erreur: 'CARTE_PERIMEE', message: TEXTE_CARTE_PERIMEE, ...etatDe(s) });
+      }
+      const action = carte.action;
       if (!ACTIONS_CONNUES.includes(action) || action === 'AUCUNE') return json(400, { erreur: 'ACTION_INCONNUE' });
       const cible = b.cible.trim().slice(0, 300);
-      /* [S36] la cible retapee aussi : controlee AVANT de consommer la preuve,
-       * pour qu'une faute de frappe se corrige dans la meme carte */
+      /* [S36] la cible retapee aussi : controlee AVANT de consommer la preuve
+       * ET le jeton, pour qu'une faute de frappe se corrige dans la meme carte */
       const refusDest = destinataireRefuse(action, cible);
       if (refusDest) return json(400, { erreur: refusDest.motif, message: refusDest.texte });
-      const resource = typeof b.resource === 'string' && b.resource.trim() ? b.resource.trim().slice(0, 60) : 'LOCAL';
+      const resource = carte.resource;
       const d = debitAutorise(ipDe(req), 1);   /* une reponse du modele au plus : comptee comme /api/chat */
       if (!d.ok) return json(429, { decide: 'REFUSE', etape: 'DEBIT', motif: d.motif, reessayerDans: d.reessayerDans });
+      /* [S40] usage unique, consomme AVANT toute attente : deux touchers
+       * simultanes sur la meme carte ne preparent qu'une action */
+      s.reformulations.delete(b.jeton);
       const rf = s.entree.reformuler(action, cible);   /* [S16] */
       if (!rf.ok) return json(400, { erreur: rf.motif });
       s.vig.confirmer(action, cible);   /* [S10] frappe humaine : leve le doute sur l'intention */
@@ -1472,6 +1549,12 @@ const serveur = http.createServer((req, res) => {
       const s = sessionDe(id);
       /* [S7] session verifiee AVANT le debit : une session expiree ne coute rien */
       if (!s) return inconnue();
+      /* [S40] action annulee parce que la conversation a continue : on le dit */
+      const perimee = s.enAttente.get(b.jeton);
+      if (perimee && perimee.perime) {
+        s.enAttente.delete(b.jeton);
+        return json(200, { etat: 'PERIME', message: TEXTE_ACTION_PERIMEE, ...etatDe(s) });
+      }
       const d = debitAutorise(ipDe(req), 1);   /* [S4] cette route appelle Claude elle aussi */
       if (!d.ok) return json(429, { etat: 'REFUSE', motif: d.motif, reessayerDans: d.reessayerDans });
       const att = s.enAttente.get(b.jeton);
@@ -1623,6 +1706,7 @@ const serveur = http.createServer((req, res) => {
       /* [S7] session verifiee AVANT le debit : une session expiree ne coute rien */
       const sc = sessionDe(b.sessionId);
       if (!sc) return inconnue();
+      perimerCartes(sc);   /* [S40] un nouveau message : les anciennes cartes ne valent plus */
       sc.souvenirs = M.nettoyerSouvenirs(b.souvenirs);   /* [S12] G6.4 : borne a chaque requete */
       /* [S12] "retiens que" n'appelle pas le modele : il ne coute rien. */
       const poids = (!b.action && M.extraireSouvenir(b.message.slice(0, LIMITES.maxCaracteresPrompt))) ? 0 : 2;

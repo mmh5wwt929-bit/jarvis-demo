@@ -119,9 +119,9 @@ const t = async (id, nom, f) => { let r; try { r = await f(); } catch (e) { r = 
   await dort(400);
   const reelNow = Date.now; let decalage = 0; Date.now = () => reelNow() + decalage;
 
-  await t('H1', '/health : v4.6.x, couche 5.30.0, ecriture active, elevation Face ID + code', async () => {
+  await t('H1', '/health : v4.6.x, couche 5.30.x, ecriture active, elevation Face ID + code', async () => {
     const h = await appel('/health');
-    return { ok: /^v4\.6\.\d+$/.test(h.passerelle) && h.couche === '5.30.0' && h.ecriture === 'actif' && h.elevation === 'faceid+code', info: [h.passerelle, h.couche, h.ecriture, h.elevation].join(' ') };
+    return { ok: /^v4\.6\.\d+$/.test(h.passerelle) && /^5\.30\.\d+$/.test(h.couche) && h.ecriture === 'actif' && h.elevation === 'faceid+code', info: [h.passerelle, h.couche, h.ecriture, h.elevation].join(' ') };
   });
 
   /* ======================= CREATION D'EVENEMENT ======================= */
@@ -212,20 +212,22 @@ const t = async (id, nom, f) => { let r; try { r = await f(); } catch (e) { r = 
   /* ======================= ELEVATION (Face ID / code) ======================= */
   IP = '91.1.2.1';
   const sA = await session();
+  /* [S40 - v4.6.4] une seule action en attente a la fois : un nouveau message
+   * annule celle qui attend. Chaque action de A est donc preparee apres que
+   * la precedente a ete traitee (avant : trois en attente d'un coup). */
   const pend = [];
-  for (const cible of ['pierre@exemple.fr', 'paul@exemple.fr', 'jean@exemple.fr']) {
-    plans.push(planEnvoi(cible)); pend.push(await dire(sA, 'envoie les factures à ' + cible));
-  }
+  plans.push(planEnvoi('pierre@exemple.fr')); pend.push(await dire(sA, 'envoie les factures à pierre@exemple.fr'));
   IP = '91.1.2.2';
   const sB = await session();
   plans.push(planEnvoi('marc@exemple.fr')); const pB = await dire(sB, 'envoie les factures à marc@exemple.fr');
   IP = '91.1.2.3';
   const sC = await session();
-  plans.push(planEnvoi('luc@exemple.fr')); const pC = await dire(sC, 'envoie les factures à luc@exemple.fr', { canal: 'voix' });
+  /* [S40] l'envoi dicte vient en DERNIER dans C : un message apres lui l'annulerait */
   const souvenirVoix = await dire(sC, 'retiens que mon code portail est le 4455', { canal: 'voix' });
   plans.push(planCreer('17:00', 'Match'));
   const creerVoix = await dire(sC, 'ajoute match demain 17h', { canal: 'voix' });
-  await t('E0', "5 actions irreversibles preparees (3 tapees en A, 1 en B, 1 A LA VOIX en C) : toutes en attente", async () =>
+  plans.push(planEnvoi('luc@exemple.fr')); const pC = await dire(sC, 'envoie les factures à luc@exemple.fr', { canal: 'voix' });
+  await t('E0', "3 actions irreversibles preparees (tapee en A, tapee en B, A LA VOIX en C) : toutes en attente", async () =>
     ({ ok: [...pend, pB, pC].every(x => x.decide === 'EN_ATTENTE'), info: [...pend, pB, pC].map(x => x.decide).join(' ') }));
   await dort(10300);
 
@@ -241,8 +243,12 @@ const t = async (id, nom, f) => { let r; try { r = await f(); } catch (e) { r = 
   await t('E2', "Face ID valide -> confirmation executee ; la trace dit « elevation FACE_ID »", async () =>
     ({ ok: fA.ok && fA.elevation.active && e2.etat === 'EXECUTE' && e2.trace.confirmation.elevation === 'FACE_ID',
        info: 'Face ID ' + fA.ok + ' (' + Math.round((fA.jusqua - Date.now()) / 60000) + ' min) ; ' + e2.etat + ' ; trace ' + (e2.trace || { confirmation: {} }).confirmation.elevation }));
+  plans.push(planEnvoi('paul@exemple.fr')); pend.push(await dire(sA, 'envoie les factures à paul@exemple.fr'));
+  await dort(10300);
   const e3 = await appel('/api/finaliser', { sessionId: sA, jeton: pend[1].jetonAnnulation });
   await t('E3', "dans les 15 minutes : l'action suivante se confirme sans redemander Face ID", async () => ({ ok: e3.etat === 'EXECUTE', info: e3.etat }));
+  plans.push(planEnvoi('jean@exemple.fr')); pend.push(await dire(sA, 'envoie les factures à jean@exemple.fr'));
+  await dort(10300);
   decalage = 16 * 60 * 1000;
   const etat16 = await appel('/api/elevation?sessionId=' + sA);
   const e4 = await appel('/api/finaliser', { sessionId: sA, jeton: pend[2].jetonAnnulation });

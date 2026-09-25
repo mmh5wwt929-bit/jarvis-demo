@@ -149,22 +149,21 @@ const B = 'http://localhost:' + BASE;
   const finalisations = () => corps.filter(x => /\/api\/finaliser/.test(x.u)).length;
   const cartes = () => d.querySelectorAll('#fil .elevation').length;
 
+  /* [S40 - v4.6.4] une seule action en attente a la fois : un nouveau message
+   * annule celle qui attend. Chaque action est donc traitee avant la suivante
+   * (avant : deux boites ouvertes en meme temps). P1 et P2 portent sur la 1re. */
   plans.push({ ...envoi }); $('msg').value = 'envoie les factures à pierre@exemple.fr'; clic($('envoyer')); await dort(700);
   const confirmer1 = [...d.querySelectorAll('button[data-finaliser]')].pop();
-  plans.push({ action: 'SEND', resource: 'EMAIL', target: 'luc@exemple.fr' }); $('msg').value = 'envoie les factures à luc@exemple.fr'; clic($('envoyer')); await dort(700);
-  const confirmer2 = [...d.querySelectorAll('button[data-finaliser]')].pop();
   await dort(10400);
 
-  clic(confirmer1); await dort(700);
+  clic(confirmer1); clic(confirmer1); await dort(800);
   const n1 = finalisations(), carte1 = [...d.querySelectorAll('#fil .elevation')].pop();
+  await t('P2', 'deux touchers rapides (avant la réponse du serveur) : une seule requête, une seule carte', async () =>
+    ({ ok: n1 === 1 && cartes() === 1, info: 'requetes ' + n1 + ', cartes ' + cartes() }));
   clic(confirmer1); await dort(400); clic(confirmer1); await dort(400);
-  await t('P1', "« Confirmer l'envoi » touché 3 fois : UNE carte, UNE requête ; les suivants ramènent à la carte (champ du code actif)", async () =>
-    ({ ok: n1 === 1 && finalisations() === 1 && cartes() === 1 && w.__vu === carte1 && d.activeElement === carte1.querySelector('input.code'),
+  await t('P1', "« Confirmer l'envoi » re-touché : toujours UNE carte, UNE requête ; les suivants ramènent à la carte (champ du code actif)", async () =>
+    ({ ok: !!carte1 && finalisations() === 1 && cartes() === 1 && w.__vu === carte1 && d.activeElement === carte1.querySelector('input.code'),
        info: 'requetes ' + finalisations() + ', cartes ' + cartes() + ', focus ' + (d.activeElement && d.activeElement.className) }));
-
-  clic(confirmer2); clic(confirmer2); await dort(800);
-  await t('P2', 'deux touchers rapides (avant la réponse du serveur) : une seule requête, une seule carte de plus', async () =>
-    ({ ok: finalisations() === 2 && cartes() === 2, info: 'requetes ' + finalisations() + ', cartes ' + cartes() }));
 
   const champ = carte1.querySelector('input.code');
   await t('P3', 'le champ du code : clavier à chiffres, masqué', async () =>
@@ -177,7 +176,7 @@ const B = 'http://localhost:' + BASE;
   await t('P4', "bon code : envoyé, carte éteinte, la boîte dit « Envoyé. », ses boutons s'éteignent, rien ne se relance", async () =>
     ({ ok: /Code validé/.test(carte1.textContent) && /Envoyé\./.test($('fil').textContent) && carte1.dataset.fini === '1'
          && [...carte1.querySelectorAll('button, input')].every(x => x.disabled) && boite1.querySelector('.compte').textContent === 'Envoyé.'
-         && [...boite1.querySelectorAll('button')].every(x => x.disabled) && finalisations() === nApres && cartes() === 2,
+         && [...boite1.querySelectorAll('button')].every(x => x.disabled) && finalisations() === nApres && cartes() === 1,
        info: 'fini=' + carte1.dataset.fini + ', boite « ' + boite1.querySelector('.compte').textContent + ' », requetes ' + finalisations() }));
 
   const bulles = () => d.querySelectorAll('#fil .tour').length;
@@ -188,17 +187,19 @@ const B = 'http://localhost:' + BASE;
        info: 'bulles +' + (bulles() - b0) + ', requetes +' + (finalisations() - f0) }));
 
   /* action 2 : envoyée PAR AILLEURS (autre onglet), la page ne le sait pas */
+  plans.push({ action: 'SEND', resource: 'EMAIL', target: 'luc@exemple.fr' }); $('msg').value = 'envoie les factures à luc@exemple.fr'; clic($('envoyer')); await dort(700);
+  const confirmer2 = [...d.querySelectorAll('button[data-finaliser]')].pop();
+  await dort(10400);
   const sidPage = corps.filter(x => x.b && x.b.sessionId).pop().b.sessionId;
-  const carte2 = [...d.querySelectorAll('#fil .elevation')].find(c => c.dataset.jeton === confirmer2.dataset.finaliser);
   const ailleurs = await fetch(B + '/api/finaliser', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Jarvis-Cle': CLE },
     body: JSON.stringify({ sessionId: sidPage, jeton: confirmer2.dataset.finaliser }) }).then(r => r.json());
   const b1 = bulles();
-  carte2.querySelector('input.code').value = CODE; clic(carte2.querySelector('[data-code]')); await dort(900);
+  clic(confirmer2); await dort(600);
   const boite2 = confirmer2.closest('.retenue'), b2 = bulles();
   clic(confirmer2); clic(confirmer2); clic(boite2.querySelector('[data-annuler]')); await dort(500);
   await t('P8', "action déjà partie ailleurs : la boîte dit « Déjà traitée », UNE fois ; plus jamais « Pas encore : INTROUVABLE »", async () =>
     ({ ok: ailleurs.etat === 'EXECUTE' && /Déjà traitée/.test(boite2.querySelector('.compte').textContent) && !/INTROUVABLE/.test($('fil').textContent)
-         && bulles() === b2 && [...boite2.querySelectorAll('button')].every(x => x.disabled) && !/jamais eu lieu/.test($('fil').textContent),
+         && bulles() === b2 && b2 === b1 && [...boite2.querySelectorAll('button')].every(x => x.disabled) && !/jamais eu lieu/.test($('fil').textContent),
        info: 'ailleurs ' + ailleurs.etat + ' ; boite « ' + boite2.querySelector('.compte').textContent.slice(0, 40) + ' » ; bulles +' + (bulles() - b1) }));
 
   /* action 3 : annulée pendant la fenêtre ; décompte dans SA boîte */

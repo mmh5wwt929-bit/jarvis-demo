@@ -221,7 +221,8 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   plans.push({ action: 'SEND', resource: 'EMAIL', target: 'alsid@exemple.fr' });
   const q1 = await appel('/api/chat', { sessionId: sid2, message: 'À alsid@exemple.fr' });
   const avantConf = appelsModele.length;
-  const q2 = await appel('/api/reformuler', { sessionId: sid2, action: 'SEND', cible: 'alsid@exemple.fr', resource: 'EMAIL' });
+  /* [S40 - v4.6.4] la carte porte un jeton du serveur ; la page n'envoie plus l'action */
+  const q2 = await appel('/api/reformuler', { sessionId: sid2, jeton: (q1.aReformuler || {}).jeton, cible: 'alsid@exemple.fr' });
   const d2 = q2.decision || {};
   await t('V19', "sequence vue en ligne : cible retapee -> l'envoi est retenu 10 s tout de suite, sans repasser par le modele", async () =>
     ({ ok: q1.motif === 'REFORMULATION_REQUISE' && d2.decide === 'EN_ATTENTE' && !!d2.jetonAnnulation && appelsModele.length === avantConf,
@@ -229,7 +230,7 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   await t('V19b', "apres confirmation au clavier, la carte dit « cible retapee par toi », sans l'alerte de provenance devenue fausse", async () => {
     const sig = ((d2.note || {}).signaux || []).map(x => x.texte), alt = (d2.note || {}).alternatives || [];
     return { ok: /Cible retapée par toi au clavier/.test(sig[0] || '') && !sig.some(x => /contenu externe|pas de toi|pas par toi/.test(x))
-               && !alt.some(a => /reformuler/i.test(a)) && sig.some(x => /rreversible/.test(x)),
+               && !alt.some(a => /reformuler/i.test(a)) && sig.some(x => /rr[eé]versible/.test(x)),
              info: sig.slice(0, 3).join(' | ').slice(0, 110) };
   });
   await t('V19c', "un REFUS garde ses alertes de provenance (elles y sont vraies)", async () => {
@@ -241,17 +242,29 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   const q3 = await appel('/api/chat', { sessionId: sid2, message: 'renvoie-le' });
   await t('V20', 'la confirmation au clavier ne sert qu\'une fois (consommee tout de suite)', async () =>
     ({ ok: q3.decide === 'REFUSE' && q3.motif === 'REFORMULATION_REQUISE' && !q3.jetonAnnulation, info: q3.decide + ' / ' + q3.motif }));
-  const q4 = await appel('/api/reformuler', { sessionId: sid2, action: 'AUCUNE', cible: 'x' });
-  const q5 = await appel('/api/reformuler', { sessionId: sid2, action: 'EFFACER_TOUT', cible: 'x' });
-  const q6 = await appel('/api/reformuler', { sessionId: sid2, action: 'SEND', cible: '   ' });
+  /* [S40] l'action n'est plus choisie par la page : sans jeton, jeton invente, cible blanche */
+  const q4 = await appel('/api/reformuler', { sessionId: sid2, action: 'EFFACER_TOUT', cible: 'x' });
+  const q5 = await appel('/api/reformuler', { sessionId: sid2, jeton: 'rf_00000000-0000-4000-8000-000000000000', cible: 'alsid@exemple.fr' });
+  const q6 = await appel('/api/reformuler', { sessionId: sid2, jeton: (q3.aReformuler || {}).jeton, cible: '   ' });
   IP = '87.88.3.3';
   const sid3 = (await appel('/api/session', {})).sessionId;
   /* [S39] instance protegee : 60 appels/h par defaut (24 avant) -> 100 essais */
-  let q7; for (let i = 0; i < 100; i++) { q7 = await appel('/api/reformuler', { sessionId: sid3, action: 'READ', cible: 'x' + i, resource: 'LOCAL' }); if (q7.status === 429) break; }
-  await t('V21', 'confirmation avec action vide, inconnue, ou cible blanche : refusee', async () =>
-    ({ ok: q4.status === 400 && q5.status === 400 && q6.status === 400, info: [q4.erreur, q5.erreur, q6.erreur].join(' ') }));
+  /* [S40] chaque carte vient d'un message (2 appels) ; sa confirmation en coute 1 :
+   * 60 appels = 20 tours complets. Si la confirmation etait gratuite : 30. */
+  let q7, tours = 0;
+  for (let i = 0; i < 100; i++) {
+    const c = 'a' + i + '@exemple.fr';   /* une cible nouvelle a chaque tour : toujours une carte */
+    plans.push({ action: 'SEND', resource: 'EMAIL', target: c });
+    const r = await appel('/api/chat', { sessionId: sid3, message: 'ok' + i });
+    if (r.status === 429) { q7 = r; plans.pop(); break; }   /* plan non consomme : ne pas decaler la suite */
+    q7 = await appel('/api/reformuler', { sessionId: sid3, jeton: (r.aReformuler || {}).jeton, cible: c });
+    if (q7.status === 429) break;
+    tours++;
+  }
+  await t('V21', 'confirmation sans jeton (action choisie par la page), jeton invente, ou cible blanche : refusee', async () =>
+    ({ ok: q4.status === 400 && q5.status === 409 && q5.erreur === 'CARTE_PERIMEE' && q6.status === 400, info: [q4.erreur, q5.erreur, q6.erreur].join(' ') }));
   await t('V21b', 'la confirmation compte dans le budget IA : pas de contournement de la limite horaire', async () =>
-    ({ ok: q7.status === 429 && /LIMITE/.test(String(q7.motif)), info: 'apres repetition : ' + q7.status + ' ' + q7.motif }));
+    ({ ok: q7.status === 429 && /LIMITE/.test(String(q7.motif)) && tours === 20, info: 'apres ' + tours + ' tours : ' + q7.status + ' ' + q7.motif }));
   await t('V22', "le texte de journal de la confirmation n'est JAMAIS declare comme une frappe (verification du code)", async () => {
     const src = require('fs').readFileSync(path.join(DIR, 'server.js'), 'utf8');
     return { ok: /if \(!confirme\) s\.entree\.soumettre\(texte[,)]/.test(src) && (src.match(/s\.entree\.soumettre\(/g) || []).length === 1,
@@ -296,22 +309,23 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
     return { ok: ouverts.length === 0, info: res27.map(x => x.status).join(' ') + (ouverts.length ? ' | OUVERTS : ' + ouverts.map(x => x.c).join(' ') : '') };
   });
 
-  /* ---- [S25] doublon d'une action en attente ---- */
+  /* ---- [S25] -> [S40] redemande pendant l'attente ---- */
+  /* v4.6.4 : un nouveau message annule l'action qui attend. Redemander la
+   * meme chose ne fait plus un doublon refuse : l'ancienne est perimee, une
+   * seule reste en attente. */
   IP = '87.88.6.6';
   const sid6 = (await appel('/api/session', {})).sessionId;
   plans.push({ action: 'SEND', resource: 'EMAIL', target: 'compta@exemple.fr' });
   const e1 = await appel('/api/chat', { sessionId: sid6, message: 'envoie les factures à compta@exemple.fr' });
   plans.push({ action: 'SEND', resource: 'EMAIL', target: 'compta@exemple.fr' });
   const e2 = await appel('/api/chat', { sessionId: sid6, message: 'envoie les factures à compta@exemple.fr' });
-  if (e1.jetonAnnulation) await appel('/api/annuler', { sessionId: sid6, jeton: e1.jetonAnnulation });
-  plans.push({ action: 'SEND', resource: 'EMAIL', target: 'compta@exemple.fr' });
-  const e3 = await appel('/api/chat', { sessionId: sid6, message: 'envoie les factures à compta@exemple.fr' });
-  if (e3.jetonAnnulation) await appel('/api/annuler', { sessionId: sid6, jeton: e3.jetonAnnulation });
-  await t('V28', "doublon pendant l'attente : refuse, avec une phrase claire ; apres annulation, la redemande passe", async () => {
-    const sig = ((e2.note || {}).signaux || []).map(x => x.texte);
-    return { ok: e1.decide === 'EN_ATTENTE' && e2.decide === 'REFUSE' && /déjà en attente/.test(sig[0] || '') && e3.decide === 'EN_ATTENTE',
-             info: [e1.decide, e2.decide + ' (' + (/déjà en attente/.test(sig[0] || '') ? 'expliqué' : 'OBSCUR') + ')', e3.decide].join(' → ') };
-  });
+  const f1 = await appel('/api/finaliser', { sessionId: sid6, jeton: e1.jetonAnnulation });
+  const f1b = await appel('/api/finaliser', { sessionId: sid6, jeton: e1.jetonAnnulation });
+  if (e2.jetonAnnulation) await appel('/api/annuler', { sessionId: sid6, jeton: e2.jetonAnnulation });
+  await t('V28', "redemande pendant l'attente : l'ancienne est perimee (dit en clair), la nouvelle seule attend", async () =>
+    ({ ok: e1.decide === 'EN_ATTENTE' && e2.decide === 'EN_ATTENTE' && f1.etat === 'PERIME' && /Rien n'est parti/.test(f1.message || '')
+         && f1b.etat !== 'EXECUTE',
+       info: [e1.decide, e2.decide, 'ancienne ' + f1.etat, 'retouchee ' + f1b.etat].join(' → ') }));
 
   await t('V17', "couche [O1] : un outil declare ne peut pas ouvrir une nouvelle ligne de consigne dans le prompt", async () => {
     const P = require(path.join(DIR, 'jarvis-plus-5.29.js'));

@@ -2,6 +2,10 @@
 /* ============================================================================
  * JARVIS+ 5.29 — COUCHE DE GOUVERNANCE (sur noyau 5.28.3)
  * ----------------------------------------------------------------------------
+ * 5.30.1 (25 sept 2026) — [S40] annuler(jeton, motif) : le journal distingue
+ *  l'annulation par la personne de l'annulation d'une action perimee (un autre
+ *  message est arrive pendant qu'elle attendait) ; motif sur liste fermee.
+ *  [S42] accents retablis dans les textes affiches (note, alternatives).
  * 5.30.0 (24 sept 2026) — [V1] canal de frappe (clavier / voix) : la voix seule
  *  n'autorise pas l'irreversible sans Face ID ; [V2] elevation Face ID / code,
  *  15 min au plus, exigee a la confirmation d'une action irreversible ;
@@ -425,7 +429,7 @@ function noteDeDecision({ spec, classe, plancher, influences, ciblesVues, heure 
   const signaux = [], alternatives = [];
   let risque = 0;
 
-  if (classe === 'IRREVERSIBLE') { risque += 40; signaux.push({ poids: 'fort', texte: 'Action irreversible : aucun retour arriere possible.' }); }
+  if (classe === 'IRREVERSIBLE') { risque += 40; signaux.push({ poids: 'fort', texte: 'Action irréversible : aucun retour arrière possible.' }   /* [S42] accents */); }
   else if (classe === 'COMPENSABLE') { risque += 15; signaux.push({ poids: 'moyen', texte: 'Action annulable, mais seulement par une action de compensation.' }); }
 
   if (plancher !== 'USER_DIRECT') {
@@ -434,7 +438,7 @@ function noteDeDecision({ spec, classe, plancher, influences, ciblesVues, heure 
       poids: plancher === 'CONTENT_DERIVED' ? 'fort' : 'moyen',
       texte: plancher === 'CONTENT_DERIVED'
         ? "L'intention descend d'un contenu externe, pas de toi."
-        : "L'intention vient d'une deduction du modele, pas d'une consigne directe."
+        : "L'intention vient d'une déduction du modèle, pas d'une consigne directe."
     });
     if (influences.length) signaux.push({ poids: 'info', texte: 'Origine : ' + influences.map(i => i.source).join(', ') });
   }
@@ -451,11 +455,11 @@ function noteDeDecision({ spec, classe, plancher, influences, ciblesVues, heure 
   }
 
   if (classe === 'IRREVERSIBLE' && /^(SEND|PUBLISH)$/i.test(spec.action))
-    alternatives.push("Exporter en local et envoyer toi-meme : meme resultat, tu gardes la main.");
+    alternatives.push("Exporter en local et envoyer toi-même : même résultat, tu gardes la main.");
   if (classe === 'IRREVERSIBLE' && /^DELETE$/i.test(spec.action))
-    alternatives.push("Deplacer vers une corbeille plutot que supprimer : reversible.");
+    alternatives.push("Déplacer vers une corbeille plutôt que supprimer : réversible.");
   if (plancher === 'CONTENT_DERIVED')
-    alternatives.push("Reformuler toi-meme la cible : un texte injecte ne traverse pas un clavier.");
+    alternatives.push("Reformuler toi-même la cible : un texte injecté ne traverse pas un clavier.");
 
   const niveau = risque >= 60 ? 'ELEVE' : risque >= 30 ? 'MOYEN' : 'FAIBLE';
   return {
@@ -933,7 +937,7 @@ ${demandeUtilisateur}`
         provenanceCible = 'DEMANDE_UTILISATEUR';
         note = this.note(spec);
         note.signaux.unshift({ poids: 'info',
-          texte: 'Cible tapee par toi dans cette demande : provenance verifiee pour cet argument.' });
+          texte: 'Cible tapée par toi dans cette demande : provenance vérifiée pour cet argument.' });
         preuve = { nature: d.canal === 'voix' ? 'VOIX' : 'FRAPPE', texte: String(d.texte) };
       } else preuve = { nature: 'CIBLE_RETAPEE', texte: String(spec.target || spec.resource) };
       plancher = 'USER_DIRECT';
@@ -1080,13 +1084,18 @@ ${demandeUtilisateur}`
     return rec && rec.etat === 'PENDING' && rec.transactionId === jeton ? rec : null;
   }
 
-  annuler(jeton) {
+  /* [S40 - 5.30.1] le journal dit POURQUOI l'action a ete annulee : par la
+   * personne (bouton « Annuler ») ou parce qu'elle a envoye un autre message
+   * pendant que l'action attendait (carte perimee). Motif sur liste fermee :
+   * rien d'autre ne s'ecrit dans le journal. */
+  annuler(jeton, motif) {
+    const m = motif === 'PERIMEE_NOUVEAU_MESSAGE' ? motif : 'ANNULE_PAR_UTILISATEUR';
     const rec = this.#enAttenteDe(jeton);
     if (!rec) return { etat: 'INTROUVABLE' };
     this.#enAttente.delete(jeton);
-    this.#transition(rec, 'CANCELLED', 'ANNULE_PAR_UTILISATEUR');
+    this.#transition(rec, 'CANCELLED', m);
     try { this.#j.permissions.revoke(rec.propositionId); } catch { /* deja inactive */ }
-    this.#journal.push({ ts: this.#h.mur(), evenement: 'ANNULE_PAR_UTILISATEUR',
+    this.#journal.push({ ts: this.#h.mur(), evenement: m,
       autorisationId: rec.autorisationId, transactionId: rec.transactionId,
       action: rec.spec.action, cible: rec.spec.target });
     return { etat: 'ANNULE', message: "L'action n'a jamais eu lieu." };
@@ -1421,5 +1430,5 @@ module.exports = Object.freeze({
   noteDeDecision, classeDe, REVERSIBILITE, NIVEAUX, FENETRE_ANNULATION_MS, STATUTS_ANCRAGE,
   TRANSITIONS_TX, HorlogeCouche, creerSessionGouvernee, LIMITES_GOUVERNANCE,
   noyau: K,
-  VERSION: '5.30.0'   /* [S33] lue par /health : prouve quel fichier est vraiment chargé */
+  VERSION: '5.30.1'   /* [S33] lue par /health : prouve quel fichier est vraiment chargé ; [S40] [S42] */
 });
