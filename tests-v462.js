@@ -92,7 +92,7 @@ const B = 'http://localhost:' + BASE;
     const cas = { '509183746201': true, ['9'.repeat(64)]: true, '482913': false, '50918374620': false, 'abcdefghijkl': false,
       'Jarvis2026!!x': false, '5091 8374 6201': false, ['9'.repeat(65)]: false, '': false };
     const faux = Object.entries(cas).filter(([c, attendu]) => EL.creerElevation({ code: c }).codeSecours !== attendu || EL.codeValide(c) !== attendu);
-    return { ok: faux.length === 0 && EL.VERSION === '1.1', info: faux.length ? 'faux sur ' + faux.map(x => JSON.stringify(x[0])).join(', ') : 'elevation ' + EL.VERSION };
+    return { ok: faux.length === 0 && /^1\.[1-9]$/.test(EL.VERSION) /* [v4.6.5] 1.2 : defi lie a l'action */, info: faux.length ? 'faux sur ' + faux.map(x => JSON.stringify(x[0])).join(', ') : 'elevation ' + EL.VERSION };
   });
 
   /* ======================= FERME PAR DEFAUT (serveur) ======================= */
@@ -107,7 +107,7 @@ const B = 'http://localhost:' + BASE;
     const d = await mal.appel('/api/chat', { sessionId: sid, message: 'envoie les factures à pierre@exemple.fr' });
     await dort(10400);
     const f1 = await mal.appel('/api/finaliser', { sessionId: sid, jeton: d.jetonAnnulation });
-    const c = await mal.appel('/api/elevation/code', { sessionId: sid, code: 'abcdefghijkl' });
+    const c = await mal.appel('/api/elevation/code', { sessionId: sid, code: 'abcdefghijkl', jeton: d.jetonAnnulation });   /* [v4.6.5] par action */
     const f2 = await mal.appel('/api/finaliser', { sessionId: sid, jeton: d.jetonAnnulation });
     return { ok: d.decide === 'EN_ATTENTE' && f1.etat === 'ELEVATION_REQUISE' && f1.moyens.erreurConfig === true && f1.moyens.code === false
       && !c.ok && f2.etat === 'ELEVATION_REQUISE',
@@ -191,6 +191,9 @@ const B = 'http://localhost:' + BASE;
   const confirmer2 = [...d.querySelectorAll('button[data-finaliser]')].pop();
   await dort(10400);
   const sidPage = corps.filter(x => x.b && x.b.sessionId).pop().b.sessionId;
+  /* [v4.6.5 - S46] regle stricte : l'autre onglet confirme CETTE action avec le code */
+  await fetch(B + '/api/elevation/code', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Jarvis-Cle': CLE },
+    body: JSON.stringify({ sessionId: sidPage, jeton: confirmer2.dataset.finaliser, code: CODE }) });
   const ailleurs = await fetch(B + '/api/finaliser', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Jarvis-Cle': CLE },
     body: JSON.stringify({ sessionId: sidPage, jeton: confirmer2.dataset.finaliser }) }).then(r => r.json());
   const b1 = bulles();

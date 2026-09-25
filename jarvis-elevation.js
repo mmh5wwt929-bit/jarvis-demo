@@ -12,6 +12,11 @@
  *  - CODE : un code de secours (JARVIS_CODE_SECOURS), si Face ID manque.
  *    [1.1] 12 a 64 CHIFFRES : la page l'affiche avec le clavier a chiffres ;
  *    un code avec des lettres etait accepte mais impossible a taper.
+ *  [1.2] REGLE STRICTE (v4.6.5) : le defi Face ID est LIE a l'action retenue
+ *    qu'il doit confirmer (identifiant + empreinte de la transaction). Le defi
+ *    lui-meme en derive (SHA-256 d'un alea et de ce lien) : la signature de
+ *    l'appareil porte sur CETTE action. Un defi emis pour une action ne
+ *    confirme jamais une autre (DEFI_AUTRE_ACTION).
  *
  * CE QUI EST VERIFIE A CHAQUE FACE ID
  *  - defi aleatoire (32 octets), a usage unique, valable 2 min, lie a la session ;
@@ -111,7 +116,7 @@ function creerElevation({ passkeys, code, rpId, origine, maintenant = () => Date
   const L = Object.freeze({ ...LIMITES_ELEVATION, ...(limites || {}) });
   const cles = lirePasskeys(passkeys);
   const codeOk = codeValide(code) ? sha256(Buffer.from(code, 'utf8')) : null;   /* [1.1] */
-  const defis = new Map();       /* sessionId -> { defi, type, expire } */
+  const defis = new Map();       /* sessionId -> { defi, type, expire, lien } */
   const echecs = new Map();      /* cle (session ou adresse) -> [horodatages] */
   const compteurs = new Map();   /* id de cle -> dernier compteur vu */
 
@@ -123,9 +128,11 @@ function creerElevation({ passkeys, code, rpId, origine, maintenant = () => Date
   const purger = () => { const t = maintenant(); for (const [k, v] of defis) if (v.expire < t) defis.delete(k); };
   const bloque = (...cs) => { const t = maintenant(); return cs.some(c => (echecs.get(c) || []).filter(x => t - x < L.fenetreEchecsMs).length >= L.echecsMax); };
   const echec = (motif, ...cs) => { const t = maintenant(); for (const c of cs) { const l = (echecs.get(c) || []).filter(x => t - x < L.fenetreEchecsMs); l.push(t); echecs.set(c, l.slice(-20)); } return Object.freeze({ ok: false, motif }); };
-  const prendreDefi = (sessionId, type) => {
+  const lienValide = (l) => l === undefined || l === null || (typeof l === 'string' && /^[A-Za-z0-9_|:.-]{1,200}$/.test(l));
+  const prendreDefi = (sessionId, type, lien) => {
     const d = defis.get(sessionId); defis.delete(sessionId);          /* usage unique, meme en cas d'echec */
     if (!d || d.type !== type || d.expire < maintenant()) return null;
+    if (d.lien !== (lien == null ? null : lien)) throw new Error('DEFI_AUTRE_ACTION');   /* [1.2] */
     return d.defi;
   };
   const lireClientData = (b64, type, attendu, s) => {
@@ -138,11 +145,13 @@ function creerElevation({ passkeys, code, rpId, origine, maintenant = () => Date
     if (c.crossOrigin === true) throw new Error('ORIGINE_CROISEE');
     return brut;
   };
-  const nouveauDefi = (sessionId, type) => {
+  const nouveauDefi = (sessionId, type, lien) => {
     purger();
     if (defis.size >= L.maxDefis) return null;
-    const defi = b64u(crypto.randomBytes(32));
-    defis.set(sessionId, { defi, type, expire: maintenant() + L.defiMs });
+    /* [1.2] lie a une action : le defi derive de l'alea ET du lien */
+    const alea = crypto.randomBytes(32);
+    const defi = b64u(lien == null ? alea : sha256(Buffer.concat([alea, Buffer.from('JARVIS-ELEVATION|' + lien, 'utf8')])));
+    defis.set(sessionId, { defi, type, expire: maintenant() + L.defiMs, lien: lien == null ? null : lien });
     return defi;
   };
 
@@ -178,20 +187,22 @@ function creerElevation({ passkeys, code, rpId, origine, maintenant = () => Date
     },
 
     /* ---- Face ID : prouver la presence de la personne ---- */
-    defiAssertion(sessionId, hote, adresse) {
+    defiAssertion(sessionId, hote, adresse, lien) {
       if (!cles.size) return Object.freeze({ ok: false, motif: 'FACE_ID_NON_CONFIGURE' });
+      if (!lienValide(lien)) return Object.freeze({ ok: false, motif: 'LIEN_INVALIDE' });   /* [1.2] */
       if (bloque('s:' + sessionId, 'a:' + adresse)) return Object.freeze({ ok: false, motif: 'TROP_D_ECHECS' });
       const s = site(hote); if (!s) return Object.freeze({ ok: false, motif: 'SITE_INVALIDE' });
-      const defi = nouveauDefi(String(sessionId), 'assertion'); if (!defi) return Object.freeze({ ok: false, motif: 'TROP_DE_DEFIS' });
+      const defi = nouveauDefi(String(sessionId), 'assertion', lien); if (!defi) return Object.freeze({ ok: false, motif: 'TROP_DE_DEFIS' });
       return Object.freeze({ ok: true, options: { challenge: defi, rpId: s.rpId, timeout: 60000, userVerification: 'required',
         allowCredentials: [...cles.keys()].map(id => ({ type: 'public-key', id })) } });
     },
-    verifierAssertion(sessionId, hote, adresse, r) {
+    verifierAssertion(sessionId, hote, adresse, r, lien) {
       const ks = ['s:' + sessionId, 'a:' + adresse];
       if (bloque(...ks)) return Object.freeze({ ok: false, motif: 'TROP_D_ECHECS' });
       const s = site(hote); if (!s) return echec('SITE_INVALIDE', ...ks);
       try {
-        const attendu = prendreDefi(String(sessionId), 'assertion');
+        if (!lienValide(lien)) throw new Error('LIEN_INVALIDE');
+        const attendu = prendreDefi(String(sessionId), 'assertion', lien);   /* [1.2] */
         const c = cles.get(r && r.id); if (!c) throw new Error('CLE_INCONNUE');
         const brut = lireClientData(r.clientDataJSON, 'webauthn.get', attendu, s);
         const adBrut = deB64u(r.authenticatorData); const ad = lireAuthData(adBrut, false);
@@ -202,7 +213,7 @@ function creerElevation({ passkeys, code, rpId, origine, maintenant = () => Date
         const avant = compteurs.get(c.id) || 0;
         if ((ad.compteur !== 0 || avant !== 0) && ad.compteur <= avant) throw new Error('COMPTEUR');
         compteurs.set(c.id, ad.compteur);
-        return Object.freeze({ ok: true, mode: 'FACE_ID' });
+        return Object.freeze({ ok: true, mode: 'FACE_ID', lien: lien == null ? null : lien });
       } catch (e) { return echec('FACE_ID_REFUSE_' + String(e && e.message || 'ERREUR').slice(0, 30), ...ks); }
     },
 
@@ -218,4 +229,4 @@ function creerElevation({ passkeys, code, rpId, origine, maintenant = () => Date
   });
 }
 
-module.exports = { creerElevation, codeValide, decoderCbor, lireAuthData, coseVersJwk, lirePasskeys, b64u, deB64u, LIMITES_ELEVATION, VERSION: '1.1' };
+module.exports = { creerElevation, codeValide, decoderCbor, lireAuthData, coseVersJwk, lirePasskeys, b64u, deB64u, LIMITES_ELEVATION, VERSION: '1.2' };

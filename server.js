@@ -199,6 +199,34 @@
  *   : si elle n'est ni une adresse ni dans les mots de la personne -> « A qui ? ».
  *   [S42] la carte dit QUI lance l'action (« Tu relances », « Tu imposes »,
  *   « Claude veut ») ; accents retablis dans les textes affiches (couche 5.30.1).
+ *
+ * v4.6.5 — audit de la v4.6.4 (risques reproduits hors ligne) et retours
+ * d'Alsid du 25 sept apres-midi :
+ *   [S43] COURSES : deux messages quasi simultanes -> la carte du 1er naissait
+ *   APRES le 2e et restait utilisable. Compteur de tours par session : un
+ *   message depasse par un plus recent ne produit ni carte ni action. Un
+ *   nouveau message perime aussi la carte « Creer » d'un evenement.
+ *   [S44] PREUVE LIMITEE A SON TOUR (couche 5.30.2) ; cote serveur, une cible
+ *   retapee ne leve plus la vigilance pour les messages suivants.
+ *   [S45] RESSOURCE FIXEE PAR LE SERVEUR selon l'action (liste fermee) :
+ *   « envoie … » + BANQUE choisi par le modele donnait SEND/BANQUE.
+ *   [S46] REGLE STRICTE (choisie par Alsid) : Face ID ou code a CHAQUE action
+ *   irreversible, defi et code lies a l'empreinte de CETTE action, consommes a
+ *   l'envoi. Avant : 15 min pour toute la session (un code donne pour un
+ *   envoi laissait passer un paiement).
+ *   [S47] carte « retape la cible » : une phrase tapee au lieu de l'adresse ->
+ *   « tape seulement l'adresse » ; a la voix, « la dictee a sans doute mal
+ *   entendu » ; « Tu demandes : » ; verbe + adresse ecrits par la personne =
+ *   action proposee meme si le modele n'a rien prepare ; apres un envoi, la
+ *   reponse dit toujours « en simulation ».
+ *
+ * v4.6.6 — BRANCHER GOOGLE (ecriture 1.1), avant le premier evenement reel :
+ *   [S48] diagnostic sans rien ecrire (cle, agenda, droit d'ecriture) :
+ *   GET /api/ecriture/diagnostic et bouton « Verifier la connexion Google »
+ *   dans la page ; une variable Google mal collee est nommee dans /api/health
+ *   (« ecriture : erreur-config » + motif), au lieu d'un « inactif » muet ;
+ *   erreurs de mise en place dites en francais (API non activee, agenda
+ *   introuvable ou non partage, partage en lecture seule, cle revoquee…).
  * ========================================================================== */
 
 const http = require('http');
@@ -211,7 +239,7 @@ const crypto = require('crypto');
 const K = require('./jarvis-5.28.3.js');
 const P = require('./jarvis-plus-5.29.js');
 const { SessionGouvernee, creerSessionGouvernee, classeDe, SONDES_M, lancerSondeM } = P;
-const { Vigilance } = require('./jarvis-vigilance.js');   /* [S10] */
+const { Vigilance, analyserIntention, separer } = require('./jarvis-vigilance.js');   /* [S10] [S47] */
 const M = require('./jarvis-memoire.js');                  /* [S12] */
 const AG = require('./jarvis-agenda.js');                   /* [S19] */
 const EC = require('./jarvis-ecriture.js');                 /* [S30] */
@@ -298,17 +326,17 @@ if (process.env.JARVIS_AGENDA_ICAL) {
 
 /* [S30] ECRITURE : l'agenda DEDIE « JARVIS », via un compte de service Google
  * auquel la personne n'a partage que cet agenda. Instance protegee seulement. */
-let ECRITURE = null;
+let ECRITURE = null, ECRITURE_MOTIF = null;   /* [S48] pourquoi elle est ignoree (un motif fixe, jamais un secret) */
 if (process.env.JARVIS_GOOGLE_COMPTE || process.env.JARVIS_AGENDA_JARVIS) {
   if (!CLE_ACCES) console.error('Ecriture : IGNOREE : instance publique (pas de JARVIS_CLE_ACCES).');
   else {
     const e = EC.creerEcriture({ compte: process.env.JARVIS_GOOGLE_COMPTE, agendaId: process.env.JARVIS_AGENDA_JARVIS, zone: FUSEAU });
-    if (e.actif) ECRITURE = e; else console.error('Ecriture : ignoree (' + e.motif + ').');
+    if (e.actif) ECRITURE = e; else { ECRITURE_MOTIF = e.motif; console.error('Ecriture : ignoree (' + e.motif + ').'); }
   }
 }
 /* [S31] ELEVATION : Face ID (JARVIS_PASSKEYS) et/ou code de secours
  * (JARVIS_CODE_SECOURS). Des qu'un des deux existe, toute action IRREVERSIBLE
- * exige une elevation de moins de 15 min au moment de la confirmer. */
+ * exige une elevation au moment de la confirmer : [S46] une par action. */
 const ELEVATION = CLE_ACCES ? EL.creerElevation({ passkeys: process.env.JARVIS_PASSKEYS, code: process.env.JARVIS_CODE_SECOURS,
   rpId: process.env.JARVIS_RP_ID || undefined }) : null;
 /* [S35] sur une instance personnelle, une variable d'elevation PRESENTE veut
@@ -515,14 +543,17 @@ function creerSession() {
   const { session: g, entree } = creerSessionGouvernee({ plafond: 100, puitsAncrage, exigerElevation: ELEVATION_EXIGEE });   /* [S31] */
   const s = { g, entree, vue: Date.now(), enAttente: new Map(),
               historique: [], verdicts: [], vig: new Vigilance(), souvenirs: [], creations: new Map(), propositions: new Map(),
-              reformulations: new Map() };   /* [S10] [S12] [S30] [S40] */
+              reformulations: new Map(), tour: 0 };   /* [S10] [S12] [S30] [S40] [S43] */
   sessions.set(id, s);
   return { id, s };
 }
 
 function sessionDe(id) {
   purgerSessions();
-  const s = sessions.get(String(id || ''));
+  /* [S47] un identifiant est du TEXTE : un tableau [id] passait par String()
+   * et retrouvait la session (vu en rejouant tests-preuves E2 sur la v4.6.5) */
+  if (typeof id !== 'string') return null;
+  const s = sessions.get(id);
   if (!s) return null;
   s.vue = Date.now();
   return s;
@@ -664,7 +695,7 @@ function systemeDe(s, ceTour) {
     M.blocPourPrompt(s.souvenirs || []),
     "",
     "LES VRAIES RÈGLES DU NOYAU (ne les contredis jamais, n'en invente aucune)",
-    "1. Une action sensible (envoyer, supprimer, payer) passe quand la personne tape elle-même, dans le MÊME message, le verbe ET la cible, par exemple « envoie la facture à nom@exemple.fr » : elle est alors retenue 10 secondes, puis confirmée d'un clic, ou annulée. La cible d'un envoi ou d'un paiement doit être une adresse e-mail complète (nom@domaine.fr) : un prénom seul est refusé avant le noyau.",
+    "1. Une action sensible (envoyer, supprimer, payer) passe quand la personne tape elle-même, dans le MÊME message, le verbe ET la cible, par exemple « envoie la facture à nom@exemple.fr » : elle est alors retenue 10 secondes, puis confirmée d'un clic (avec Face ID ou le code de secours, redemandés à CHAQUE action irréversible quand ils sont configurés), ou annulée. La cible d'un envoi ou d'un paiement doit être une adresse e-mail complète (nom@domaine.fr) : un prénom seul est refusé avant le noyau.",
     "2. Sinon, la personne retape la cible dans le cadre prévu, puis touche « Confirmer » : l'action est alors retenue de la même façon.",
     "3. Le plancher de confiance ne redescend JAMAIS avec le temps : seule une nouvelle session le remet à zéro. Lire du contenu externe ne bloque pas les actions : cela oblige seulement la personne à les taper elle-même.",
     "4. Tu ne sais qu'un refus ou une autorisation a eu lieu que si « CE TOUR-CI » le dit. Sinon, ne parle ni de refus, ni d'autorisation du noyau.",
@@ -726,6 +757,10 @@ function emettreReformulation(s, a) {
 }
 function perimerCartes(s) {
   s.reformulations.clear();
+  /* [S43] la carte « Creer » d'un evenement suit la meme regle : avant, elle
+   * restait confirmable 10 min apres d'autres messages (reel des que l'ecriture
+   * Google est branchee). */
+  for (const [cle, pr] of s.propositions) if (pr && pr.etat === 'PROPOSEE') s.propositions.delete(cle);
   for (const [jeton, att] of s.enAttente) {
     if (!att || att.annule) continue;
     const r = s.g.annuler(jeton, 'PERIMEE_NOUVEAU_MESSAGE');
@@ -735,6 +770,43 @@ function perimerCartes(s) {
     }
   }
 }
+
+/* [S43] COURSES. Audit de la v4.6.4, reproduit hors ligne : deux messages
+ * quasi simultanes ; la planification du 1er revient APRES le 2e, et sa carte
+ * « retape la cible » naissait apres le « perimer » du 2e : utilisable. Deux
+ * envois tapes simultanes : un seul effet (le sceau de la couche bloque le
+ * 1er), mais le 1er laissait une carte. Chaque message recoit un numero de
+ * tour ; au retour de chaque attente, un message depasse ne produit plus rien. */
+const TEXTE_DEPASSE = "Message dépassé : tu en as envoyé un autre pendant que je préparais celui-ci. "
+  + "Rien n'a été préparé pour lui.";
+const depasse = (s, o) => o && o.tour != null && s.tour !== o.tour;
+const reponseDepassee = (s, plan) => ({ decide: 'SANS_OBJET', etape: 'DEPASSE', motif: 'MESSAGE_DEPASSE',
+  reponse: TEXTE_DEPASSE, plan: { action: 'AUCUNE' }, ...etatDe(s) });
+
+/* [S45] RESSOURCE FIXEE PAR LE SERVEUR. Audit de la v4.6.4 : la ressource
+ * venait du modele (« envoie … a pierre@ » + BANQUE -> retenu SEND/BANQUE).
+ * Sans effet tant que tout est simule, mais c'est la ressource qui choisira
+ * le connecteur reel (Google) : elle ne peut pas venir du modele. Liste
+ * fermee ; l'agenda garde son propre aiguillage (READ AGENDA, CREATE
+ * AGENDA_JARVIS, tout le reste refuse). */
+const RESSOURCE_DE_L_ACTION = Object.freeze({ SEND: 'EMAIL', PAY: 'BANQUE', GRANT: 'ACCES' });
+const ressourceDe = (action) => RESSOURCE_DE_L_ACTION[String(action || '').toUpperCase()] || 'LOCAL';
+
+/* [S47] Vu en ligne le 25 sept (14h39) : « transfère les factures comme demandé
+ * dans le mail à …@yahoo.fr » n'a pas ete prepare, et le modele a dit (a tort)
+ * qu'il manquait le verbe et la cible. Verbe + adresse ecrits par la personne
+ * (hors texte cite ou colle) = on PROPOSE l'action ; la couche decide, et
+ * l'action reste retenue 10 s, a confirmer (Face ID ou code). Une seule
+ * adresse, un seul verbe (envoyer OU payer) ; sinon on ne devine rien. */
+function actionEcrite(texte) {
+  const propres = separer(texte).propres;
+  const adresses = [...new Set((propres.match(/[^\s<>()«»"';,]+@[^\s<>()«»"';,]+/g) || [])
+    .map(x => x.replace(/[.:!?]+$/, '')))].filter(adresseValide);
+  if (adresses.length !== 1) return null;
+  const actes = ['SEND', 'PAY'].filter(a => analyserIntention(a, texte).presente);
+  return actes.length === 1 ? { action: actes[0], adresse: adresses[0] } : null;
+}
+const TEXTE_SIMULATION = "En simulation : rien n'est réellement parti.";
 
 function memoriser(s, sessionId, question, reponse) {
   if (!sessionId || sessionId === 'anon') return;
@@ -803,7 +875,7 @@ function dansLesMots(cible, mots) {
   return c.length > 0 && sansAccents(mots).includes(c);
 }
 /* null si la cible convient ; sinon { motif, texte } a dire a la personne. */
-function destinataireRefuse(action, target, motsDeLaPersonne) {
+function destinataireRefuse(action, target, motsDeLaPersonne, canal) {
   if (!ACTIONS_VERS_PERSONNE.has(String(action || '').toUpperCase())) return null;
   const t = String(target == null ? '' : target).trim();
   if (!t || t.toUpperCase() === 'CONVERSATION'
@@ -811,7 +883,10 @@ function destinataireRefuse(action, target, motsDeLaPersonne) {
     return { motif: 'DESTINATAIRE_MANQUANT', texte: "À qui ? Je n'ai pas de destinataire, donc rien n'a été préparé. "
       + "Retape ta demande au clavier avec l'adresse e-mail complète, par exemple « envoie la facture à nom@exemple.fr »." };
   if (!adresseValide(t))
-    return { motif: 'ADRESSE_INVALIDE', texte: "« " + lisible(t, 80) + " » n'est pas une adresse e-mail complète : un envoi ou un paiement "
+    return { motif: 'ADRESSE_INVALIDE', texte: canal === 'voix'   /* [S47] vu en ligne : « alcide.:-)j@yahoo.fr » */
+      ? "« " + lisible(t, 80) + " » n'est pas une adresse e-mail complète : la dictée a sans doute mal entendu. "
+        + "Tape l'adresse au clavier, par exemple « envoie la facture à nom@domaine.fr ». Rien n'a été préparé."
+      : "« " + lisible(t, 80) + " » n'est pas une adresse e-mail complète : un envoi ou un paiement "
       + "ne part que vers une adresse du type nom@domaine.fr. Rien n'a été préparé." };
   return null;
 }
@@ -976,6 +1051,18 @@ async function lireAgenda(s, sessionId, texte, plan, avant) {
 const ERREURS_ECRITURE = {
   AGENDA_INACCESSIBLE: "l'agenda JARVIS n'est pas accessible (partage au compte de service, ou identifiant d'agenda, à vérifier)",
   AUTH_GOOGLE_REFUSEE: "Google a refusé la clé du compte de service",
+  /* [S48] erreurs de mise en place, nommees par l'ecriture 1.1 */
+  COMPTE_ABSENT: "JARVIS_GOOGLE_COMPTE est vide : colle le contenu du fichier JSON du compte de service",
+  COMPTE_JSON_ILLISIBLE: "JARVIS_GOOGLE_COMPTE n'est pas un JSON lisible : recolle TOUT le fichier, de la première { à la dernière }",
+  COMPTE_PAS_UN_COMPTE_DE_SERVICE: "JARVIS_GOOGLE_COMPTE n'est pas une clé de compte de service (il faut le fichier JSON créé dans « Comptes de service → Clés »)",
+  COMPTE_CLE_PRIVEE_ILLISIBLE: "la clé privée du JSON est abîmée (souvent des retours à la ligne ajoutés en collant) : recolle le fichier tel quel",
+  AGENDA_ID_INVALIDE: "JARVIS_AGENDA_JARVIS n'est pas un identifiant d'agenda (il finit par @group.calendar.google.com)",
+  API_AGENDA_NON_ACTIVEE: "l'API Google Agenda n'est pas activée dans le projet Google Cloud (API et services → Bibliothèque → Google Calendar API → Activer)",
+  AGENDA_INTROUVABLE: "l'agenda JARVIS est introuvable : identifiant d'agenda faux, ou agenda pas encore partagé avec le compte de service",
+  AGENDA_LECTURE_SEULE: "l'agenda JARVIS est partagé en lecture seule : il faut « Apporter des modifications aux événements »",
+  CLE_GOOGLE_REVOQUEE: "la clé du compte de service a été supprimée ou remplacée : crée une nouvelle clé JSON",
+  COMPTE_GOOGLE_INTROUVABLE: "le compte de service n'existe plus dans Google Cloud",
+  HORLOGE_SERVEUR: "l'heure du serveur est décalée : Google refuse la clé",
   PLAFOND_JOURNALIER: 'le plafond de 20 créations par jour est atteint',
   CONFLIT_IDENTIFIANT: "un autre événement porte déjà cet identifiant : rien n'a été écrasé",
   GOOGLE_LIMITE: 'Google limite les requêtes en ce moment, réessaie plus tard',
@@ -1106,12 +1193,20 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
   }
 
   /* L'assistant decide. Le mode manuel reste possible pour les demonstrations. */
-  const plan = confirme
+  let plan = confirme
     ? { action: confirme.action, resource: confirme.resource, target: confirme.target,
         pourquoi: confirme.pourquoi || 'cible retapée au clavier par toi', manuel: true, confirme: true }   /* [S20] [S42] */
     : actionForcee
     ? { action: actionForcee, resource: 'LOCAL', target: cibleForcee || 'CONVERSATION', pourquoi: 'action imposée à la main', manuel: true }   /* [S42] */
     : await planifier(g, texte);
+  /* [S43] un message plus recent est arrive pendant la planification */
+  if (depasse(s, o)) return reponseDepassee(s, plan);
+  /* [S47] verbe + adresse ecrits par la personne, rien de prepare : on propose */
+  if (!confirme && !actionForcee && plan.action === 'AUCUNE' && !plan.erreur && plan.pourquoi !== 'plan illisible') {
+    const e = actionEcrite(texte);
+    if (e) plan = { action: e.action, resource: ressourceDe(e.action), target: e.adresse,
+      pourquoi: 'verbe et adresse écrits par toi', sceauContexte: plan.sceauContexte };
+  }
 
   /* Aucune action a gouverner : l'assistant repond, simplement. */
   if (plan.action === 'AUCUNE') {
@@ -1134,7 +1229,8 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
         : "Aucune action n'a été préparée ni soumise au noyau pour ce message : conversation ordinaire. ")
         + "Ne dis jamais que le noyau a refusé ou autorisé quoi que ce soit ce tour-ci. Si la personne semble pourtant demander une action "
         + "(envoyer, supprimer, payer, lire son agenda…), dis simplement que tu ne l'as pas préparée et invite-la à la reformuler en une phrase "
-        + "avec le verbe et la cible, par exemple « envoie la facture à nom@exemple.fr ». Sinon, réponds normalement."));
+        + "avec le verbe et la cible, par exemple « envoie la facture à nom@exemple.fr ». Ne donne jamais une raison que tu ne connais pas : "
+        + "en particulier, ne dis pas qu'il manque un verbe ou une cible s'ils figurent dans son message. Sinon, réponds normalement."));   /* [S47] */
     if (rep.ok) memoriser(s, sessionId, texte, rep.texte);
     return { decide: 'SANS_OBJET', etape: 'CONVERSATION', motif: rep.ok ? null : rep.erreur /* [S32] */, plan,
       reponse: rep.ok ? rep.texte : null, note: g.note({ action: 'READ', resource: 'LOCAL', target: 'CONVERSATION' }),
@@ -1157,6 +1253,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
   }
 
   const acte = plan.action;
+  plan.resource = ressourceDe(acte);   /* [S45] jamais celle du modele */
 
   /* [S10] Vigilance : l'intention d'agir figure-t-elle dans ce qui a ete tape ?
    * Avant demander(), qui sinon aurait deja confirme la cible par C3. */
@@ -1178,7 +1275,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
    * loin : rien n'est soumis au noyau. APRES la vigilance : une action que la
    * personne n'a pas voulue (verbe venu d'un contenu lu) garde son refus et
    * ses alertes ; on ne lui demande jamais « a qui ? » pour elle. */
-  const refusDest = destinataireRefuse(acte, plan.target, plan.manuel ? null : texte);   /* [S41] */
+  const refusDest = destinataireRefuse(acte, plan.target, plan.manuel ? null : texte, voix ? 'voix' : 'clavier');   /* [S41] [S47] */
   if (refusDest) {
     noterVerdict(s, { decide: 'REFUSE', action: acte, target: propre(plan.target, 80), motif: refusDest.motif });
     memoriser(s, sessionId, texte, refusDest.texte);
@@ -1214,6 +1311,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
       alternatives: (demande.note.alternatives || []).filter(a => !/reformuler/i.test(String(a))) };
   }
   const sortie = (o) => ({ ...o, plan, note: noteAffichee, classe: demande.classe,
+    provenanceCible: demande.provenanceCible || null,   /* [S47] « Tu demandes : » */
     audit: g.auditDepuis(avant), ...etatDe(s) });
 
   if (demande.decide !== 'AUTORISE') {
@@ -1245,6 +1343,8 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
   const rep = await appelAnthropic(messagesAvec(s, sessionId, texte), null, null,
     systemeDe(s, "Le noyau vient d'autoriser l'action " + propre(acte, 30) + ' sur ' + propre(plan.target)
       + " (réversible). Exécution simulée : rien ne touche un vrai système. Réponds à la demande, et précise la simulation si la personne pourrait croire le contraire."));
+  /* [S43] depasse pendant la reponse : l'autorisation est retiree, rien ne s'execute */
+  if (depasse(s, o)) { g.revoquer(demande.autorisationId); return reponseDepassee(s, plan); }
   const exe = g.executer(demande, () => ({ recu: rep.ok === true }));
   if (exe.etat !== 'EXECUTE') {
     noterVerdict(s, { decide: 'REFUSE', action: acte, target: plan.target, motif: exe.motif });
@@ -1405,11 +1505,12 @@ const serveur = http.createServer((req, res) => {
       detail = true;
     }
     if (!detail)
-      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.6.4',
+      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.6.6',
         acces: 'protege', config: verdict, manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
         node: String(process.versions.node).split('.')[0] });
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.6.4',
-      agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : 'inactif',   /* [S30] */
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.6.6',
+      agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : ECRITURE_MOTIF ? 'erreur-config' : 'inactif',   /* [S30] [S48] */
+      ecritureMotif: ECRITURE_MOTIF,
       elevation: ELEVATION_MAL_CONFIGUREE ? 'erreur-config' : !ELEVATION || !ELEVATION.actif ? 'inactif'   /* [S35] */
         : [ELEVATION.faceId ? 'faceid' : null, ELEVATION.codeSecours ? 'code' : null,
            CODE_ILLISIBLE ? 'code-refuse' : null, CLES_ILLISIBLES ? 'cles-illisibles' : null].filter(Boolean).join('+'),
@@ -1500,10 +1601,17 @@ const serveur = http.createServer((req, res) => {
       const action = carte.action;
       if (!ACTIONS_CONNUES.includes(action) || action === 'AUCUNE') return json(400, { erreur: 'ACTION_INCONNUE' });
       const cible = b.cible.trim().slice(0, 300);
+      /* [S47] vu en ligne le 25 sept (14h35) : la phrase entiere tapee dans la
+       * carte (« envoie les factures a … »), refusee deux fois sans dire
+       * pourquoi. La carte attend l'adresse seule ; on le dit. */
+      if (ACTIONS_VERS_PERSONNE.has(action) && /\s/.test(cible))
+        return json(400, { erreur: 'ADRESSE_SEULE', message: "Tape seulement l'adresse, sans phrase autour : par exemple nom@domaine.fr. Rien n'a été préparé." });
       /* [S36] la cible retapee aussi : controlee AVANT de consommer la preuve
        * ET le jeton, pour qu'une faute de frappe se corrige dans la meme carte */
       const refusDest = destinataireRefuse(action, cible);
       if (refusDest) return json(400, { erreur: refusDest.motif, message: refusDest.texte });
+      /* [S45] la carte a ete emise avec la ressource deja fixee par le serveur
+       * (messageGouverne) ; messageGouverne la refixe de toute facon */
       const resource = carte.resource;
       const d = debitAutorise(ipDe(req), 1);   /* une reponse du modele au plus : comptee comme /api/chat */
       if (!d.ok) return json(429, { decide: 'REFUSE', etape: 'DEBIT', motif: d.motif, reessayerDans: d.reessayerDans });
@@ -1512,7 +1620,12 @@ const serveur = http.createServer((req, res) => {
       s.reformulations.delete(b.jeton);
       const rf = s.entree.reformuler(action, cible);   /* [S16] */
       if (!rf.ok) return json(400, { erreur: rf.motif });
-      s.vig.confirmer(action, cible);   /* [S10] frappe humaine : leve le doute sur l'intention */
+      /* [S44] plus de s.vig.confirmer(action, cible) : l'action repart ici en
+       * mode « imposee » (la vigilance ne la juge pas) ; son SEUL effet etait
+       * de lever la vigilance pour les messages SUIVANTS. Audit v4.6.4 : cible
+       * retapee refusee par le noyau (DRY_RUN_RATE_LIMITED), puis 10 min plus
+       * tard « d'accord, vas-y » + meme cible proposee par le modele -> retenue
+       * sans frappe. */
       s.g.dryRun({ action, resource, target: cible });   /* [S8] */
       const decision = await messageGouverne(String(b.sessionId), '(cible retapée au clavier : ' + propre(cible, 120) + ')',
         null, null, { action, resource, target: cible });
@@ -1530,7 +1643,7 @@ const serveur = http.createServer((req, res) => {
   /* G2 — fenetre d'annulation. */
   if (u.pathname === '/api/annuler' && req.method === 'POST')
     return lire(req, res, (b) => {
-      const id = String(b.sessionId || '');
+      const id = typeof b.sessionId === 'string' ? b.sessionId : '';   /* [S47] */
       const s = sessionDe(id);
       if (!s) return inconnue();
       const r = s.g.annuler(b.jeton);
@@ -1545,7 +1658,7 @@ const serveur = http.createServer((req, res) => {
 
   if (u.pathname === '/api/finaliser' && req.method === 'POST')
     return lire(req, res, async (b) => {
-      const id = String(b.sessionId || '');
+      const id = typeof b.sessionId === 'string' ? b.sessionId : '';   /* [S47] */
       const s = sessionDe(id);
       /* [S7] session verifiee AVANT le debit : une session expiree ne coute rien */
       if (!s) return inconnue();
@@ -1560,7 +1673,8 @@ const serveur = http.createServer((req, res) => {
       const att = s.enAttente.get(b.jeton);
       const r = s.g.finaliser(b.jeton);
       if (r.etat === 'ELEVATION_REQUISE')   /* [S31] rien n'est consomme : Face ID ou code, puis on reconfirme */
-        return json(200, { ...r, moyens: { faceId: !!(ELEVATION && ELEVATION.faceId), code: !!(ELEVATION && ELEVATION.codeSecours),
+        return json(200, { ...r, pour: att ? { action: att.action, cible: lisible(att.target, 120) } : null,   /* [S46] ce que Face ID confirme */
+          moyens: { faceId: !!(ELEVATION && ELEVATION.faceId), code: !!(ELEVATION && ELEVATION.codeSecours),
           erreurConfig: ELEVATION_MAL_CONFIGUREE /* [S35] */ }, ...etatDe(s) });
       if (r.etat !== 'EXECUTE') return json(200, { ...r, ...etatDe(s) });
       /* [S6] la confirmation est un vrai geste de la personne : elle entre
@@ -1575,7 +1689,9 @@ const serveur = http.createServer((req, res) => {
         if (rep.ok) memoriser(s, id, confirmation, rep.texte);
       }
       s.enAttente.delete(b.jeton);
-      return json(200, { etat: 'EXECUTE', reponse: rep.ok ? rep.texte : null, motif: rep.ok ? null : rep.erreur,
+      /* [S47] la reponse dit TOUJOURS la simulation : on ne s'en remet pas au modele */
+      const texteRep = rep.ok ? (/simul/i.test(rep.texte) ? rep.texte : TEXTE_SIMULATION + '\n\n' + rep.texte) : TEXTE_SIMULATION;
+      return json(200, { etat: 'EXECUTE', reponse: texteRep, simule: true, motif: rep.ok ? null : rep.erreur,
         trace: s.g.trace(String(b.jeton)), ...etatDe(s) });   /* [S29] */
     });
 
@@ -1610,7 +1726,7 @@ const serveur = http.createServer((req, res) => {
    * Seulement pour un evenement cree dans CETTE session. */
   if (u.pathname === '/api/compenser' && req.method === 'POST')
     return lire(req, res, async (b) => {
-      const id = String(b.sessionId || '');
+      const id = typeof b.sessionId === 'string' ? b.sessionId : '';   /* [S47] */
       const s = sessionDe(id);
       if (!s) return inconnue();
       const tx = String(b.transactionId || '').slice(0, 60);
@@ -1628,21 +1744,30 @@ const serveur = http.createServer((req, res) => {
     });
 
   /* [S31] ELEVATION — Face ID (cles d'acces) ou code de secours. Le serveur
-   * verifie, la couche enregistre (capacite elever) : 15 min, cette session. */
+   * verifie, la couche enregistre (capacite elever).
+   * [S46] REGLE STRICTE : pour UNE action retenue, designee par son jeton ; le
+   * defi Face ID en derive, le code ne vaut que pour elle ; consommes a
+   * l'envoi. Sans action retenue valable : rien n'est verifie ni compte. */
   if (u.pathname.startsWith('/api/elevation') && req.method === 'POST')
     return lire(req, res, (b) => {
       const s = sessionDe(b.sessionId);
       if (!s) return inconnue();
       if (!ELEVATION) return json(400, { erreur: 'ELEVATION_INDISPONIBLE' });
       const hote = String(req.headers.host || '').slice(0, 260), ip = ipDe(req), sidE = String(b.sessionId);
+      const lien = typeof b.jeton === 'string' && b.jeton.length <= 100 ? s.g.lienElevation(b.jeton) : null;
+      const cle = lien ? lien.transactionId + '|' + lien.empreinte : null;
+      const sansAction = () => json(409, { ok: false, motif: 'ACTION_INTROUVABLE', ...etatDe(s) });
       const elever = (r) => { if (!r.ok) return json(200, { ok: false, motif: r.motif, ...etatDe(s) });
-        const e = s.entree.elever(ELEVATION.dureeMs, r.mode); return json(200, { ok: e.ok, mode: e.mode, jusqua: e.jusqua, ...etatDe(s) }); };
+        const e = s.entree.elever(ELEVATION.dureeMs, r.mode, lien);
+        return json(200, { ok: e.ok, mode: e.mode, motif: e.motif, jeton: e.transactionId, ...etatDe(s) }); };
       if (u.pathname === '/api/elevation/defi') {
-        const r = b.type === 'creation' ? ELEVATION.defiCreation(sidE, hote) : ELEVATION.defiAssertion(sidE, hote, ip);
+        if (b.type === 'creation') { const r = ELEVATION.defiCreation(sidE, hote); return json(r.ok ? 200 : 400, r); }
+        if (!lien) return sansAction();
+        const r = ELEVATION.defiAssertion(sidE, hote, ip, cle);
         return json(r.ok ? 200 : 400, r);
       }
-      if (u.pathname === '/api/elevation/faceid') return elever(ELEVATION.verifierAssertion(sidE, hote, ip, b.reponse || {}));
-      if (u.pathname === '/api/elevation/code') return elever(ELEVATION.verifierCode(sidE, ip, b.code));
+      if (u.pathname === '/api/elevation/faceid') return lien ? elever(ELEVATION.verifierAssertion(sidE, hote, ip, b.reponse || {}, cle)) : sansAction();
+      if (u.pathname === '/api/elevation/code') return lien ? elever(ELEVATION.verifierCode(sidE, ip, b.code)) : sansAction();
       if (u.pathname === '/api/elevation/enroler') {
         const r = ELEVATION.verifierCreation(sidE, hote, b.reponse || {});
         return json(r.ok ? 200 : 400, r.ok ? { ok: true, identifiant: r.identifiant,
@@ -1655,6 +1780,25 @@ const serveur = http.createServer((req, res) => {
     if (!s) return inconnue();
     return json(200, { disponible: !!ELEVATION, faceId: !!(ELEVATION && ELEVATION.faceId), code: !!(ELEVATION && ELEVATION.codeSecours),
       exigee: ELEVATION_EXIGEE, erreurConfig: ELEVATION_MAL_CONFIGUREE, ...s.g.etat().elevation });
+  }
+
+  /* [S48] BRANCHER GOOGLE : l'etat de l'ecriture, et un diagnostic qui
+   * n'ecrit RIEN (cle, agenda, droit d'ecriture). Derriere la cle d'acces
+   * comme toute route /api/ ; compte dans le seau des actions. */
+  if (u.pathname === '/api/ecriture' && req.method === 'GET') {
+    const s = sessionDe(sid());
+    if (!s) return inconnue();
+    return json(200, { configuree: !!(ECRITURE || ECRITURE_MOTIF), actif: !!ECRITURE, motif: ECRITURE_MOTIF,
+      message: ECRITURE_MOTIF ? erreurEcriture(ECRITURE_MOTIF) : null });
+  }
+  if (u.pathname === '/api/ecriture/diagnostic' && req.method === 'GET') {
+    const s = sessionDe(sid());
+    if (!s) return inconnue();
+    if (!ECRITURE) return json(200, { ok: false, code: ECRITURE_MOTIF || 'ECRITURE_ABSENTE',
+      message: ECRITURE_MOTIF ? erreurEcriture(ECRITURE_MOTIF) : "Aucun agenda JARVIS n'est relié (variables Google absentes)." });
+    return ECRITURE.diagnostic().then(d => json(200, { ok: d.ok, code: d.code, compte: d.compte, acces: d.acces || null, recent: !!d.recent,
+      etapes: d.etapes, message: d.ok ? "Prêt : clé acceptée, agenda JARVIS trouvé, écriture permise. Rien n'a été écrit." : erreurEcriture(d.code) }),
+      () => json(500, { ok: false, code: 'DIAGNOSTIC_IMPOSSIBLE' }));
   }
 
   /* [S29] TRACABILITE — une transaction de CETTE session, en lecture seule :
@@ -1707,6 +1851,7 @@ const serveur = http.createServer((req, res) => {
       const sc = sessionDe(b.sessionId);
       if (!sc) return inconnue();
       perimerCartes(sc);   /* [S40] un nouveau message : les anciennes cartes ne valent plus */
+      const tour = ++sc.tour;   /* [S43] */
       sc.souvenirs = M.nettoyerSouvenirs(b.souvenirs);   /* [S12] G6.4 : borne a chaque requete */
       /* [S12] "retiens que" n'appelle pas le modele : il ne coute rien. */
       const poids = (!b.action && M.extraireSouvenir(b.message.slice(0, LIMITES.maxCaracteresPrompt))) ? 0 : 2;
@@ -1714,7 +1859,7 @@ const serveur = http.createServer((req, res) => {
       const d = poids ? debitAutorise(ipDe(req), poids) : actionAutorisee(ipDe(req));   /* planification + reponse */
       if (!d.ok) return json(429, { decide: 'REFUSE', etape: 'DEBIT', motif: d.motif, reessayerDans: d.reessayerDans });
       return json(200, await messageGouverne(String(b.sessionId),
-        b.message.slice(0, LIMITES.maxCaracteresPrompt), b.action, b.cible, undefined, { canal: b.canal === 'voix' ? 'voix' : 'clavier' }));
+        b.message.slice(0, LIMITES.maxCaracteresPrompt), b.action, b.cible, undefined, { canal: b.canal === 'voix' ? 'voix' : 'clavier', tour }));
     });
 
   res.writeHead(404); res.end('Introuvable');
@@ -1732,6 +1877,6 @@ serveur.listen(PORT, () => {
   console.log(AGENDA ? 'Agenda : ACTIF (lecture seule, ' + FUSEAU + ')' : 'Agenda : inactif');
   console.log(ECRITURE ? 'Ecriture : ACTIVE (agenda JARVIS dedie, sans invites)' : 'Ecriture : inactive');
   console.log(ELEVATION_MAL_CONFIGUREE ? 'Elevation : MAL CONFIGUREE — l\'irreversible reste BLOQUE (corrige la variable dans Render)'   /* [S35] */
-    : ELEVATION_EXIGEE ? 'Elevation : EXIGEE pour l\'irreversible (' + [ELEVATION.faceId && 'Face ID', ELEVATION.codeSecours && 'code'].filter(Boolean).join(' + ') + ', 15 min)' : 'Elevation : non configuree');
+    : ELEVATION_EXIGEE ? 'Elevation : EXIGEE pour l\'irreversible (' + [ELEVATION.faceId && 'Face ID', ELEVATION.codeSecours && 'code'].filter(Boolean).join(' + ') + ', a chaque action)' : 'Elevation : non configuree');   /* [S46] */
   console.log('Sessions emises par le serveur (SESSION_INCONNUE sinon)');
 });

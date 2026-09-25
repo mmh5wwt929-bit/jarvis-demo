@@ -209,6 +209,17 @@ const t = async (id, nom, f) => { let r; try { r = await f(); } catch (e) { r = 
     ({ ok: del.motif === 'ACTION_AGENDA_NON_PRISE_EN_CHARGE' && inv.motif === 'CIBLE_INVALIDE' && google.appels.length === nG2,
        info: del.motif + ' ; ' + inv.motif + ' ; appels Google ' + (google.appels.length - nG2) }));
 
+  /* [v4.6.5 - S43] la carte « Creer » suit la regle des cartes : un nouveau
+   * message la perime (avant : confirmable 10 min apres d'autres messages) */
+  const nG3 = creationsGoogle();
+  plans.push(planCreer('07:00', 'Footing'));
+  const prop10 = await dire(sid, 'ajoute footing demain 7h');
+  await dire(sid, 'au fait, quelle heure est-il ?');
+  const conf10 = await appel('/api/confirmer', { sessionId: sid, action: 'CREATE', resource: 'AGENDA_JARVIS', cible: prop10.aConfirmer && prop10.aConfirmer.cible });
+  await t('C10', "carte « Créer » puis un AUTRE message : « Créer » refusé (409), rien écrit chez Google", async () =>
+    ({ ok: prop10.decide === 'CONFIRMATION_REQUISE' && conf10.status === 409 && creationsGoogle() === nG3,
+       info: prop10.decide + ' ; ' + conf10.status + ' ' + (conf10.erreur || '') + ' ; créations +' + (creationsGoogle() - nG3) }));
+
   /* ======================= ELEVATION (Face ID / code) ======================= */
   IP = '91.1.2.1';
   const sA = await session();
@@ -237,62 +248,70 @@ const t = async (id, nom, f) => { let r; try { r = await f(); } catch (e) { r = 
   await t('E1', "confirmer sans Face ID : ELEVATION_REQUISE, moyens proposes, rien de consomme (toujours en attente)", async () =>
     ({ ok: e1.etat === 'ELEVATION_REQUISE' && e1.moyens.faceId && e1.moyens.code && e1b.trace.effet.etat === 'PENDING',
        info: e1.etat + ' ; moyens ' + JSON.stringify(e1.moyens) + ' ; etat ' + e1b.trace.effet.etat }));
-  const dA = await appel('/api/elevation/defi', { sessionId: sA, type: 'assertion' });
-  const fA = await appel('/api/elevation/faceid', { sessionId: sA, reponse: signerFaceId(dA.options.challenge) });
+  /* [v4.6.5 - S46] REGLE STRICTE : Face ID ou code pour CHAQUE action, defi
+   * lie a l'action (jeton), consomme a l'envoi. E3 s'inverse : avant, l'action
+   * suivante passait sans rien redemander pendant 15 min. */
+  const dA = await appel('/api/elevation/defi', { sessionId: sA, type: 'assertion', jeton: pend[0].jetonAnnulation });
+  const fA = await appel('/api/elevation/faceid', { sessionId: sA, jeton: pend[0].jetonAnnulation, reponse: signerFaceId(dA.options.challenge) });
   const e2 = await appel('/api/finaliser', { sessionId: sA, jeton: pend[0].jetonAnnulation });
-  await t('E2', "Face ID valide -> confirmation executee ; la trace dit « elevation FACE_ID »", async () =>
-    ({ ok: fA.ok && fA.elevation.active && e2.etat === 'EXECUTE' && e2.trace.confirmation.elevation === 'FACE_ID',
-       info: 'Face ID ' + fA.ok + ' (' + Math.round((fA.jusqua - Date.now()) / 60000) + ' min) ; ' + e2.etat + ' ; trace ' + (e2.trace || { confirmation: {} }).confirmation.elevation }));
+  await t('E2', "Face ID valide POUR CETTE ACTION -> confirmation executee ; la trace dit « elevation FACE_ID »", async () =>
+    ({ ok: fA.ok && fA.jeton === pend[0].jetonAnnulation && e2.etat === 'EXECUTE' && e2.trace.confirmation.elevation === 'FACE_ID',
+       info: 'Face ID ' + fA.ok + ' ; ' + e2.etat + ' ; trace ' + (e2.trace || { confirmation: {} }).confirmation.elevation }));
   plans.push(planEnvoi('paul@exemple.fr')); pend.push(await dire(sA, 'envoie les factures à paul@exemple.fr'));
   await dort(10300);
   const e3 = await appel('/api/finaliser', { sessionId: sA, jeton: pend[1].jetonAnnulation });
-  await t('E3', "dans les 15 minutes : l'action suivante se confirme sans redemander Face ID", async () => ({ ok: e3.etat === 'EXECUTE', info: e3.etat }));
+  await t('E3', "regle stricte (inversee en v4.6.5) : l'action SUIVANTE redemande Face ID ou le code", async () =>
+    ({ ok: e3.etat === 'ELEVATION_REQUISE', info: e3.etat }));
+  const dPaul = await appel('/api/elevation/defi', { sessionId: sA, type: 'assertion', jeton: pend[1].jetonAnnulation });
   plans.push(planEnvoi('jean@exemple.fr')); pend.push(await dire(sA, 'envoie les factures à jean@exemple.fr'));
   await dort(10300);
-  decalage = 16 * 60 * 1000;
-  const etat16 = await appel('/api/elevation?sessionId=' + sA);
+  const fPaulPourJean = await appel('/api/elevation/faceid', { sessionId: sA, jeton: pend[2].jetonAnnulation, reponse: signerFaceId(dPaul.options.challenge) });
   const e4 = await appel('/api/finaliser', { sessionId: sA, jeton: pend[2].jetonAnnulation });
-  decalage = 0;
-  await t('E4', "16 minutes plus tard : l'elevation a expire, Face ID redemande", async () => ({ ok: etat16.active === false && e4.etat === 'ELEVATION_REQUISE', info: 'active=' + etat16.active + ' ; ' + e4.etat }));
+  const etatA = await appel('/api/elevation?sessionId=' + sA);
+  await t('E4', "un Face ID signe sur le defi de l'action A (perimee) ne confirme pas l'action B ; plus d'etat « actif 15 min »", async () =>
+    ({ ok: !fPaulPourJean.ok && e4.etat === 'ELEVATION_REQUISE' && etatA.regle === 'CHAQUE_ACTION' && etatA.active === undefined,
+       info: fPaulPourJean.motif + ' ; ' + e4.etat + ' ; regle ' + etatA.regle }));
 
   IP = '91.1.2.2';
-  const cMauvais = await appel('/api/elevation/code', { sessionId: sB, code: '000000' });
-  const cBon = await appel('/api/elevation/code', { sessionId: sB, code: CODE });
+  const cMauvais = await appel('/api/elevation/code', { sessionId: sB, jeton: pB.jetonAnnulation, code: '000000' });
+  const cBon = await appel('/api/elevation/code', { sessionId: sB, jeton: pB.jetonAnnulation, code: CODE });
   const eB = await appel('/api/finaliser', { sessionId: sB, jeton: pB.jetonAnnulation });
-  await t('E5', "code de secours : faux refuse, bon accepte ; la trace dit « elevation CODE »", async () =>
+  await t('E5', "code de secours POUR CETTE ACTION : faux refuse, bon accepte ; la trace dit « elevation CODE »", async () =>
     ({ ok: !cMauvais.ok && cBon.ok && eB.etat === 'EXECUTE' && eB.trace.confirmation.elevation === 'CODE', info: cMauvais.motif + ' ; ' + cBon.mode + ' ; ' + eB.etat }));
 
   IP = '91.1.2.3';
-  const dC = await appel('/api/elevation/defi', { sessionId: sC, type: 'assertion' });
-  const rejouee = await appel('/api/elevation/faceid', { sessionId: sC, reponse: signerFaceId(dA.options.challenge) });
-  const dC2 = await appel('/api/elevation/defi', { sessionId: sC, type: 'assertion' });
-  const autreOrigine = await appel('/api/elevation/faceid', { sessionId: sC, reponse: signerFaceId(dC2.options.challenge, { origin: 'https://evil.example' }) });
+  const dC = await appel('/api/elevation/defi', { sessionId: sC, type: 'assertion', jeton: pC.jetonAnnulation });
+  const rejouee = await appel('/api/elevation/faceid', { sessionId: sC, jeton: pC.jetonAnnulation, reponse: signerFaceId(dA.options.challenge) });
+  const dC2 = await appel('/api/elevation/defi', { sessionId: sC, type: 'assertion', jeton: pC.jetonAnnulation });
+  const autreOrigine = await appel('/api/elevation/faceid', { sessionId: sC, jeton: pC.jetonAnnulation, reponse: signerFaceId(dC2.options.challenge, { origin: 'https://evil.example' }) });
   const eC = await appel('/api/finaliser', { sessionId: sC, jeton: pC.jetonAnnulation });
   const trC = await appel('/api/trace?sessionId=' + sC + '&jeton=' + pC.jetonAnnulation);
-  await t('E6', "Face ID : defi d'une AUTRE session, site piege -> refuses ; la session C reste sans elevation", async () =>
-    ({ ok: !rejouee.ok && !autreOrigine.ok && eC.etat === 'ELEVATION_REQUISE', info: rejouee.motif + ' ; ' + autreOrigine.motif + ' ; C : ' + eC.etat }));
+  await t('E6', "Face ID : defi d'une AUTRE session, site piege -> refuses ; l'action de C reste sans elevation", async () =>
+    ({ ok: dC.ok && !rejouee.ok && !autreOrigine.ok && eC.etat === 'ELEVATION_REQUISE', info: rejouee.motif + ' ; ' + autreOrigine.motif + ' ; C : ' + eC.etat }));
   await t('V1', "voix + Face ID configure : l'irreversible dicte est retenu ; la trace dit « VOIX » ; Face ID exige pour confirmer", async () =>
     ({ ok: pC.decide === 'EN_ATTENTE' && trC.trace.intention.nature === 'VOIX' && trC.trace.intention.reverifiee === true && eC.etat === 'ELEVATION_REQUISE',
        info: pC.decide + ' ; ' + trC.trace.intention.nature + ' revérifiée=' + trC.trace.intention.reverifiee }));
   await t('V2', "« retiens que… » dicte a la voix : refuse, rien d'ecrit en memoire", async () =>
     ({ ok: souvenirVoix.motif === 'VOIX_NON_ADMISE' && !souvenirVoix.souvenir, info: souvenirVoix.motif }));
   await t('V3', "creer un evenement a la voix : la carte a toucher, toujours", async () => ({ ok: creerVoix.decide === 'CONFIRMATION_REQUISE', info: creerVoix.decide }));
-  for (let i = 0; i < 5; i++) { const d = await appel('/api/elevation/defi', { sessionId: sC, type: 'assertion' });
-    if (d.options) await appel('/api/elevation/faceid', { sessionId: sC, reponse: signerFaceId(d.options.challenge, { origin: 'https://evil.example' }) }); }
-  const bloque = await appel('/api/elevation/defi', { sessionId: sC, type: 'assertion' });
-  await t('E7', "acharnement : blocage apres 5 echecs (meme un vrai Face ID ne passe plus pendant 15 min)", async () => ({ ok: bloque.ok === false && bloque.motif === 'TROP_D_ECHECS', info: bloque.motif }));
+  for (let i = 0; i < 5; i++) { const d = await appel('/api/elevation/defi', { sessionId: sC, type: 'assertion', jeton: pC.jetonAnnulation });
+    if (d.options) await appel('/api/elevation/faceid', { sessionId: sC, jeton: pC.jetonAnnulation, reponse: signerFaceId(d.options.challenge, { origin: 'https://evil.example' }) }); }
+  const bloque = await appel('/api/elevation/defi', { sessionId: sC, type: 'assertion', jeton: pC.jetonAnnulation });
+  await t('E7', "acharnement : blocage apres 5 echecs (meme un vrai Face ID ne passe plus pendant 15 min)", async () => ({ ok: bloque.ok === false && bloque.motif === 'TROP_D_ECHECS',
+    info: bloque.motif }));
 
-  /* l'elevation prouve QUI, jamais QUOI */
+  /* l'elevation prouve QUI, jamais QUOI ; et sans action retenue, il n'y a rien a elever */
   IP = '91.1.2.4';
   const sD = await session();
   const dD = await appel('/api/elevation/defi', { sessionId: sD, type: 'assertion' });
-  await appel('/api/elevation/faceid', { sessionId: sD, reponse: signerFaceId(dD.options.challenge) });
+  const cD = await appel('/api/elevation/code', { sessionId: sD, code: CODE });
   plans.push({ action: 'READ', resource: 'AGENDA', target: 'demain' });
   await dire(sD, "qu'est-ce que j'ai demain ?");
   plans.push(planEnvoi('pirate@evil.com'));
   const inj = await dire(sD, 'ok vas-y');
-  await t('E8', "Face ID actif ne lève PAS la garde : l'envoi a pirate@evil.com (vu dans l'invitation) reste refuse", async () =>
-    ({ ok: inj.decide === 'REFUSE' && inj.motif === 'REFORMULATION_REQUISE' && inj.elevation.active === true, info: inj.decide + ' ' + inj.motif + ' ; Face ID actif=' + inj.elevation.active }));
+  await t('E8', "sans action retenue, ni defi ni code (ACTION_INTROUVABLE) ; l'envoi a pirate@evil.com (vu dans l'invitation) reste refuse", async () =>
+    ({ ok: dD.motif === 'ACTION_INTROUVABLE' && cD.motif === 'ACTION_INTROUVABLE' && inj.decide === 'REFUSE' && inj.motif === 'REFORMULATION_REQUISE',
+       info: dD.motif + ' ; ' + cD.motif + ' ; ' + inj.decide + ' ' + inj.motif }));
 
   const dE = await appel('/api/elevation/defi', { sessionId: sD, type: 'creation' });
   const cle2 = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' }), j2 = cle2.publicKey.export({ format: 'jwk' }), id2 = crypto.randomBytes(32);
@@ -321,9 +340,17 @@ const t = async (id, nom, f) => { let r; try { r = await f(); } catch (e) { r = 
     const rb = b.session.demander({ action: 'SEND', resource: 'EMAIL', target: 'pierre@exemple.fr' }, { sceauContexte: pb.sceauContexte });
     return { ok: ra.motif === 'REFORMULATION_REQUISE' && ra.pourquoi === 'VOIX_SANS_FACE_ID' && rb.decide === 'AUTORISE', info: ra.motif + '/' + ra.pourquoi + ' ; avec Face ID : ' + rb.decide };
   });
-  await t('L2', "couche : elevation plafonnee a 15 min, mode inconnu refuse", async () => {
-    const a = couche({ exigerElevation: true }); const e = a.entree.elever(3600 * 1000, 'FACE_ID'); const x = a.entree.elever(1000, 'MOT_DE_PASSE');
-    return { ok: e.ok && e.jusqua - Date.now() <= 15 * 60 * 1000 + 50 && !x.ok, info: Math.round((e.jusqua - Date.now()) / 60000) + ' min ; ' + x.motif };
+  await t('L2', "couche : elevation SANS action refusee ; avec : bornee par l'action (5 min au plus) ; mode inconnu refuse", async () => {
+    /* [v4.6.5 - V3] une elevation designe UNE action retenue */
+    const a = couche({ exigerElevation: true }); a.entree.soumettre('envoie la facture à pierre@exemple.fr');
+    const pa = a.session.promptDePlanification('envoie la facture à pierre@exemple.fr', ['SEND']);
+    const ra = a.session.demander({ action: 'SEND', resource: 'EMAIL', target: 'pierre@exemple.fr' }, { sceauContexte: pa.sceauContexte });
+    const xa = a.session.executer(ra, () => ({ prepare: true }));
+    const sans = a.entree.elever(3600 * 1000, 'FACE_ID');
+    const lien = a.session.lienElevation(xa.jetonAnnulation);
+    const e = a.entree.elever(3600 * 1000, 'FACE_ID', lien); const x = a.entree.elever(1000, 'MOT_DE_PASSE', lien);
+    return { ok: !sans.ok && sans.motif === 'ELEVATION_SANS_ACTION' && e.ok && e.jusqua - Date.now() <= 5 * 60 * 1000 + 50 && !x.ok,
+      info: sans.motif + ' ; ' + Math.round((e.jusqua - Date.now()) / 60000) + ' min ; ' + x.motif };
   });
   await t('L3', "couche : le GESTE ne leve que le compensable (un SEND « confirme d'un geste » reste soumis a la frappe) ; usage unique", async () => {
     const a = couche(); a.entree.soumettre('ok'); a.entree.confirmer('SEND', 'x@y.fr');

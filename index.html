@@ -127,11 +127,16 @@ button.lien{background:none;border:none;color:var(--sourd);font-size:12px;
 .elevation .rang{display:flex;gap:7px;flex-wrap:wrap}
 .elevation input.code{width:9em;letter-spacing:.2em}
 .elevation .etat-elev{margin:8px 0 0;color:#e3b341}
+.reformuler .etat-carte{margin:6px 0 0;color:#e3b341;font-size:13px}
+.reformuler .etat-carte:empty{display:none}
 #micro{min-width:44px}
 #micro.ecoute{background:#5a1d1d;border-color:#f85149;color:#fff}
 #blocFaceId .rang{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
 #blocFaceId textarea{width:100%;margin-top:8px;font-size:12px}
 #blocFaceId p{font-size:13px}
+#blocGoogle p{font-size:13px}
+#blocGoogle .rang{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+#googleEtapes div{font-size:13px;margin-top:4px}
 
 /* ---------- SAISIE ---------- */
 .saisie{border-top:1px solid var(--regle);background:var(--ardoise);padding:12px 20px;flex-shrink:0}
@@ -317,13 +322,21 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
     </div>
     <div class="bloc" id="blocFaceId" hidden>
       <h2>Face ID <span class="mono" id="etatFaceId"></span></h2>
-      <p>Une action irréversible se confirme avec Face ID (ou le code de secours) : valable 15 min, dans cette session. Face ID prouve que c'est toi ; il ne remplace jamais la vérification de ce que tu as demandé.</p>
+      <p>Chaque action irréversible se confirme avec Face ID (ou le code de secours) : une fois par action, jamais pour la suivante. Face ID prouve que c'est toi ; il ne remplace jamais la vérification de ce que tu as demandé.</p>
       <div class="rang"><button id="fidPreparer" type="button">Enregistrer Face ID sur cet appareil</button>
         <button id="fidCreer" class="primaire" type="button" hidden>Créer la clé Face ID</button></div>
       <p id="fidMessage"></p>
       <div id="fidResultat" hidden><p>Copie cette valeur dans Render → variable <b>JARVIS_PASSKEYS</b> (après une virgule s'il y en a déjà une), puis redémarre le service. C'est une clé publique : elle ne permet rien seule.</p>
         <textarea id="fidValeur" rows="3" readonly></textarea>
         <div class="rang"><button id="fidCopier" type="button">Copier</button></div></div>
+    </div>
+
+    <div class="bloc" id="blocGoogle" hidden>
+      <h2>Agenda JARVIS (Google) <span class="mono" id="etatGoogle"></span></h2>
+      <p>Vérifie la clé Google, l'agenda JARVIS et le droit d'y écrire. Rien n'est créé pendant la vérification.</p>
+      <div class="rang"><button id="googleVerifier" type="button">Vérifier la connexion Google</button></div>
+      <p id="googleMessage"></p>
+      <div id="googleEtapes"></div>
     </div>
 
     <div class="bloc">
@@ -534,10 +547,8 @@ function majEtat(d) {
     const e = d.elevation;
     /* [S38] dire PAR QUOI l'identite a ete confirmee : vu le 25 sept, « Face ID
      * actif » s'affichait apres une validation par le code de secours */
-    $('etatFaceId').textContent = e.active
-      ? (e.mode === 'CODE' ? 'identité confirmée par le code' : e.mode === 'FACE_ID' ? 'actif' : 'identité confirmée')
-        + ' · ' + Math.max(1, Math.round((e.jusqua - Date.now()) / 60000)) + ' min'
-      : e.exigee ? 'demandé pour l\'irréversible' : '';
+    /* [S46] regle stricte : plus d'etat « actif 15 min » ; une fois par action */
+    $('etatFaceId').textContent = e.exigee ? 'demandé à chaque action irréversible' : '';
   }
 }
 
@@ -597,7 +608,10 @@ function resumeTrace(t) {
     : i.nature === 'CIBLE_RETAPEE' ? 'la cible retapée par toi « ' + i.frappe + ' »'
     : i.nature === 'CONFIRMATION_GESTE' ? 'ton toucher sur « Créer »' : 'aucune frappe requise';
   const elev = c.elevation === 'FACE_ID' ? ' + Face ID' : c.elevation === 'CODE' ? ' + code de secours' : '';
-  return 'Trace : ' + source + (i.reverifiee === true ? ' (revérifiée)' : i.reverifiee === false ? ' (NON revérifiée)' : '')
+  /* [S47] l'heure de la DEMANDE (vu le 25 sept : « est-ce l'action de 14h39 ? ») */
+  const h0 = (t.historique || [])[0], d0 = h0 && Number.isFinite(h0.ts) ? new Date(h0.ts) : null;
+  const heure = d0 ? ', demandée à ' + String(d0.getHours()).padStart(2, '0') + 'h' + String(d0.getMinutes()).padStart(2, '0') : '';
+  return 'Trace : ' + source + (i.reverifiee === true ? ' (revérifiée)' : i.reverifiee === false ? ' (NON revérifiée)' : '') + heure
     + ' → autorisé (' + (CLASSES[(t.plan || {}).classe] || String((t.plan || {}).classe || '').toLowerCase()) + ')'   /* [S42] */
     + (c.mode === 'CLIC_APRES_FENETRE' ? ' → retenu 10 s → confirmé par ton clic' + elev : c.mode === 'SANS_FENETRE' ? ' → exécuté sans fenêtre' : '')
     + (e.reel ? (e.reel.ok ? ' → effet réel confirmé' : ' → effet réel ÉCHOUÉ (' + e.reel.code + ')') : '')
@@ -609,6 +623,7 @@ function resumeTrace(t) {
 function quiLance(d, p) {
   if (d.etape === 'MEMOIRE') return 'Tu veux';
   if (p.confirme) return 'Tu relances :';
+  if (d.provenanceCible === 'DEMANDE_UTILISATEUR') return 'Tu demandes :';   /* [S47] verbe et cible venus de toi */
   if (p.manuel) return 'Tu imposes :';
   return 'Claude veut';
 }
@@ -633,7 +648,7 @@ function sansReponse(d) {
 function rendreDecision(d) {
   /* Conversation ordinaire : aucune action a gouverner, aucune carte. */
   if (d.decide === 'SANS_OBJET') {
-    const deJarvis = d.etape === 'MEMOIRE' || d.etape === 'DESTINATAIRE';   /* [S36] */
+    const deJarvis = d.etape === 'MEMOIRE' || d.etape === 'DESTINATAIRE' || d.etape === 'DEPASSE';   /* [S36] [S43] */
     if (d.reponse) tour(deJarvis ? 'JARVIS' : 'Claude', d.reponse, false, !deJarvis);
     else tour('JARVIS', sansReponse(d), false);
     return;
@@ -724,12 +739,16 @@ function rendreDecision(d) {
      * qu'une formalite. */
     /* [S40] la carte ne porte que le jeton du serveur : l'action et la
      * ressource restent cote serveur, la page ne peut plus les choisir */
+    /* [S47] vu le 25 sept : la phrase entiere tapee dans la carte, refusee deux
+     * fois. Pour un envoi ou un paiement, la carte dit qu'elle attend l'adresse. */
+    const versPersonne = ['SEND', 'PAY', 'GRANT'].includes(p.action);
     h += '<div class="reformuler" data-jeton="' + esc(d.aReformuler.jeton || '') + '">'
       +  '<p>' + (d.etape === 'VIGILANCE_INTENTION' ? 'Tu n\'as pas demandé cette action' : 'Action irréversible')
-      +  ' : si tu la veux vraiment, retape la cible toi-même. Un texte injecté ne traverse pas un clavier.</p>'
-      +  '<div class="rang"><input class="cible" value="" placeholder="cible, tapée à la main" aria-label="Cible retapée"'
+      +  (versPersonne ? ' : si tu la veux vraiment, tape seulement l\'adresse, toi-même.' : ' : si tu la veux vraiment, retape la cible toi-même.')
+      +  ' Un texte injecté ne traverse pas un clavier.</p>'
+      +  '<div class="rang"><input class="cible" value="" placeholder="' + (versPersonne ? 'nom@domaine.fr' : 'cible, tapée à la main') + '" aria-label="Cible retapée"'
       +  ' autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">'
-      +  '<button class="primaire" data-reformuler="1">Confirmer</button></div></div>';
+      +  '<button class="primaire" data-reformuler="1">Confirmer</button></div><p class="etat-carte"></p></div>';
   }
   if (d.decide === 'EN_ATTENTE') {
     h += '<div class="retenue"><p class="compte">' + esc(d.message) + '</p><div class="rang">'
@@ -858,7 +877,7 @@ async function finaliserJeton(jeton) {
   if (!r) { rendre(); return direDansRetenue(jeton, 'Pas de réponse du serveur : réessaie « Confirmer l\'envoi ».'); }
   if (limiteAtteinte(r)) return rendre();
   majEtat(r);
-  if (r.etat === 'ELEVATION_REQUISE') { rendre(); return demanderElevation(jeton, r.moyens || {}); }
+  if (r.etat === 'ELEVATION_REQUISE') { rendre(); return demanderElevation(jeton, r.moyens || {}, r.pour); }
   if (r.etat === 'TROP_TOT') { rendre(); return direDansRetenue(jeton, 'Pas encore : la fenêtre court toujours.'); }
   if (r.etat === 'INTROUVABLE') return clore(jeton, 'Déjà traitée (envoyée ou annulée) : plus rien à confirmer.');
   if (r.etat === 'PERIME') return clore(jeton, r.message || TEXTE_PERIMEE);   /* [S40] */
@@ -895,18 +914,28 @@ function perimerTout() {
     const jeton = b.dataset.finaliser, boite = b.closest('.retenue');
     if (boite && !boite.dataset.close && !confirmationsFaites.has(jeton)) clore(jeton, TEXTE_PERIMEE);
   }
+  /* [S43] la carte « Créer » aussi : le serveur la refuse après un autre message */
+  for (const b of document.querySelectorAll('#fil .creation [data-creer]')) {
+    const c = b.closest('.creation');
+    if (b.disabled || c.dataset.perimee) continue;
+    c.dataset.perimee = '1';
+    for (const x of c.querySelectorAll('button')) x.disabled = true;
+    const v = c.querySelector('.verdict b'); if (v) v.textContent = 'Périmée : rien créé, redemande-la';
+  }
 }
 /* [S35] identité prouvée : la carte est terminée, ses commandes s'éteignent */
 function fermerCarte(boite) {
   boite.dataset.fini = '1';
   for (const x of boite.querySelectorAll('button, input')) x.disabled = true;
 }
-async function demanderElevation(jeton, moyens) {
+async function demanderElevation(jeton, moyens, pour) {
   const deja = carteElevation(jeton);
   if (deja) return rappelerCarte(deja);                /* [S35] */
   const avecFaceId = moyens.faceId && FaceId.dispo();
   const bloc = tour('JARVIS', '', false);
-  let h = '<div class="elevation" data-jeton="' + esc(jeton) + '"><p>Action irréversible : confirme que c\'est bien toi (valable 15 min).</p><div class="rang">';
+  /* [S46] Face ID ne montre pas CE qu'il confirme : la carte le dit, action et cible */
+  const quoi = pour && pour.action ? ' pour : ' + esc(ACTES[pour.action] || String(pour.action).toLowerCase()) + ' → ' + esc(pour.cible || '') : '';
+  let h = '<div class="elevation" data-jeton="' + esc(jeton) + '"><p>Action irréversible : confirme que c\'est bien toi' + quoi + ' (cette action seulement).</p><div class="rang">';
   if (avecFaceId) h += '<button class="primaire" data-faceid="1" disabled>Face ID</button>';
   if (moyens.code) h += '<input class="code" type="password" inputmode="numeric" autocomplete="off" placeholder="code de secours" aria-label="Code de secours"><button data-code="1">Valider le code</button>';
   if (moyens.erreurConfig) h += '<span>Code de secours mal réglé dans Render (il faut 12 à 64 chiffres) : l\'envoi reste bloqué tant qu\'il n\'est pas corrigé.</span>';   /* [S35] */
@@ -950,7 +979,7 @@ const FaceId = (() => {
   const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   const octets = (s) => Uint8Array.from(atob(s.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((s.length + 3) % 4)), c => c.charCodeAt(0));
   async function preparer(boite) {
-    const r = await api('/api/elevation/defi', { type: 'assertion' });
+    const r = await api('/api/elevation/defi', { type: 'assertion', jeton: boite.dataset.jeton });   /* [S46] le defi de CETTE action */
     const bouton = boite.querySelector('[data-faceid]');
     if (r && r.ok) { boite._options = r.options; boite._depuis = Date.now(); if (bouton) bouton.disabled = false; }
     else { boite._options = null; if (bouton) bouton.disabled = true;
@@ -960,9 +989,9 @@ const FaceId = (() => {
     return navigator.credentials.get({ publicKey: { challenge: octets(o.challenge), rpId: o.rpId, timeout: o.timeout, userVerification: 'required',
       allowCredentials: o.allowCredentials.map(c => ({ type: 'public-key', id: octets(c.id) })) } });
   }
-  function envoyer(cred) {
+  function envoyer(cred, jeton) {
     const x = cred.response;
-    return api('/api/elevation/faceid', { reponse: { id: cred.id, clientDataJSON: b64(x.clientDataJSON),
+    return api('/api/elevation/faceid', { jeton, reponse: { id: cred.id, clientDataJSON: b64(x.clientDataJSON),
       authenticatorData: b64(x.authenticatorData), signature: b64(x.signature) } });
   }
   let optionsEnr = null;
@@ -1077,9 +1106,11 @@ document.addEventListener('click', async (ev) => {
     if (limiteAtteinte(r)) { t.disabled = false; return; }
     /* [S40] carte perimee (un autre message est parti, ou plus de 2 min) */
     if (r && r.erreur === 'CARTE_PERIMEE') return perimerCarte(boite, r.message);
-    /* [S36] adresse refusee avant le noyau : rien n'est consomme, on corrige */
-    if (r && (r.erreur === 'ADRESSE_INVALIDE' || r.erreur === 'DESTINATAIRE_MANQUANT')) {
-      tour('JARVIS', r.message || 'Adresse e-mail invalide.', false);
+    /* [S36] adresse refusee avant le noyau : rien n'est consomme, on corrige.
+     * [S47] le motif s'ecrit DANS la carte, a cote du champ a corriger */
+    if (r && (r.erreur === 'ADRESSE_INVALIDE' || r.erreur === 'DESTINATAIRE_MANQUANT' || r.erreur === 'ADRESSE_SEULE')) {
+      const etatC = boite.querySelector('.etat-carte');
+      if (etatC) etatC.textContent = r.message || 'Adresse e-mail invalide.'; else tour('JARVIS', r.message || 'Adresse e-mail invalide.', false);
       t.disabled = false; if (champ) champ.focus(); return;
     }
     /* [S20] l'action repart directement avec la cible tapee : on affiche sa decision */
@@ -1113,7 +1144,7 @@ document.addEventListener('click', async (ev) => {
     if (r && r.decision) { majEtat(r.decision); rendreDecision(r.decision);
       if (r.decision.etape !== 'COMPLET') for (const b of carte.querySelectorAll('button')) b.disabled = false; }
     else tour('JARVIS', r && r.erreur === 'DEJA_CONFIRMEE' ? 'Déjà confirmé : un seul événement.' : r && r.erreur === 'CARTE_INCONNUE_OU_EXPIREE'
-      ? 'Cette proposition a expiré (10 min) ou vient d\'une autre session : redemande-la.' : 'Création impossible : ' + ((r && r.erreur) || 'erreur'), false);
+      ? 'Cette proposition n\'est plus valable (un autre message est parti, 10 min ont passé, ou autre session) : redemande-la.' : 'Création impossible : ' + ((r && r.erreur) || 'erreur'), false);
   }
   if (t.dataset.ignorer) {
     for (const b of t.closest('.creation').querySelectorAll('button')) b.disabled = true;
@@ -1140,9 +1171,9 @@ document.addEventListener('click', async (ev) => {
     if (!frais) { etat.textContent = 'Préparation…'; await FaceId.preparer(boite); etat.textContent = boite._options ? 'Touche à nouveau « Face ID ».' : 'Face ID indisponible.'; return; }
     let cred = null;
     try { cred = await FaceId.obtenir(o); } catch (e) { etat.textContent = 'Face ID annulé ou indisponible.'; await FaceId.preparer(boite); return; }
-    const r = await FaceId.envoyer(cred);
+    const r = await FaceId.envoyer(cred, boite.dataset.jeton);
     if (!r || !r.ok) { etat.textContent = 'Face ID refusé' + (r && r.motif === 'TROP_D_ECHECS' ? ' : trop d\'échecs, attends 15 min.' : '.'); await FaceId.preparer(boite); return; }
-    majEtat(r); etat.textContent = 'Face ID validé pour 15 min.';
+    majEtat(r); etat.textContent = 'Face ID validé pour cette action.';
     fermerCarte(boite);   /* [S35] */
     await finaliserJeton(boite.dataset.jeton);
   }
@@ -1150,13 +1181,19 @@ document.addEventListener('click', async (ev) => {
     const boite = t.closest('.elevation'), champ = boite.querySelector('input.code'), etat = boite.querySelector('.etat-elev');
     if (!champ.value) { champ.focus(); return; }
     t.disabled = true;
-    const r = await api('/api/elevation/code', { code: champ.value });
+    const r = await api('/api/elevation/code', { code: champ.value, jeton: boite.dataset.jeton });   /* [S46] */
     champ.value = '';
     t.disabled = false;
     if (!r || !r.ok) { etat.textContent = r && r.motif === 'TROP_D_ECHECS' ? "Trop d'échecs : attends 15 min." : 'Code refusé.'; return; }
-    majEtat(r); etat.textContent = 'Code validé pour 15 min.';
+    majEtat(r); etat.textContent = 'Code validé pour cette action.';
     fermerCarte(boite);   /* [S35] */
     await finaliserJeton(boite.dataset.jeton);
+  }
+  if (t.id === 'googleVerifier') {   /* [S48] diagnostic : rien n'est écrit */
+    t.disabled = true; $('googleMessage').textContent = 'Vérification…'; $('googleEtapes').innerHTML = '';
+    let r = null; try { r = await api('/api/ecriture/diagnostic'); } catch (e) { r = null; }
+    if (!limiteAtteinte(r || {})) afficherDiagnostic(r);
+    t.disabled = false;
   }
   if (t.id === 'micro') Voix.basculer();
   if (t.id === 'fidPreparer') await FaceId.preparerEnregistrement();
@@ -1259,6 +1296,23 @@ document.addEventListener('click', async (ev) => {
 
 $('envoyer').addEventListener('click', envoyer);
 Voix.init();   /* [S32] micro visible seulement si le navigateur sait dicter */
+/* [S48] bloc Agenda JARVIS : seulement si des variables Google sont posées */
+const ETAPES_GOOGLE = { CLE: 'Clé du compte de service', AGENDA: 'Agenda JARVIS', ECRITURE: "Droit d'écriture" };
+function afficherDiagnostic(r) {
+  $('googleMessage').textContent = (r && r.message) || 'Pas de réponse du serveur.';
+  $('googleEtapes').innerHTML = ((r && r.etapes) || []).map(e => '<div>' + (e.ok ? '✓ ' : '✗ ') + esc(ETAPES_GOOGLE[e.etape] || e.etape)
+    + (e.ok ? '' : ' : ' + esc(e.code)) + '</div>').join('')
+    + (r && r.compte ? '<div>Compte de service (à qui partager l\'agenda) : <span class="mono">' + esc(r.compte) + '</span></div>' : '');
+  $('etatGoogle').textContent = r && r.ok ? 'prêt' : 'à régler';
+}
+(async () => {
+  try {
+    const g = await api('/api/ecriture');
+    if (g && g.configuree) { $('blocGoogle').hidden = false; $('etatGoogle').textContent = g.actif ? 'relié' : 'variable à corriger';
+      if (g.message) $('googleMessage').textContent = g.message; }
+  } catch (x) { /* instance publique ou hors ligne */ }
+})();
+
 /* [S31] bloc Face ID : seulement sur une instance ou l'elevation existe */
 (async () => {
   try {
@@ -1386,14 +1440,19 @@ api('/api/integrite').then(r => majEtat({ integrite: r })).catch(() => {});   /*
     allumer(e.viser);
   }
 
+  /* [S47] vu le 25 sept : l'étape 2 → 3 était longue après 30 min sans visite
+     (Render endort le serveur). Au-delà de 3 s, on le dit, et on attend jusqu'à
+     70 s au lieu de repartir au bout de 15 s pendant que le serveur démarre. */
+  const TEXTE_REVEIL = "Le serveur se réveille (jusqu'à 1 min)… il dormait faute de visite. La suite arrive toute seule.";
   async function suivant() {
     const e = ÉTAPES[pas];
     if (e.clic) {
       const b = document.querySelector(e.clic);
       if (b) {
         bSuiv.disabled = true;
+        const lent = setTimeout(() => { qX.textContent = TEXTE_REVEIL; bSuiv.textContent = 'Patiente…'; }, 3000);
         b.click();
-        await attendre(e.clic);
+        try { await attendre(e.clic, 70000); } finally { clearTimeout(lent); }
       }
     }
     pas += 1;

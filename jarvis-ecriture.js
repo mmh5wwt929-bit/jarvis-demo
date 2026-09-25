@@ -28,6 +28,15 @@
  *    5 min .. 24 h ; titre nettoye (100 caracteres).
  *  - Aucun secret (cle, jeton d'acces, identifiant d'agenda) dans une erreur,
  *    un resultat ou un journal.
+ *
+ * 1.1 (v4.6.6, 25 sept) — AVANT LE PREMIER BRANCHEMENT REEL
+ *  - diagnostic() : verifie la cle ET l'acces a l'agenda SANS RIEN ECRIRE
+ *    (jeton, puis lecture d'un evenement ; Google renvoie le niveau d'acces du
+ *    compte de service : « writer » attendu). 1 appel toutes les 20 s au plus.
+ *  - Les erreurs de mise en place sont NOMMEES au lieu d'un seul
+ *    « AGENDA_INACCESSIBLE » : API non activee, agenda introuvable, partage en
+ *    lecture seule, cle revoquee, compte supprime, horloge ; JSON du compte mal
+ *    colle (illisible / pas un compte de service / cle privee abimee).
  * ========================================================================== */
 const https = require('https');
 const crypto = require('crypto');
@@ -50,15 +59,40 @@ function base32hex(buf) {
 const idEvenement = (transactionId) => 'jv' + base32hex(crypto.createHash('sha256').update('jarvis-evenement|' + String(transactionId)).digest()).slice(0, 38);
 
 /* ---- compte de service : JSON brut ou en base64 ---- */
-function lireCompte(texte) {
-  if (!texte) return null;
+/* [1.1] dit POURQUOI un compte est refuse (jamais son contenu) */
+function examinerCompte(texte) {
+  if (!texte) return { motif: 'COMPTE_ABSENT' };
   let o = null;
-  for (const essai of [String(texte), (() => { try { return Buffer.from(String(texte), 'base64').toString('utf8'); } catch { return ''; } })()]) {
+  for (const essai of [String(texte).trim(), (() => { try { return Buffer.from(String(texte).trim(), 'base64').toString('utf8'); } catch { return ''; } })()]) {
     try { o = JSON.parse(essai); break; } catch { /* essai suivant */ }
   }
-  if (!o || o.type !== 'service_account' || typeof o.client_email !== 'string' || typeof o.private_key !== 'string') return null;
-  try { return { email: o.client_email, cle: crypto.createPrivateKey(o.private_key), kid: typeof o.private_key_id === 'string' ? o.private_key_id : undefined }; }
-  catch { return null; }
+  if (!o || typeof o !== 'object') return { motif: 'COMPTE_JSON_ILLISIBLE' };
+  if (o.type !== 'service_account' || typeof o.client_email !== 'string' || typeof o.private_key !== 'string') return { motif: 'COMPTE_PAS_UN_COMPTE_DE_SERVICE' };
+  try { return { compte: { email: o.client_email, cle: crypto.createPrivateKey(o.private_key), kid: typeof o.private_key_id === 'string' ? o.private_key_id : undefined } }; }
+  catch { return { motif: 'COMPTE_CLE_PRIVEE_ILLISIBLE' }; }
+}
+function lireCompte(texte) { return examinerCompte(texte).compte || null; }
+
+/* [1.1] Les erreurs de MISE EN PLACE, nommees depuis la reponse de Google.
+ * Seuls des motifs fixes sortent d'ici, jamais le texte de Google. */
+function erreurGoogle(status, json) {
+  const e = json && typeof json === 'object' && json.error && typeof json.error === 'object' ? json.error : {};
+  const raisons = [...(Array.isArray(e.errors) ? e.errors : []), ...(Array.isArray(e.details) ? e.details : [])]
+    .map(x => String(x && x.reason || '')).join(' ');
+  const message = String(e.message || '');
+  if (status === 403 && (/accessNotConfigured|SERVICE_DISABLED/.test(raisons) || /has not been used|is disabled/i.test(message))) return 'API_AGENDA_NON_ACTIVEE';
+  if (status === 403 && (/requiredAccessLevel/.test(raisons) || /writer access/i.test(message))) return 'AGENDA_LECTURE_SEULE';
+  if (status === 404) return 'AGENDA_INTROUVABLE';
+  if (status === 401 || status === 403) return 'AGENDA_INACCESSIBLE';
+  if (status === 429) return 'GOOGLE_LIMITE';
+  return 'GOOGLE_HTTP_' + status;
+}
+function erreurJeton(json) {
+  const d = String(json && json.error_description || '') + ' ' + String(json && json.error || '');
+  if (/account not found/i.test(d)) return 'COMPTE_GOOGLE_INTROUVABLE';
+  if (/Invalid JWT Signature/i.test(d)) return 'CLE_GOOGLE_REVOQUEE';
+  if (/timeframe|\biat\b|\bexp\b/i.test(d)) return 'HORLOGE_SERVEUR';
+  return 'AUTH_GOOGLE_REFUSEE';
 }
 function jwt(compte, maintenantMs) {
   const iat = Math.floor(maintenantMs / 1000);
@@ -135,8 +169,8 @@ function transportHttps(methode, url, entetes, corps, L) {
 
 function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = transportHttps, maintenant = () => Date.now(), limites } = {}) {
   const L = Object.freeze({ ...LIMITES_ECRITURE, ...(limites || {}) });
-  const c = lireCompte(compte);
-  if (!c) return Object.freeze({ actif: false, motif: 'COMPTE_DE_SERVICE_INVALIDE' });
+  const ex = examinerCompte(compte), c = ex.compte;
+  if (!c) return Object.freeze({ actif: false, motif: ex.motif });   /* [1.1] le motif precis */
   if (typeof agendaId !== 'string' || !/^[A-Za-z0-9._%+@-]{5,200}$/.test(agendaId)) return Object.freeze({ actif: false, motif: 'AGENDA_ID_INVALIDE' });
   const base = 'https://www.googleapis.com/calendar/v3/calendars/' + encodeURIComponent(agendaId) + '/events';
   const permisEmis = new WeakMap();
@@ -146,7 +180,7 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
   async function appeler(methode, url, corps, jetonAcces) {
     const u = new URL(url);
     if (u.protocol !== 'https:' || !HOTES.has(u.hostname)) return { ok: false, code: 'HOTE_INTERDIT' };
-    const entetes = { 'User-Agent': 'JARVIS-ecriture/1.0', Accept: 'application/json' };
+    const entetes = { 'User-Agent': 'JARVIS-ecriture/1.1', Accept: 'application/json' };
     if (jetonAcces) entetes.Authorization = 'Bearer ' + jetonAcces;
     let charge = null;
     if (corps != null) {
@@ -164,22 +198,42 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
     const r = await appeler('POST', 'https://oauth2.googleapis.com/token',
       'grant_type=' + encodeURIComponent('urn:ietf:params:oauth:grant-type:jwt-bearer') + '&assertion=' + jwt(c, maintenant()));
     if (!r.ok) return r;
-    if (r.status !== 200 || !r.json || typeof r.json.access_token !== 'string') return { ok: false, code: 'AUTH_GOOGLE_REFUSEE' };
+    if (r.status !== 200 || !r.json || typeof r.json.access_token !== 'string') return { ok: false, code: erreurJeton(r.json) };   /* [1.1] */
     acces = { jeton: r.json.access_token, expire: maintenant() + Math.max(60, Math.min(3600, Number(r.json.expires_in) || 3600) - 60) * 1000 };
     return { ok: true, jeton: acces.jeton };
   }
-  const httpVersCode = (st) => st === 401 || st === 403 || st === 404 ? 'AGENDA_INACCESSIBLE' : st === 429 ? 'GOOGLE_LIMITE' : 'GOOGLE_HTTP_' + st;
   async function lire(id, j) {
     const r = await appeler('GET', base + '/' + id, null, j);
     if (!r.ok) return r;
     if (r.status === 404 || r.status === 410) return { ok: true, absent: true };
-    if (r.status !== 200 || !r.json) return { ok: false, code: httpVersCode(r.status) };
+    if (r.status !== 200 || !r.json) return { ok: false, code: erreurGoogle(r.status, r.json) };
     return { ok: true, absent: r.json.status === 'cancelled', evenement: r.json };
   }
   const marque = (ev) => ev && ev.extendedProperties && ev.extendedProperties.private && ev.extendedProperties.private.jarvisTx;
 
+  /* [1.1] DIAGNOSTIC SANS RIEN ECRIRE : la cle (un jeton), puis l'agenda (lire
+   * au plus UN evenement a venir). La reponse de Google porte le niveau d'acces
+   * du compte de service sur cet agenda : il faut « writer » (ou « owner »). */
+  let dernierDiag = null;
+  async function diagnostic() {
+    if (dernierDiag && maintenant() - dernierDiag.ts < 20000) return { ...dernierDiag.r, recent: true };
+    const etapes = [];
+    const fin = (r) => { const x = Object.freeze({ ...r, compte: c.email, etapes: Object.freeze(etapes) }); dernierDiag = { ts: maintenant(), r: x }; return x; };
+    const j = await jeton();
+    etapes.push(Object.freeze({ etape: 'CLE', ok: j.ok, code: j.ok ? 'JETON_OBTENU' : j.code }));
+    if (!j.ok) return fin({ ok: false, code: j.code });
+    const r = await appeler('GET', base + '?maxResults=1&singleEvents=true&timeMin=' + encodeURIComponent(new Date(maintenant()).toISOString()), null, j.jeton);
+    if (!r.ok) { etapes.push(Object.freeze({ etape: 'AGENDA', ok: false, code: r.code })); return fin({ ok: false, code: r.code }); }
+    if (r.status !== 200 || !r.json) { const code = erreurGoogle(r.status, r.json); etapes.push(Object.freeze({ etape: 'AGENDA', ok: false, code })); return fin({ ok: false, code }); }
+    const role = String(r.json.accessRole || '');
+    const ecrit = role === 'writer' || role === 'owner';
+    etapes.push(Object.freeze({ etape: 'AGENDA', ok: true, code: 'AGENDA_TROUVE' }));
+    etapes.push(Object.freeze({ etape: 'ECRITURE', ok: ecrit, code: ecrit ? 'ECRITURE_PERMISE' : 'AGENDA_LECTURE_SEULE' }));
+    return fin({ ok: ecrit, code: ecrit ? 'PRET' : 'AGENDA_LECTURE_SEULE', acces: /^[a-zA-Z]{1,20}$/.test(role) ? role : null });
+  }
+
   return Object.freeze({
-    actif: true, zone,
+    actif: true, zone, diagnostic,
     validerCible: (cible) => validerCible(cible, maintenant(), zone, L),
     idEvenement,
     /* Appele DANS l'effet d'une transaction autorisee (T6). */
@@ -216,7 +270,7 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
         if (l.ok && !l.absent && marque(l.evenement) === permis.transactionId) return { ok: true, code: 'DEJA_CREE', preuve: permis.id };
         return { ok: false, code: 'CONFLIT_IDENTIFIANT' };
       }
-      return { ok: false, code: httpVersCode(r.status) };
+      return { ok: false, code: erreurGoogle(r.status, r.json) };   /* [1.1] */
     },
     /* Compensation : cible = la cible gelee rendue par compensationDebut. */
     async supprimer(cible) {
@@ -230,7 +284,7 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
         if (marque(avant.evenement) !== tx) return { ok: false, verifie: false, code: 'PAS_UN_EVENEMENT_JARVIS' };
         const d = await appeler('DELETE', base + '/' + id + '?sendUpdates=none', null, j.jeton);
         if (!d.ok) return { ok: false, verifie: false, code: d.code };
-        if (![200, 204, 404, 410].includes(d.status)) return { ok: false, verifie: false, code: httpVersCode(d.status) };
+        if (![200, 204, 404, 410].includes(d.status)) return { ok: false, verifie: false, code: erreurGoogle(d.status, d.json) };
       }
       const apres = await lire(id, j.jeton);   /* la preuve : il a disparu */
       if (!apres.ok) return { ok: false, verifie: false, code: apres.code };
@@ -239,4 +293,4 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
   });
 }
 
-module.exports = { creerEcriture, validerCible, idEvenement, lireCompte, jwt, base32hex, LIMITES_ECRITURE, HOTES, VERSION: '1.0' };
+module.exports = { creerEcriture, validerCible, idEvenement, lireCompte, examinerCompte, erreurGoogle, erreurJeton, jwt, base32hex, LIMITES_ECRITURE, HOTES, VERSION: '1.1' };

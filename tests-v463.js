@@ -121,7 +121,8 @@ const session = async () => (await appel('/api/session', {})).sessionId;
   const reps = [];
   for (const c of mauvaises) reps.push(await appel('/api/reformuler', { sessionId: sid, jeton: jPay, cible: c }));
   await t('D3', 'cible retapée : prénom, phrase, adresse dictée cassée, sans domaine, points, tiret, sosie cyrillique, caractère invisible : 13/13 refusés', async () => {
-    const passees = mauvaises.filter((c, i) => !(reps[i].status === 400 && reps[i].erreur === 'ADRESSE_INVALIDE' && !reps[i].decision));
+    /* [v4.6.5 - S47] une phrase (avec espaces) est refusee par « tape seulement l'adresse » */
+    const passees = mauvaises.filter((c, i) => !(reps[i].status === 400 && ['ADRESSE_INVALIDE', 'ADRESSE_SEULE'].includes(reps[i].erreur) && !reps[i].decision));
     return { ok: passees.length === 0, info: passees.length ? 'passées : ' + passees.map(x => JSON.stringify(x)).join(', ') : '13 refus ADRESSE_INVALIDE' };
   });
 
@@ -241,13 +242,17 @@ const session = async () => (await appel('/api/session', {})).sessionId;
   const clic = el => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
   const derniere = () => [...d.querySelectorAll('#fil .tour')].pop();
 
-  const dans15 = Date.now() + 15 * 60 * 1000;
-  w.majEtat({ elevation: { active: true, mode: 'CODE', jusqua: dans15, exigee: true } });
-  const parCode = $('etatFaceId').textContent;
-  w.majEtat({ elevation: { active: true, mode: 'FACE_ID', jusqua: dans15, exigee: true } });
-  const parFace = $('etatFaceId').textContent;
-  await t('P1', "le bandeau dit PAR QUOI l'identité a été confirmée : « code » après le code, « actif » après Face ID", async () =>
-    ({ ok: /code/.test(parCode) && !/actif/.test(parCode) && /^actif · 15 min$/.test(parFace), info: '« ' + parCode + ' » / « ' + parFace + ' »' }));
+  /* [v4.6.5 - S46] regle stricte : plus d'etat « actif 15 min » pour la session.
+   * PAR QUOI l'identite a ete confirmee se dit desormais action par action,
+   * dans la trace ; le bandeau dit la regle. */
+  w.majEtat({ elevation: { exigee: true, regle: 'CHAQUE_ACTION' } });
+  const bandeau = $('etatFaceId').textContent;
+  const tr = (e) => w.resumeTrace({ intention: { nature: 'FRAPPE', frappe: 'x', reverifiee: true }, plan: { classe: 'IRREVERSIBLE' },
+    confirmation: { mode: 'CLIC_APRES_FENETRE', elevation: e }, effet: { etat: 'EXECUTED' } });
+  const parCode = tr('CODE'), parFace = tr('FACE_ID');
+  await t('P1', "PAR QUOI l'identité a été confirmée, pour CETTE action : « code de secours » / « Face ID » dans la trace ; bandeau « à chaque action »", async () =>
+    ({ ok: /\+ code de secours/.test(parCode) && !/Face ID/.test(parCode) && /\+ Face ID/.test(parFace) && bandeau === 'demandé à chaque action irréversible',
+       info: '« ' + bandeau + ' »' }));
 
   plans.push({ action: 'SEND', resource: 'EMAIL' });
   $('msg').value = "envoie une facture s'il te plaît"; clic($('envoyer')); await dort(900);

@@ -79,9 +79,10 @@ const R=[];const ok=(id,c,nom,info)=>R.push((c?'OK    ':'ECHEC ')+id+' '+nom+(in
  ok('P9',pan&&!pan.querySelector('[data-faceid]').disabled&&pan.querySelector('input.code')&&/bien toi/.test(pan.textContent),"confirmation d'un envoi : panneau « Face ID » (défi déjà prêt) + code de secours");
  clic(pan.querySelector('[data-faceid]'));await dort(1500);
  const txt=d.body.textContent;
- ok('P10',/Face ID validé/.test(pan.textContent)&&/Envoyé\./.test(txt)&&/confirmé par ton clic \+ Face ID/.test(txt)&&/actif · 1[45] min/.test($('etatFaceId').textContent),"Face ID : validé → envoi confirmé automatiquement, trace « + Face ID », état « actif · 15 min »",$('etatFaceId').textContent);
+ /* [v4.6.5 - S46] regle stricte : validé POUR CETTE ACTION ; plus d'état « actif 15 min » */
+ ok('P10',/Face ID validé pour cette action/.test(pan.textContent)&&/Envoyé\./.test(txt)&&/confirmé par ton clic \+ Face ID/.test(txt)&&$('etatFaceId').textContent==='demandé à chaque action irréversible',"Face ID : validé pour cette action → envoi confirmé automatiquement, trace « + Face ID », état « demandé à chaque action »",$('etatFaceId').textContent);
  /* enregistrement */
  clic($('fidPreparer'));await dort(500);clic($('fidCreer'));await dort(900);
  ok('P11',creeAppels===1&&!$('fidResultat').hidden&&EL.lirePasskeys($('fidValeur').value).size===1,"enregistrer Face ID : la clé publique à coller dans Render s'affiche, relisible par le serveur");
  ok('P12',err.length===0,'aucune erreur JavaScript dans la page',err.slice(0,2).join(' | '));
- L('JARVIS — page v4.6 (jsdom, vrai serveur)\n');for(const x of R)L(x);const k=R.filter(x=>x.startsWith('ECHEC')).length;L('\n>>> '+(R.length-k)+'/'+R.length+' tests passent');process.exit(0);})();
+ L('JARVIS — page v4.6 (jsdom, vrai serveur)\n');for(const x of R)L(x);const k=R.filter(x=>x.startsWith('ECHEC')).length;L('\n>>> '+(R.length-k)+'/'+R.length+' tests passent');process.exit(k?1:0) /* [v4.6.5] sortait toujours 0 : la CI ne voyait jamais un échec */;})();

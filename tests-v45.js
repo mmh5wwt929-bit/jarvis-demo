@@ -277,7 +277,9 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   plans.push({ action: 'READ', resource: 'AGENDA', target: 'demain' });
   await appel('/api/chat', { sessionId: sid4, message: "qu'est-ce que j'ai demain ?" });
   plans.push({ action: 'AUCUNE' });                                   /* planificateur qui s'auto-censure */
-  const w1 = await appel('/api/chat', { sessionId: sid4, message: 'Envoie la facture à alsid@exemple.fr' });
+  /* [v4.6.5 - S47] sans adresse : avec verbe + adresse ecrits, le serveur propose
+   * desormais l'action lui-meme (voir tests-v465.js, B6) */
+  const w1 = await appel('/api/chat', { sessionId: sid4, message: 'Envoie la facture, stp' });
   const sys1 = derniereReponse().system, plan4 = dernierPlanificateur().messages[0].content;
   plans.push('pas du json du tout');                                  /* planificateur illisible */
   const w2 = await appel('/api/chat', { sessionId: sid4, message: 'Envoie la facture à alsid@exemple.fr' });
