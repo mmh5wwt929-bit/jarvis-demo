@@ -284,17 +284,19 @@ const pasDEffet = (r) => r.decide !== 'EN_ATTENTE' && r.decide !== 'AUTORISE' &&
 
   /* ============================== P5 ============================== */
   /* [v4.8 - S64] 8 points : la lecture d'agenda existe deux fois (question tapee, point du jour a l'ouverture), meme permis */
-  await t('E1', 'P5', "inventaire : exactement 8 points d'effet (dont la creation d'evenement et 2 lectures d'agenda), 1 compensation, 1 constat d'effet ; finaliser seulement dans /api/finaliser", async () => {
+  await t('E1', 'P5', "inventaire : exactement 10 points d'effet (dont la creation d'evenement, 2 lectures d'agenda, l'envoi d'un vrai e-mail et la lecture de la boite [v4.9]), 1 compensation, 2 constats d'effet ; finaliser seulement dans /api/finaliser", async () => {
     const src = fs.readFileSync(path.join(DIR, 'server.js'), 'utf8');
     const lignes = src.split('\n');
     const effets = lignes.map((l, i) => ({ l, i })).filter(x => /\.executer\(|\.finaliser\(/.test(x.l) && !/^\s*(\*|\/\/|\/\*)/.test(x.l));
     /* [v4.6.7 - S50] le meme point d'effet de lecture emet aussi le permis de l'agenda JARVIS */
-    const attendus = [/permis = AGENDA\.permis\(action\);.*permisJ = ECRITURE\.permisLecture\(action\)/, /permis = ECRITURE\.permis\(action\)/, /memorise: true/, /prepare: true/, /recu: rep\.ok === true/, /target: 'secret'/, /s\.g\.finaliser\(b\.jeton\)/];
+    const attendus = [/permis = AGENDA\.permis\(action\);.*permisJ = ECRITURE\.permisLecture\(action\)/, /permis = ECRITURE\.permis\(action\)/, /memorise: true/, /prepare: true/, /recu: rep\.ok === true/, /target: 'secret'/, /s\.g\.finaliser\(b\.jeton\)/,
+      /att\.permis = MAIL_ENVOI\.permisEnvoi\(action\)/,    /* [v4.9 S68] le permis d'envoi d'un vrai e-mail nait dans l'effet */
+      /permis = MAIL_LECTURE\.permisLecture\(action\)/];     /* [v4.9 S69] le permis de lecture de la boite aussi */
     const inconnus = effets.filter(x => !attendus.some(re => re.test(x.l)));
     const isole = /hote_compromis: \(\) => \{\s*const \{ session: g, entree \} = creerSessionGouvernee\(\);/.test(src);
     const nComp = (src.match(/\.compensationDebut\(/g) || []).length, nConst = (src.match(/\.constaterEffet\(/g) || []).length;
     const lectures = effets.filter(x => attendus[0].test(x.l)).length;
-    return { ok: effets.length === 8 && lectures === 2 && inconnus.length === 0 && isole && nComp === 1 && nConst === 1, info: effets.length + ' points, compensation x' + nComp + ', constat x' + nConst + (inconnus.length ? ' ; INCONNUS lignes ' + inconnus.map(x => x.i + 1).join(',') : '') + (isole ? ' ; demo isolee' : ' ; DEMO NON ISOLEE') };
+    return { ok: effets.length === 10 && lectures === 2 && inconnus.length === 0 && isole && nComp === 1 && nConst === 2, info: effets.length + ' points, compensation x' + nComp + ', constat x' + nConst + (inconnus.length ? ' ; INCONNUS lignes ' + inconnus.map(x => x.i + 1).join(',') : '') + (isole ? ' ; demo isolee' : ' ; DEMO NON ISOLEE') };
   });
   nouvelleIp(); sid = await session();
   const bizarres = await Promise.all([

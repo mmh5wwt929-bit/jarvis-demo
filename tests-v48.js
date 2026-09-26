@@ -165,7 +165,7 @@ const PAGE = (() => { try { return fs.readFileSync(path.join(DIR, 'index.html'),
   const hp = await essai(() => fetch('http://localhost:' + (port - 1) + '/health').then(r => r.json()), {});
   const DETAIL = ['agenda', 'ecriture', 'elevation', 'ip', 'tonIp', 'ipDepuis', 'delaiIa', 'gouvernance', 'vigilance', 'memoire', 'verite', 'ecritureMotif', 'config'];
   await t('S1', "instance publique : /health = statut, versions, empreinte et manifeste ; ni outils, ni adresse IP, ni réglages", async () =>
-    ({ ok: hp.status === 'ok' && /^v4\.8\.\d+$/.test(hp.passerelle || '') && hp.acces === 'public' && typeof hp.empreinte === 'string' && !!hp.manifeste && DETAIL.every(k => !(k in hp)),
+    ({ ok: hp.status === 'ok' && /^v4\.[89]\.\d+$/.test(hp.passerelle || '') /* [v4.9] */ && hp.acces === 'public' && typeof hp.empreinte === 'string' && !!hp.manifeste && DETAIL.every(k => !(k in hp)),
        info: Object.keys(hp).join(',') }));
   pub.arreter();
   const pubD = await lancer({ JARVIS_SANTE_PUBLIQUE: 'detail' });

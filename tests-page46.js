@@ -50,10 +50,11 @@ const R=[];const ok=(id,c,nom,info)=>R.push((c?'OK    ':'ECHEC ')+id+' '+nom+(in
  const dernier=()=>[...d.querySelectorAll('#fil .tour')].pop().textContent;
  ok('P1',!$('micro').hidden&&!$('blocFaceId').hidden,'micro visible (dictée possible), bloc Face ID visible (instance avec élévation)','micro '+!$('micro').hidden+', Face ID '+!$('blocFaceId').hidden);
  /* voix */
- clic($('micro'));rec.onresult({results:[[{transcript:'envoie les factures à luc@exemple.fr'}]]});rec.stop();
- const dicte=$('msg').value;plans.push({action:'SEND',resource:'EMAIL',target:'luc@exemple.fr'});clic($('envoyer'));await dort(700);
- const cv=corps.filter(x=>/\/api\/chat/.test(x.u)).pop();const bulle=[...d.querySelectorAll('#fil .tour.moi')].pop().textContent;
- ok('P2',dicte==='envoie les factures à luc@exemple.fr'&&cv.b.canal==='voix'&&/🎤/.test(bulle),"dictée : texte dans le champ, relu, puis envoyé avec canal « voix » et 🎤 dans la bulle",'canal '+cv.b.canal);
+ /* [v4.9 S66] la dictee part toute seule a la fin (plus de toucher sur « Envoyer ») */
+ plans.push({action:'SEND',resource:'EMAIL',target:'luc@exemple.fr'});
+ clic($('micro'));rec.onresult({results:[[{transcript:'envoie les factures à luc@exemple.fr'}]]});rec.stop();await dort(700);
+ const cv=corps.filter(x=>/\/api\/chat/.test(x.u)).pop()||{b:{}};const bulle=[...d.querySelectorAll('#fil .tour.moi')].pop().textContent;
+ ok('P2',cv.b.message==='envoie les factures à luc@exemple.fr'&&cv.b.canal==='voix'&&/🎤/.test(bulle)&&$('msg').value==='',"dictée : envoyée toute seule à la fin de la dictée [v4.9], canal « voix » et 🎤 dans la bulle",'canal '+cv.b.canal);
  $('msg').value='bonjour';plans.push({action:'AUCUNE'});clic($('envoyer'));await dort(500);
  ok('P3',!('canal' in corps.filter(x=>/\/api\/chat/.test(x.u)).pop().b),"message tapé ensuite : plus marqué voix");
  /* creation */

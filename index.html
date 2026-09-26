@@ -146,6 +146,12 @@ button.lien{background:none;border:none;color:var(--sourd);font-size:12px;
 #blocFaceId textarea{width:100%;margin-top:8px;font-size:12px}
 #blocFaceId p{font-size:13px}
 #blocGoogle p{font-size:13px}
+/* [S68] v4.9 : le vrai e-mail, montre EN ENTIER (texte, jamais du HTML) */
+.mail-carte{border:1px solid var(--retenu);border-radius:10px;padding:10px;margin-top:6px}
+.mail-entete{font-size:13px;margin:2px 0}.mail-entete b{display:inline-block;min-width:52px}
+.mail-texte{white-space:pre-wrap;word-break:break-word;font-size:13px;border-left:3px solid var(--retenu);padding:6px 9px;margin:8px 0;max-height:none}
+#blocGmail p{font-size:13px}
+#blocGmail .rang{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
 #blocGoogle .rang{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
 #googleEtapes div{font-size:13px;margin-top:4px}
 
@@ -345,7 +351,7 @@ details.point-du-jour[open]>summary::after{content:'\2212'}
       <div class="mesure">ancres publiées <b id="mAncres" class="mono">0</b></div>
       <div class="mesure">contexte déclaré <b id="mCouv" class="mono">—</b></div>
     </div>
-    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.2 · passerelle v4.7</div>
+    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.9</div>
   </div>
 </header>
 
@@ -364,7 +370,7 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
     <div class="saisie">
       <div class="rang">
         <textarea id="msg" rows="1" placeholder="Écris à JARVIS…"></textarea>
-        <button id="micro" type="button" hidden aria-label="Dicter (toucher pour parler, toucher pour arrêter)">🎤</button>
+        <button id="micro" type="button" hidden aria-label="Dicter (toucher pour parler, toucher pour arrêter ; le message part à la fin de la dictée)" title="Dicter : le message part à la fin de la dictée">🎤</button>
         <button class="primaire" id="envoyer">Envoyer</button>
       </div>
       <div class="rang" id="rangManuel" hidden>
@@ -412,6 +418,17 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
         <button id="googleTester" type="button">Tester l'écriture</button></div>
       <p id="googleMessage"></p>
       <div id="googleEtapes"></div>
+      </div>
+    </details>
+
+    <details class="bloc" id="blocGmail" hidden>
+      <summary><h2>Gmail (compte d'essai) <span class="mono" id="etatGmail"></span></h2></summary>
+      <div class="corps">
+      <p><b>Vérifier Gmail</b> contrôle les deux jetons et leurs droits (envoyer seulement, lire seulement) : rien n'est envoyé.
+        Un vrai e-mail ne part que vers une adresse de ta liste, après que tu as retapé l'adresse, puis avec Face ID.</p>
+      <div class="rang"><button id="gmailVerifier" type="button">Vérifier Gmail</button></div>
+      <p id="gmailMessage"></p>
+      <div id="gmailEtapes"></div>
       </div>
     </details>
 
@@ -713,12 +730,15 @@ const CLASSES = { IRREVERSIBLE: 'irréversible', REVERSIBLE: 'réversible', COMP
 /* [v4.7] vu en ligne : la trace finissait en anglais (« → executed. ») */
 const ETATS_FR = { PROPOSED: 'proposé', PENDING: 'en attente', EXECUTED: 'exécuté', COMPENSATING: 'annulation en cours',
   COMPENSATED: 'annulé', FAILED: 'échoué', CANCELLED: 'abandonné', EXPIRED: 'expiré', REVOKED: 'révoqué' };
+/* [S67] v4.9 1c : vu en ligne, « Tester l'écriture » etait trace « ton toucher
+ * sur « Créer » ». Le geste vient de la couche (liste fermee), jamais du modele. */
+const GESTES_FR = { CREER: 'Créer', CREER_SERIE: 'Créer les séances', TESTER_ECRITURE: "Tester l'écriture" };
 function resumeTrace(t) {
   const i = t.intention || {}, c = t.confirmation || {}, e = t.effet || {};
   const source = i.nature === 'FRAPPE' ? 'ta frappe « ' + i.frappe + ' »'
     : i.nature === 'VOIX' ? 'ta voix « ' + i.frappe + ' »'
     : i.nature === 'CIBLE_RETAPEE' ? 'la cible retapée par toi « ' + i.frappe + ' »'
-    : i.nature === 'CONFIRMATION_GESTE' ? 'ton toucher sur « Créer »' : 'aucune frappe requise';
+    : i.nature === 'CONFIRMATION_GESTE' ? 'ton toucher sur « ' + (GESTES_FR[i.geste] || 'Créer') + ' »' : 'aucune frappe requise';   /* [S67] le vrai geste */
   const elev = c.elevation === 'FACE_ID' ? ' + Face ID' : c.elevation === 'CODE' ? ' + code de secours' : '';
   /* [S47] l'heure de la DEMANDE (vu le 25 sept : « est-ce l'action de 14h39 ? ») */
   const h0 = (t.historique || [])[0], d0 = h0 && Number.isFinite(h0.ts) ? new Date(h0.ts) : null;
@@ -726,7 +746,8 @@ function resumeTrace(t) {
   return 'Trace : ' + source + (i.reverifiee === true ? ' (revérifiée)' : i.reverifiee === false ? ' (NON revérifiée)' : '') + heure
     + ' → autorisé (' + (CLASSES[(t.plan || {}).classe] || String((t.plan || {}).classe || '').toLowerCase()) + ')'   /* [S42] */
     + (c.mode === 'CLIC_APRES_FENETRE' ? ' → retenu 10 s → confirmé par ton clic' + elev : c.mode === 'SANS_FENETRE' ? ' → exécuté sans fenêtre' : '')
-    + (e.reel ? (e.reel.ok ? ' → effet réel confirmé' : ' → effet réel ÉCHOUÉ (' + e.reel.code + ')') : '')
+    + (e.reel ? (e.reel.ok ? ' → effet réel confirmé' + (e.reel.preuve && /^GMAIL:/.test(String((t.plan || {}).outil || '')) ? ' (identifiant Google « ' + e.reel.preuve + ' »)' : '')
+      : ' → effet réel ÉCHOUÉ (' + e.reel.code + ')') : '')
     + (e.compense ? ' → annulé (disparition vérifiée)' : '')
     + (e.compense && e.etat === 'COMPENSATED' ? '.' : ' → ' + (ETATS_FR[e.etat] || String(e.etat || '').toLowerCase()) + '.');
 }
@@ -789,9 +810,29 @@ function rendreDecision(d) {
   /* Conversation ordinaire : aucune action a gouverner, aucune carte. */
   if (d.decide === 'SANS_OBJET') {
     const deJarvis = d.etape === 'MEMOIRE' || d.etape === 'DESTINATAIRE' || d.etape === 'DEPASSE'   /* [S36] [S43] */
-      || d.etape === 'SERVEUR' || d.etape === 'OUTIL';   /* [S49]-[S55] ecrit par le serveur, sans modele */
+      || d.etape === 'SERVEUR' || d.etape === 'OUTIL'   /* [S49]-[S55] ecrit par le serveur, sans modele */
+      || d.outil === 'mail' || d.outil === 'boite';   /* [S68] [S69] */
     if (d.reponse) tour(deJarvis ? 'JARVIS' : 'Claude', d.reponse, false, !deJarvis);
     else tour('JARVIS', sansReponse(d), false);
+    return;
+  }
+  /* [S68] v4.9 VRAI E-MAIL : la carte montre TOUT (destinataire, objet, texte),
+   * en texte echappe ; la personne retape l'adresse. La carte ne porte qu'un
+   * jeton : le contenu reste cote serveur, celui qui sera lie a la transaction. */
+  if (d.etape === 'MAIL_RETAPER' && d.aRetaper) {
+    const m = d.aRetaper;
+    if (d.reponse) tour('JARVIS', d.reponse, false);
+    const hM = '<div class="decision attente mail-retaper" data-jeton="' + esc(m.jeton) + '"><div class="plan">Vrai e-mail — à relire en entier</div>'
+      + '<div class="mail-carte"><p class="mail-entete"><b>De</b> compte d\'essai JARVIS</p><p class="mail-entete"><b>À</b> <span class="mono">' + esc(m.a) + '</span></p>'
+      + '<p class="mail-entete"><b>Objet</b> ' + esc(m.objet) + '</p><div class="mail-texte">' + esc(m.texte) + '</div>'
+      + '<p class="mail-entete">' + (m.redigePar === 'modele' ? 'Rédigé par Claude à partir de ta seule demande : relis chaque mot.' : 'Objet et texte : tes mots, tels quels.')
+      + ' Aucun lien que tu n\'as pas tapé, aucune pièce jointe.' + (Number.isFinite(m.restants) ? ' Envois restants aujourd\'hui : ' + esc(String(m.restants)) + '.' : '') + '</p></div>'
+      + '<p>S\'il te convient, retape l\'adresse du destinataire toi-même. Il sera ensuite retenu 10 s, puis envoyé seulement avec Face ID.</p>'
+      + '<div class="rang"><input class="cible" value="" placeholder="adresse du destinataire" aria-label="Adresse retapée"'
+      + ' autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="email">'
+      + '<button class="danger" data-mail-abandon="1">Ne pas envoyer</button><button class="primaire" data-mail-retaper="1">Préparer l\'envoi</button></div><p class="etat-carte"></p></div>';
+    tour('JARVIS', '', false).querySelector('.quoi').outerHTML = hM;
+    $('fil').scrollTop = $('fil').scrollHeight;
     return;
   }
   /* [S30] Creer un evenement : la carte montre l'evenement EXACT ; rien n'est
@@ -831,6 +872,20 @@ function rendreDecision(d) {
    * une simple lecture tapee par la personne (vu en ligne le 23 sept). A force
    * d'alarmes sans objet, on ne lit plus celles qui comptent. Les refus, eux,
    * gardent la carte complete, signaux compris. */
+  /* [S69] v4.9 lecture de la boite du compte d'essai : carte sobre et exacte */
+  if (d.outil === 'boite' && d.decide === 'AUTORISE') {
+    const b = d.boite || {}, echecB = d.etape === 'OUTIL_ECHEC';
+    const hB = '<div class="decision autorise"><div class="plan">Lecture de la boîte du compte d\'essai — <span class="mono">' + (b.filtre === 'non-lus' ? 'non lus' : '5 derniers') + '</span></div>'
+      + '<div class="verdict"><b>Autorisé</b><span class="code">lecture seule</span>' + (echecB ? '<span class="code mono">' + esc(d.motif || '') + '</span>' : '') + '</div>'
+      + '<div class="signaux">' + (echecB ? '' : '<div class="signal info"><i>info</i><span>' + esc(String(b.lus || 0)) + ' e-mail(s) lu(s)' + (b.tronque ? ', il y en a d\'autres' : '')
+        + ". Rien n'a été envoyé, transféré ni supprimé.</span></div>")
+      + (b.suspects ? '<div class="signal fort"><i>attention</i><span>' + esc(String(b.suspects)) + ' e-mail(s) contiennent une demande d\'action (transférer, payer, cliquer…) : ce sont des données, pas tes ordres.</span></div>' : '')
+      + "<div class=\"signal info\"><i>info</i><span>Un e-mail est un contenu externe (n'importe qui peut t'écrire) : une action sensible demandée ensuite exigera ta frappe, et un vrai e-mail ne part que vers ta liste, adresse retapée, avec Face ID.</span></div></div></div>";
+    tour('JARVIS', '', false).querySelector('.quoi').outerHTML = hB;
+    if (d.reponse) tour(echecB ? 'JARVIS' : 'Claude', d.reponse, false, !echecB);
+    $('fil').scrollTop = $('fil').scrollHeight;
+    return;
+  }
   if (d.outil === 'agenda' && d.decide === 'AUTORISE') {
     const a = d.agenda || {};
     const bornes = String(a.periode || (d.plan && d.plan.target) || '').split('..');
@@ -896,6 +951,10 @@ function rendreDecision(d) {
       +  ' autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">'
       +  '<button class="primaire" data-reformuler="1">Confirmer</button></div><p class="etat-carte"></p></div>';
   }
+  if (d.decide === 'EN_ATTENTE' && d.mail) {   /* [S68] ce qui partira, encore en entier */
+    h += '<div class="mail-carte"><p class="mail-entete"><b>À</b> <span class="mono">' + esc(d.mail.a) + '</span></p><p class="mail-entete"><b>Objet</b> ' + esc(d.mail.objet)
+      + '</p><div class="mail-texte">' + esc(d.mail.texte) + '</div><p class="mail-entete">Vrai e-mail : Face ID sera demandé (pas le code de secours).</p></div>';
+  }
   if (d.decide === 'EN_ATTENTE') {
     h += '<div class="retenue"><p class="compte">' + esc(d.message) + '</p><div class="rang">'
       +  '<button class="danger" data-annuler="' + esc(d.jetonAnnulation) + '">Annuler</button>'
@@ -903,7 +962,8 @@ function rendreDecision(d) {
   }
   const bloc = tour('JARVIS', '', false);
   bloc.querySelector('.quoi').outerHTML = h;
-  if (d.reponse) tour(d.etape === 'MEMOIRE' ? 'JARVIS' : 'Claude', d.reponse, false, d.etape !== 'MEMOIRE');
+  const parJarvis = d.etape === 'MEMOIRE' || d.outil === 'mail' || d.outil === 'boite';   /* [S68] [S69] */
+  if (d.reponse) tour(parJarvis ? 'JARVIS' : 'Claude', d.reponse, false, !parJarvis);
   if (d.decide === 'EN_ATTENTE') compteARebours(d.executableApres, bloc.querySelector('.compte'));   /* [S35] sa propre boîte */
   $('fil').scrollTop = $('fil').scrollHeight;
 }
@@ -1027,6 +1087,12 @@ async function finaliserJeton(jeton) {
   if (r.etat === 'TROP_TOT') { rendre(); return direDansRetenue(jeton, 'Pas encore : la fenêtre court toujours.'); }
   if (r.etat === 'INTROUVABLE') return clore(jeton, 'Déjà traitée (envoyée ou annulée) : plus rien à confirmer.');
   if (r.etat === 'PERIME') return clore(jeton, r.message || TEXTE_PERIMEE);   /* [S40] */
+  if (r.etat === 'EXECUTE' && r.reel) {   /* [S68] vrai e-mail : le SERVEUR dit s'il est parti, preuve de Google */
+    clore(jeton, r.envoye ? 'Envoyé pour de vrai.' : r.code === 'RESULTAT_INCERTAIN' ? 'Résultat incertain : vérifie les envoyés.' : "Pas parti : rien n'a été envoyé.");
+    tour('JARVIS', r.reponse || (r.envoye ? 'Envoyé.' : 'Pas parti.'), false);
+    if (r.trace) ajouterTrace(r.trace);
+    return;
+  }
   if (r.etat === 'EXECUTE') {
     clore(jeton, 'Envoyé.');
     tour('JARVIS', 'Envoyé.', false);
@@ -1060,6 +1126,9 @@ function perimerTout() {
     const jeton = b.dataset.finaliser, boite = b.closest('.retenue');
     if (boite && !boite.dataset.close && !confirmationsFaites.has(jeton)) clore(jeton, TEXTE_PERIMEE);
   }
+  /* [S68] la carte d'un vrai e-mail aussi */
+  for (const b of document.querySelectorAll('#fil .mail-retaper'))
+    if (!b.dataset.perimee && !b.dataset.utilisee) perimerCarte(b, "Carte périmée : la conversation a continué. Rien n'est parti ; redemande l'e-mail si tu le veux toujours.");
   /* [S43] la carte « Créer » aussi : le serveur la refuse après un autre message */
   for (const b of document.querySelectorAll('#fil .creation [data-creer]')) {
     const c = b.closest('.creation');
@@ -1083,9 +1152,10 @@ async function demanderElevation(jeton, moyens, pour) {
   const quoi = pour && pour.action ? ' pour : ' + esc(ACTES[pour.action] || String(pour.action).toLowerCase()) + ' → ' + esc(pour.cible || '') : '';
   let h = '<div class="elevation" data-jeton="' + esc(jeton) + '"><p>Action irréversible : confirme que c\'est bien toi' + quoi + ' (cette action seulement).</p><div class="rang">';
   if (avecFaceId) h += '<button class="primaire" data-faceid="1" disabled>Face ID</button>';
-  if (moyens.code) h += '<input class="code" type="password" inputmode="numeric" autocomplete="off" placeholder="code de secours" aria-label="Code de secours"><button data-code="1">Valider le code</button>';
+  if (moyens.code && !moyens.faceIdSeul) h += '<input class="code" type="password" inputmode="numeric" autocomplete="off" placeholder="code de secours" aria-label="Code de secours"><button data-code="1">Valider le code</button>';
+  if (moyens.faceIdSeul) h += '<span>Vrai e-mail : Face ID seulement' + (avecFaceId ? '' : ', indisponible sur cet appareil : rien ne partira d\'ici') + '.</span>';   /* [S68] */
   if (moyens.erreurConfig) h += '<span>Code de secours mal réglé dans Render (il faut 12 à 64 chiffres) : l\'envoi reste bloqué tant qu\'il n\'est pas corrigé.</span>';   /* [S35] */
-  else if (!avecFaceId && !moyens.code) h += '<span>Aucun moyen disponible sur cet appareil.</span>';
+  else if (!avecFaceId && !moyens.code && !moyens.faceIdSeul) h += '<span>Aucun moyen disponible sur cet appareil.</span>';
   h += '</div><p class="etat-elev"></p></div>';
   bloc.querySelector('.quoi').outerHTML = h;
   const boite = $('fil').lastElementChild.querySelector('.elevation');
@@ -1094,8 +1164,12 @@ async function demanderElevation(jeton, moyens, pour) {
 }
 
 /* [S32] VOIX : toucher pour parler, toucher pour arreter ; une phrase a la
- * fois, jamais d'ecoute permanente. Le texte arrive dans le champ : on relit,
- * puis « Envoyer ». */
+ * fois, jamais d'ecoute permanente.
+ * [S66] v4.9 1b : quand la dictee s'arrete (silence, ou toucher sur ■), le
+ * texte dicte part tout seul, TOUJOURS sur le canal voix (la couche ne le
+ * prend jamais pour une frappe ; l'irreversible reste a confirmer a la main).
+ * Rien ne part si rien n'a ete dicte (erreur, micro refuse, silence), ni si
+ * un message est deja en route : le texte reste alors dans le champ. */
 const Voix = (() => {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   let rec = null, ecoute = false, dicte = false;
@@ -1111,7 +1185,8 @@ const Voix = (() => {
     rec = new SR(); rec.lang = 'fr-FR'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
     const base = $('msg').value.trim() ? $('msg').value.trim() + ' ' : '';
     rec.onresult = (e) => { let x = ''; for (const r of e.results) x += r[0].transcript; $('msg').value = base + x; dicte = true; };
-    rec.onend = () => { ecoute = false; $('micro').classList.remove('ecoute'); $('micro').textContent = '🎤'; };
+    rec.onend = () => { ecoute = false; $('micro').classList.remove('ecoute'); $('micro').textContent = '🎤';
+      if (dicte && $('msg').value.trim() && !$('envoyer').disabled) envoyer(); };   /* [S66] */
     rec.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed')
       tour('JARVIS', 'Micro refusé : autorise-le pour ce site (Réglages → Safari → Micro), ou utilise la dictée du clavier.', false); };
     try { rec.start(); ecoute = true; $('micro').classList.add('ecoute'); $('micro').textContent = '■'; } catch (e) { ecoute = false; }
@@ -1238,6 +1313,36 @@ document.addEventListener('click', async (ev) => {
     $('fil').innerHTML = ''; $('chaine').innerHTML = '<div class="vide">La chaîne se construira ici.</div>';
     majEtat({ plancher:'USER_DIRECT', influences:[], ledger:{consumed:0,allocated:100} });
     tour('JARVIS', 'Nouvelle session. Le plancher repart à zéro.', false);
+    t.disabled = false;
+  }
+  /* [S68] vrai e-mail : l'adresse retapee a la main */
+  if (t.dataset.mailRetaper) {
+    const boite = t.closest('.mail-retaper'), champ = boite && boite.querySelector('input.cible'), etatC = boite && boite.querySelector('.etat-carte');
+    const a = champ ? champ.value.trim() : '';
+    if (!a) { if (champ) champ.focus(); return; }
+    if (boite.dataset.perimee || boite.dataset.utilisee) return;
+    t.disabled = true;
+    const r = await api('/api/mail/retaper', { jeton: boite.dataset.jeton || '', adresse: a });
+    if (limiteAtteinte(r)) { t.disabled = false; return; }
+    if (r && r.erreur === 'CARTE_PERIMEE') return perimerCarte(boite, r.message);
+    if (r && r.erreur) {
+      if (etatC) etatC.textContent = r.message || ('Refusé : ' + r.erreur);
+      if (/fermée/.test(r.message || '')) return perimerCarte(boite, r.message);
+      t.disabled = false; if (champ) champ.focus(); return;
+    }
+    boite.dataset.utilisee = '1';
+    for (const x of boite.querySelectorAll('button, input')) x.disabled = true;
+    tour('JARVIS', 'Adresse retapée au clavier : ' + a + '.', false);
+    if (r && r.decision) { majEtat(r.decision); rendreDecision(r.decision); }
+  }
+  if (t.dataset.mailAbandon) {
+    const boite = t.closest('.mail-retaper');
+    if (boite && !boite.dataset.utilisee) { boite.dataset.utilisee = '1'; for (const x of boite.querySelectorAll('button, input')) x.disabled = true; tour('JARVIS', "Rien n'est parti.", false); }
+  }
+  if (t.id === 'gmailVerifier') {   /* [S68] [S69] rien n'est envoyé */
+    t.disabled = true; $('gmailMessage').textContent = 'Vérification…'; $('gmailEtapes').innerHTML = '';
+    let r = null; try { r = await api('/api/mail/diagnostic'); } catch (e) { r = null; }
+    if (!limiteAtteinte(r || {})) afficherGmail(r);
     t.disabled = false;
   }
   if (t.dataset.reformuler) {
@@ -1467,6 +1572,17 @@ function accueilPerso() {
   const q = $('accueil') && $('accueil').querySelector('.quoi');
   if (q) q.textContent = "Parle-moi normalement : une question, ou ton agenda (« qu'ai-je demain ? », « ajoute hand mercredi à 18h »). Rien n'est écrit sans ton toucher.";
 }
+/* [S68] [S69] le diagnostic Gmail : des motifs, jamais un secret */
+const ETAPES_GMAIL = { ENVOI: 'Envoyer (gmail.send seul)', LECTURE: 'Lire (gmail.readonly seul)' };
+function afficherGmail(r) {
+  const ok = r && r.ok;
+  $('gmailMessage').textContent = !r ? 'Pas de réponse du serveur.' : r.message
+    || (ok ? 'Prêt. Rien n\'a été envoyé.' : 'À régler : voir ci-dessous.') + (r.compte ? '' : '');
+  $('gmailEtapes').innerHTML = ((r && r.etapes) || []).map(e => '<div>' + (e.ok ? '✓ ' : '✗ ') + esc(ETAPES_GMAIL[e.etape] || e.etape) + (e.ok ? '' : ' : ' + esc(e.code)) + '</div>').join('')
+    + (r && r.compte ? '<div>Compte lu : <span class="mono">' + esc(r.compte) + '</span></div>' : '')
+    + (r && Number.isFinite(r.autorises) ? '<div>Adresses autorisées : ' + esc(String(r.autorises)) + ' · envois restants aujourd\'hui : ' + esc(String(r.restants)) + ' / ' + esc(String(r.plafond)) + '</div>' : '');
+  $('etatGmail').textContent = ok ? 'prêt' : 'à régler';
+}
 function afficherDiagnostic(r) {
   $('googleMessage').textContent = (r && r.message) || 'Pas de réponse du serveur.';
   /* [S52] la valeur BRUTE renvoyee par Google, et « ? » quand elle ne prouve rien */
@@ -1475,6 +1591,14 @@ function afficherDiagnostic(r) {
     + (r && r.compte ? '<div>Compte de service (à qui partager l\'agenda) : <span class="mono">' + esc(r.compte) + '</span></div>' : '');
   $('etatGoogle').textContent = r && r.ok ? 'prêt' : r && r.code === 'ECRITURE_NON_CONFIRMEE' ? 'à confirmer' : 'à régler';
 }
+(async () => {   /* [S68] [S69] Gmail relie ? */
+  try {
+    const g = await api('/api/mail');
+    if (g && g.configure) { $('blocGmail').hidden = false; accueilPerso();
+      $('etatGmail').textContent = (g.envoi === 'actif' ? 'envoi ✓' : g.envoi === 'erreur-config' ? 'envoi à corriger' : 'envoi —') + ' · '
+        + (g.lecture === 'actif' ? 'lecture ✓' : g.lecture === 'erreur-config' ? 'lecture à corriger' : 'lecture —'); }
+  } catch (x) { /* instance publique ou hors ligne */ }
+})();
 (async () => {
   try {
     const g = await api('/api/ecriture');

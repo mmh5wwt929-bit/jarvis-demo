@@ -2,6 +2,16 @@
 /* ============================================================================
  * JARVIS+ 5.29 — COUCHE DE GOUVERNANCE (sur noyau 5.28.3)
  * ----------------------------------------------------------------------------
+ * 5.30.3 (26 sept 2026) — v4.9 :
+ *  [G2] LE VRAI GESTE : la confirmation par geste porte son nom (CREER,
+ *   CREER_SERIE, TESTER_ECRITURE, liste fermee) jusque dans la trace ; vu en
+ *   ligne : « Tester l'écriture » etait trace « ton toucher sur Créer ».
+ *  [V5] FACE ID EXIGE PAR ACTION : demander(spec, { elevation: 'FACE_ID' })
+ *   pour une action irreversible (un vrai e-mail) : le code de secours ne
+ *   l'eleve pas, finaliser() la retient tant que Face ID manque ; exigence
+ *   dans l'empreinte (le defi Face ID en derive) et dans la trace. Refusee
+ *   hors irreversible, ou dans une session qui n'exige aucune elevation.
+ *   La trace montre aussi spec.tool (l'empreinte du contenu d'un e-mail).
  * 5.30.2 (25 sept 2026) — trois risques de l'audit de la v4.6.4, reproduits
  *  hors ligne avant correction :
  *  [T11] PREUVE LIMITEE A SON TOUR : une cible retapee (ou un geste « Creer »)
@@ -280,6 +290,10 @@ const CAPACITES_ENTREE = new WeakMap();
 
 /* [T8] une seule portee existe aujourd'hui ; un joker ne s'introduit pas. */
 const PORTEES_ADMISES = Object.freeze(['CURRENT_CONTEXT']);
+/* [G2 - 5.30.3] les gestes qu'une carte peut porter (liste fermee) */
+const GESTES = Object.freeze(['CREER', 'CREER_SERIE', 'TESTER_ECRITURE']);
+/* [V5 - 5.30.3] l'elevation qu'une action peut exiger en plus (liste fermee) */
+const ELEVATIONS_EXIGIBLES = Object.freeze(['FACE_ID']);
 const idValide = (x) => typeof x === 'string' && x.length > 0 && x.length <= 100 && /^[A-Za-z0-9_\-:.]+$/.test(x);
 
 /* ==========================================================================
@@ -519,7 +533,7 @@ class SessionGouvernee {
     CAPACITES_ENTREE.set(this, Object.freeze({
       soumettre:  (texte, o) => this.#soumettre(texte, o),
       reformuler: (action, cible) => this.#reformuler(action, cible),
-      confirmer:  (action, cible) => this.#confirmerGeste(action, cible),
+      confirmer:  (action, cible, geste) => this.#confirmerGeste(action, cible, geste),   /* [G2 - 5.30.3] */
       elever:     (ms, mode, lien) => this.#elever(ms, mode, lien)   /* [V3 - 5.30.2] */
     }));
     Object.freeze(this);                       /* [T] aucune methode remplacable sur l'instance */
@@ -553,17 +567,23 @@ class SessionGouvernee {
   /* [G1 - 5.30] Confirmation par GESTE, pour une action COMPENSABLE seulement :
    * la personne a touche « Creer » sur une carte qui montre l'action exacte.
    * Usage unique, meme stockage borne que les reformulations. */
-  #confirmerGeste(action, cible) {
+  /* [G2 - 5.30.3] v4.9 1c : LE VRAI GESTE. La trace disait « ton toucher sur
+   * Créer » pour « Tester l'écriture » (vu en ligne). Le geste est nomme par
+   * le detenteur de la capacite, sur une liste fermee ; il entre dans la
+   * preuve et dans la trace. Absent : CREER (le cas d'origine). */
+  #confirmerGeste(action, cible, geste) {
     if (typeof action !== 'string' || !action.trim() || typeof cible !== 'string' || !cible.trim())
       return Object.freeze({ ok: false, motif: 'CONFIRMATION_INVALIDE' });
+    const g = geste == null ? 'CREER' : GESTES.includes(geste) ? geste : null;
+    if (!g) return Object.freeze({ ok: false, motif: 'GESTE_INCONNU' });
     if (this.#confirmations.size >= this.#lim.reformulations) return Object.freeze({ ok: false, motif: 'CAPACITE_CONFIRMATIONS_ATTEINTE' });
     const cle = String(action).toUpperCase() + '|' + String(cible), nonce = crypto.randomUUID(), ts = this.#h.mur();
-    this.#confirmations.set(cle, { cle, nonce, ts, preuve: sha({ cle, nonce, ts }) });
-    return Object.freeze({ ok: true });
+    this.#confirmations.set(cle, { cle, nonce, ts, geste: g, preuve: sha({ cle, nonce, ts, geste: g }) });
+    return Object.freeze({ ok: true, geste: g });
   }
   #aConfirmeGeste(spec) {
     const j = this.#confirmations.get(String(spec.action).toUpperCase() + '|' + String(spec.target || spec.resource));
-    return !!(j && sha({ cle: j.cle, nonce: j.nonce, ts: j.ts }) === j.preuve);
+    return !!(j && sha({ cle: j.cle, nonce: j.nonce, ts: j.ts, geste: j.geste }) === j.preuve) ? j.geste : null;
   }
   /* [V2 - 5.30] ELEVATION : Face ID (ou code de secours) verifie par le serveur.
    * Prouve QUI, jamais QUOI.
@@ -582,6 +602,8 @@ class SessionGouvernee {
     const rec = typeof tx === 'string' ? this.#enAttenteDe(tx) : null;
     if (!rec || rec.classe !== 'IRREVERSIBLE') return Object.freeze({ ok: false, motif: 'ELEVATION_SANS_ACTION' });
     if (typeof emp !== 'string' || emp !== rec.empreinte.slice(0, 16)) return Object.freeze({ ok: false, motif: 'ELEVATION_AUTRE_ACTION' });
+    /* [V5 - 5.30.3] une action qui exige Face ID n'accepte pas le code de secours */
+    if (rec.elevationExigee && m !== rec.elevationExigee) return Object.freeze({ ok: false, motif: 'ELEVATION_FACE_ID_EXIGEE' });
     const t = this.#h.mur(), jusqua = Math.min(t + d, rec.expireA);
     rec.elevation = Object.freeze({ mode: m, empreinte: rec.empreinte, depuis: t, jusqua });
     this.#journal.push({ ts: t, evenement: 'ELEVATION', mode: m, transactionId: rec.transactionId, jusqua });
@@ -590,7 +612,7 @@ class SessionGouvernee {
   /* posee seulement par #elever, sur CE rec, apres verification du lien */
   #eleveePour(rec) {
     const e = rec.elevation;
-    return !!(e && this.#h.mur() < e.jusqua);
+    return !!(e && this.#h.mur() < e.jusqua && (!rec.elevationExigee || e.mode === rec.elevationExigee));   /* [V5 - 5.30.3] */
   }
   /* [V3 - 5.30.2] Ce qu'une elevation doit designer : l'action retenue exacte.
    * Lecture seule ; null si ce jeton ne designe pas une action irreversible
@@ -598,7 +620,8 @@ class SessionGouvernee {
   lienElevation(jeton) {
     const rec = typeof jeton === 'string' ? this.#enAttenteDe(jeton) : null;
     if (!rec || rec.classe !== 'IRREVERSIBLE') return null;
-    return Object.freeze({ transactionId: rec.transactionId, empreinte: rec.empreinte.slice(0, 16) });
+    return Object.freeze({ transactionId: rec.transactionId, empreinte: rec.empreinte.slice(0, 16),
+      exige: rec.elevationExigee || null });   /* [V5 - 5.30.3] */
   }
   /* [E] la cible retapee a la main : confirme ACTION + CIBLE ensemble */
   #reformuler(action, cible) {
@@ -626,7 +649,8 @@ class SessionGouvernee {
   #empreinteDe(rec) {
     return sha({ session: this.#id, requeteId: rec.requeteId, propositionId: rec.propositionId,
       autorisationId: rec.autorisationId, spec: rec.spec, classe: rec.classe, plancher: rec.plancher,
-      provenanceCible: rec.provenanceCible, compensation: rec.compensation, expireA: rec.expireA });
+      provenanceCible: rec.provenanceCible, compensation: rec.compensation, expireA: rec.expireA,
+      ...(rec.elevationExigee ? { elevationExigee: rec.elevationExigee } : {}) });   /* [V5 - 5.30.3] */
   }
 
   /* ---- [T2][T5] verification complete, avant chaque pas vers l'effet ----
@@ -709,9 +733,11 @@ class SessionGouvernee {
     try { const pn = this.#j.permissions.getPermission(rec.propositionId, HARNESS_KEY); etatNoyau = pn ? pn.state : null; } catch { etatNoyau = null; }
     return fr({
       transactionId: rec.transactionId, autorisationId: rec.autorisationId, propositionId: rec.propositionId, requeteId: rec.requeteId,
-      intention: fr({ nature: p.nature, frappe: p.texte, empreinte: p.empreinte, reverifiee }),
+      intention: fr({ nature: p.nature, frappe: p.texte, empreinte: p.empreinte, reverifiee,
+        ...(p.geste ? { geste: p.geste } : {}) }),   /* [G2 - 5.30.3] le vrai geste */
       provenance: fr({ plancher: rec.plancher, provenanceCible: rec.provenanceCible, sources: rec.sources || fr([]) }),
-      plan: fr({ proposePar: 'modele', action: rec.spec.action, cible: rec.spec.target, ressource: rec.spec.resource, classe: rec.classe }),
+      plan: fr({ proposePar: 'modele', action: rec.spec.action, cible: rec.spec.target, ressource: rec.spec.resource, classe: rec.classe,
+        outil: rec.spec.tool, elevationExigee: rec.elevationExigee || null }),   /* [V5 - 5.30.3] l'empreinte du contenu (mail) et l'exigence */
       decision: fr({ couche: 'AUTORISE', noyau: etatNoyau,
         empreinteIntacte: rec.empreinte == null ? null : this.#empreinteDe(rec) === rec.empreinte }),
       confirmation: rec.confirmation,
@@ -904,7 +930,10 @@ ${demandeUtilisateur}`
       spec = Object.freeze(s);
       const o = (optionsBrutes && typeof optionsBrutes === 'object') ? optionsBrutes : {};
       const c = o.compensation;
+      const el = o.elevation;   /* [V5 - 5.30.3] lu une fois */
+      if (el != null && !ELEVATIONS_EXIGIBLES.includes(el)) return invalide('ELEVATION_EXIGEE_INVALIDE');
       options = Object.freeze({
+        elevation: el == null ? null : el,
         sceauContexte: o.sceauContexte == null ? null : o.sceauContexte,
         manuel: o.manuel ? true : false,
         requeteId: o.requeteId == null ? null : o.requeteId,
@@ -917,6 +946,10 @@ ${demandeUtilisateur}`
     const classe = classeDe(spec.action);
     let note = this.note(spec);
     const refus = (etape, motif, extra = {}) => ({ decide: 'REFUSE', etape, motif, classe, note, ...extra });
+    /* [V5 - 5.30.3] une exigence de Face ID n'a de sens que pour l'irreversible,
+     * dans une session qui exige l'elevation : sinon on ne promet rien, on refuse */
+    if (options.elevation && (classe !== 'IRREVERSIBLE' || !this.#exigerElevation))
+      return refus('ENTREE', classe !== 'IRREVERSIBLE' ? 'ELEVATION_EXIGEE_HORS_IRREVERSIBLE' : 'ELEVATION_INDISPONIBLE');
 
     /* [T1] une requete = un identifiant, jamais servi deux fois dans la session. */
     if (options.requeteId != null && !idValide(options.requeteId)) return refus('CHAINE_ID', 'REQUETE_ID_INVALIDE');
@@ -950,8 +983,9 @@ ${demandeUtilisateur}`
     /* [G1 - 5.30] une action COMPENSABLE confirmee par un GESTE sur la carte
      * exacte porte l'intention de la personne : plancher USER_DIRECT pour
      * cette action seulement. */
-    const confirmeParGeste = classe === 'COMPENSABLE' && this.#aConfirmeGeste(spec);
-    if (confirmeParGeste) { plancher = 'USER_DIRECT'; preuve = { nature: 'CONFIRMATION_GESTE', texte: String(spec.target || spec.resource) }; }
+    const geste = classe === 'COMPENSABLE' ? this.#aConfirmeGeste(spec) : null;   /* [G2 - 5.30.3] */
+    const confirmeParGeste = !!geste;
+    if (confirmeParGeste) { plancher = 'USER_DIRECT'; preuve = { nature: 'CONFIRMATION_GESTE', texte: String(spec.target || spec.resource), geste }; }
     if (classe === 'IRREVERSIBLE') {
       if (!this.#aReformule(spec)) {
         /* [C3] Provenance par argument : la cible a-t-elle ete tapee par
@@ -1019,7 +1053,7 @@ ${demandeUtilisateur}`
       transactionId: null, etat: 'PROPOSED', historique: [{ etat: 'PROPOSED', ts: this.#h.mur() }],
       spec: Object.freeze({ action: base.action, resource: base.resource, target: base.target,
         scope: base.scope, context: base.context, tool: base.tool }),
-      classe, plancher, provenanceCible,
+      classe, plancher, provenanceCible, elevationExigee: options.elevation,   /* [V5 - 5.30.3] */
       preuve: Object.freeze({ ...preuve, empreinte: preuve.texte == null ? null : sha({ frappe: preuve.texte }) }),
       sources: Object.freeze(this.#ctx.entrees.slice(-8).map(e => Object.freeze({ origine: e.origine, source: e.source }))),
       confirmation: null,
@@ -1158,11 +1192,12 @@ ${demandeUtilisateur}`
     /* [V2 - 5.30] irreversible + elevation exigee : Face ID ou code dans les
      * 15 dernieres minutes, sinon rien n'est consomme et on le demande. */
     /* [V3 - 5.30.2] l'elevation de CETTE action, jamais celle d'une autre */
-    if (rec.classe === 'IRREVERSIBLE' && this.#exigerElevation && !this.#eleveePour(rec))
-      return { etat: 'ELEVATION_REQUISE', transactionId: rec.transactionId, empreinte: rec.empreinte.slice(0, 16) };
+    if (rec.classe === 'IRREVERSIBLE' && (this.#exigerElevation || rec.elevationExigee) && !this.#eleveePour(rec))
+      return { etat: 'ELEVATION_REQUISE', transactionId: rec.transactionId, empreinte: rec.empreinte.slice(0, 16),
+        exige: rec.elevationExigee || null };   /* [V5 - 5.30.3] */
     const r = this.#reverifier(rec, 'FINALISER'); if (r) return r;
     this.#enAttente.delete(jeton);
-    const elev = rec.classe === 'IRREVERSIBLE' && this.#exigerElevation ? rec.elevation.mode : null;
+    const elev = rec.classe === 'IRREVERSIBLE' && (this.#exigerElevation || rec.elevationExigee) ? rec.elevation.mode : null;
     rec.elevation = null;   /* [V3 - 5.30.2] consommee a l'envoi */
     rec.confirmation = Object.freeze({ mode: 'CLIC_APRES_FENETRE', ts: this.#h.mur(),   /* [T10] */
       elevation: elev });
@@ -1480,5 +1515,5 @@ module.exports = Object.freeze({
   noteDeDecision, classeDe, REVERSIBILITE, NIVEAUX, FENETRE_ANNULATION_MS, STATUTS_ANCRAGE,
   TRANSITIONS_TX, HorlogeCouche, creerSessionGouvernee, LIMITES_GOUVERNANCE,
   noyau: K,
-  VERSION: '5.30.2'   /* [S33] lue par /health : prouve quel fichier est vraiment chargé ; [S40] [S42] [T11] [V3] */
+  VERSION: '5.30.3'   /* [S33] lue par /health : prouve quel fichier est vraiment chargé ; [S40] [S42] [T11] [V3] [G2] [V5] */
 });

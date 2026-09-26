@@ -45,11 +45,16 @@
  *    (« a partir du 7 octobre »), et ce qui n'est pas « chaque semaine ».
  *  - finNue() : une reponse nue a « Jusqu'a quand ? » (« 19 decembre »).
  *  - demandeSerie() reconnait aussi « ajoute hand mercredi jusqu'au … ».
+ *
+ * 1.3 (v4.9, 26 sept) — VU EN LIGNE sur la v4.8
+ *  - retirerMarque() : la marque « [Affiché par le serveur JARVIS…] » recopiee
+ *    par le modele (apres une action confirmee) est retiree, avec ce qu'elle
+ *    entoure ; applique a TOUTE reponse du modele par le serveur.
  * ========================================================================== */
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const AG = require('./jarvis-agenda.js');
 
-const VERSION = '1.2';
+const VERSION = '1.3';
 const JOUR_MS = 86400000;
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const JOURS_COURTS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
@@ -460,6 +465,39 @@ function imiteServeur(texte) {
   return { texte: retirees.length ? propre : s, retirees };
 }
 
+/* ------------------------------------ la marque du serveur : [1.3] -- */
+/* v4.9 [S65] Dans l'historique, un message du SERVEUR est montre au modele
+ * entoure de « [Affiché par le serveur JARVIS, pas par toi : … ] » [S58]. Vu en
+ * ligne le 26 sept : apres une action confirmee (/api/finaliser), la reponse du
+ * modele recopiait cette marque. Le bloc entier est retire (la marque ET ce
+ * qu'elle entoure : c'est une imitation d'un message du serveur, jamais sa
+ * parole). Sans crochet ouvrant, seulement si la suite est bien celle de la
+ * marque (« , pas par toi » ou « : ») : une phrase qui DECRIT JARVIS reste. */
+const RE_MARQUE = /(\[[ \t]*(?:\*\*|__)?[ \t]*)?affich(?:é|e|é)e?[ \t]+par[ \t]+le[ \t]+serveur[ \t]+jarvis/i;
+function retirerMarque(texte) {
+  let s = String(texte == null ? '' : texte);
+  const retirees = [];
+  let depuis = 0;
+  for (let n = 0; n < 50; n++) {
+    const m = RE_MARQUE.exec(s.slice(depuis));
+    if (!m) break;
+    const debut = depuis + m.index, apres = s.slice(debut + m[0].length);
+    if (!m[1] && !/^[\s…,.]*(?:,\s*pas par toi|:|…)/i.test(apres)) { depuis = debut + m[0].length; continue; }
+    const f = apres.search(/[\][]/);
+    const nl = apres.indexOf('\n');
+    const fin = f >= 0 && f <= 600 && apres[f] === ']' && (nl < 0 || f < nl || m[1])
+      ? debut + m[0].length + f + 1 : nl >= 0 ? debut + m[0].length + nl : s.length;
+    retirees.push(s.slice(debut, fin).replace(/\s+/g, ' ').trim().slice(0, 200));
+    const gauche = s.slice(0, debut), droite = s.slice(fin);
+    s = gauche + (/[ \t]$/.test(gauche) || !gauche ? droite.replace(/^[ \t]+/, '') : droite);
+    depuis = debut;
+  }
+  if (!retirees.length) return { texte: s, retirees };
+  const propre = s.replace(/(\*\*|__)\s*\1/g, '').split('\n').map((l) => l.replace(/[ \t]+$/, '')).join('\n')
+    .replace(/\n{3,}/g, '\n\n').trim();
+  return { texte: propre, retirees };
+}
+
 /* ------------------------------------------------- series : [1.2] -- */
 /* Le texte, pour les series : minuscules, sans accents ni ponctuation. */
 const nettoye = (texte) => ' ' + norm(separer(texte).propres).replace(/['’]/g, ' ').replace(/[^a-z0-9\/: ]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
@@ -546,5 +584,5 @@ function texteFusion(evenements, zone = 'Europe/Paris') {
 module.exports = Object.freeze({ VERSION, resoudreDates, dateUnique, tableDates, avertissementNuit, questionContradiction, questionDate,
   corrigerJours, retirerAffirmations, affirme, intentionSuppression, suppressionNue, titreNomme, resoudreHeures,
   creationDemandee, demandeSerie, parleAgenda, demandeAction, renonce, fusionner, texteFusion, mots,
-  titreTape, autreObjet, imiteServeur, lireSerie, finNue, titreSerie,
+  titreTape, autreObjet, imiteServeur, retirerMarque, lireSerie, finNue, titreSerie,
   libelle, libellePeriode, local, iso, jourDe, jourSemaine, civil });
