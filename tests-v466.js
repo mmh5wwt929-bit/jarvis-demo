@@ -70,8 +70,11 @@ const transport = async (methode, url) => { const [status, json] = reponseGoogle
     ({ ok: d1.ok && d1.code === 'PRET' && (d1.etapes || []).length === 3 && d1.etapes.every(e => e.ok) && d1.compte === EMAIL && ecrits === 0,
        info: d1.code + ' ; étapes ' + (d1.etapes || []).map(e => e.etape + (e.ok ? '✓' : '✗')).join(' ') + ' ; écritures ' + ecrits }));
   const d2 = await diag('lecture');
-  await t('E2', "agenda partagé en LECTURE SEULE (erreur la plus probable) : vu sans rien écrire → AGENDA_LECTURE_SEULE", async () =>
-    ({ ok: !d2.ok && d2.code === 'AGENDA_LECTURE_SEULE' && d2.acces === 'reader', info: d2.code + ' ; accès ' + d2.acces }));
+  /* [v4.6.7 - S52] E2 s'inverse : vu en ligne le 26 sept, ce champ disait
+   * « lecture seule » alors que l'ecriture marchait. Il n'est plus un verdict :
+   * valeur brute rendue, « non confirmee » (le vrai test est une creation). */
+  await t('E2', "accessRole « reader » : valeur brute rendue, verdict ECRITURE_NON_CONFIRMEE (plus « lecture seule »), rien écrit", async () =>
+    ({ ok: !d2.ok && d2.code === 'ECRITURE_NON_CONFIRMEE' && d2.acces === 'reader', info: d2.code + ' ; accès ' + d2.acces }));
   const [d3, d4, d5, d6, d7] = [await diag('introuvable'), await diag('api-off'), await diag('compte-supprime'), await diag('cle-revoquee'), await diag('horloge')];
   await t('E3', "erreurs de mise en place NOMMÉES : agenda introuvable, API non activée, compte supprimé, clé révoquée, horloge", async () =>
     ({ ok: d3.code === 'AGENDA_INTROUVABLE' && d4.code === 'API_AGENDA_NON_ACTIVEE' && d5.code === 'COMPTE_GOOGLE_INTROUVABLE'

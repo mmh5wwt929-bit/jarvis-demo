@@ -57,7 +57,7 @@ const R=[];const ok=(id,c,nom,info)=>R.push((c?'OK    ':'ECHEC ')+id+' '+nom+(in
  $('msg').value='bonjour';plans.push({action:'AUCUNE'});clic($('envoyer'));await dort(500);
  ok('P3',!('canal' in corps.filter(x=>/\/api\/chat/.test(x.u)).pop().b),"message tapé ensuite : plus marqué voix");
  /* creation */
- plans.push({action:'CREATE',resource:'AGENDA_JARVIS',target:DEMAIN+'T18:30|90|Entraînement U18'});$('msg').value='ajoute entraînement demain 18h30';clic($('envoyer'));await dort(600);
+ plans.push({action:'CREATE',resource:'AGENDA_JARVIS',target:DEMAIN+'T18:30|90|Entraînement U18'});/* v4.6.7 [S55] : la duree vient des mots tapes */$('msg').value='ajoute entraînement demain 18h30 pendant 1h30';clic($('envoyer'));await dort(600);
  const carte=[...d.querySelectorAll('.creation')].pop();const posts=()=>appelsG.filter(x=>x.m==='POST'&&/events/.test(x.u)).length;
  ok('P4',carte&&/À confirmer/.test(carte.textContent)&&/18:30 → 20:00/.test(carte.textContent)&&carte.querySelector('[data-creer]')&&posts()===0,"carte de création : l'événement exact, « Créer » / « Ne pas créer », rien d'écrit",carte&&carte.querySelector('.evenement').textContent);
  clic(carte.querySelector('[data-creer]'));await dort(700);

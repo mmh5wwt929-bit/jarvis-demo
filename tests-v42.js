@@ -187,7 +187,8 @@ async function serveur() {
   await t('S14.11', '/api/integrite : INTERNE_SEULEMENT, externe faux, ancres dites « meme serveur »', () => ({ ok: i.statut === 'INTERNE_SEULEMENT' && i.externe === false && i.coherent === true && typeof i.ancresMemeServeur === 'number' && i.ancresHorsProcessus === undefined, info: i.statut + ' externe=' + i.externe }));
   const a = await post('/api/attack', { sessionId: sid, scenario: 'hote_compromis' }, '10.0.7.1');
   await t('S14.12', '[non-regression] scenario « hote compromis » toujours bloque', () => ({ ok: a.resultat === 'BLOQUE', info: a.resultat + ' — ' + String(a.motif).slice(0, 60) }));
-  const c = await post('/api/chat', { sessionId: sid, message: 'quelle heure est-il ?' }, '10.0.7.1');
+  /* v4.6.7 [S54] : « quelle heure est-il ? » est desormais repondu par le serveur, sans modele ; autre question ordinaire */
+  const c = await post('/api/chat', { sessionId: sid, message: 'quelle est la capitale du Portugal ?' }, '10.0.7.1');
   await t('S14.13', '[non-regression] une question ordinaire passe', () => ({ ok: c.decide === 'SANS_OBJET' && c.reponse === 'ok', info: c.decide + ' ' + c.reponse }));
   const m = await post('/api/chat', { sessionId: sid, message: "retiens que j'entraîne les U18 le mercredi" }, '10.0.7.1');
   await t('S14.14', '[non-regression] un souvenir s\'ecrit toujours', () => ({ ok: m.decide === 'AUTORISE' && !!m.souvenir, info: m.decide }));

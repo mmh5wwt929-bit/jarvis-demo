@@ -646,9 +646,23 @@ function sansReponse(d) {
 }
 
 function rendreDecision(d) {
+  /* [S49] « Supprimer » tape : le SERVEUR montre les vraies cartes ; rien
+   * n'est supprime avant le toucher (le meme bouton que sous la creation) */
+  if (Array.isArray(d.aSupprimer) && d.aSupprimer.length) {
+    if (d.reponse) tour('JARVIS', d.reponse, false);
+    for (const e of d.aSupprimer) {
+      const hS = '<div class="decision attente creation"><div class="plan">Créé par JARVIS dans cette session</div>'
+        + '<div class="evenement">' + esc(e.lisible) + '</div>'
+        + '<div class="rang"><button class="danger" data-compenser="' + esc(e.transactionId) + '">Supprimer</button></div></div>';
+      tour('JARVIS', '', false).querySelector('.quoi').outerHTML = hS;
+    }
+    $('fil').scrollTop = $('fil').scrollHeight;
+    return;
+  }
   /* Conversation ordinaire : aucune action a gouverner, aucune carte. */
   if (d.decide === 'SANS_OBJET') {
-    const deJarvis = d.etape === 'MEMOIRE' || d.etape === 'DESTINATAIRE' || d.etape === 'DEPASSE';   /* [S36] [S43] */
+    const deJarvis = d.etape === 'MEMOIRE' || d.etape === 'DESTINATAIRE' || d.etape === 'DEPASSE'   /* [S36] [S43] */
+      || d.etape === 'SERVEUR' || d.etape === 'OUTIL';   /* [S49]-[S55] ecrit par le serveur, sans modele */
     if (d.reponse) tour(deJarvis ? 'JARVIS' : 'Claude', d.reponse, false, !deJarvis);
     else tour('JARVIS', sansReponse(d), false);
     return;
@@ -660,7 +674,8 @@ function rendreDecision(d) {
     const hC = '<div class="decision attente creation"><div class="plan">Créer dans ton agenda JARVIS</div>'
       + '<div class="evenement">' + esc(a.lisible) + '</div>'
       + '<div class="verdict"><b>À confirmer</b><span class="code">annulable ensuite</span></div>'
-      + "<div class=\"signaux\"><div class=\"signal info\"><i>info</i><span>Aucun invité, aucune notification. Vérifie la date et l'heure : rien n'est écrit avant ton toucher.</span></div></div>"
+      + "<div class=\"signaux\"><div class=\"signal info\"><i>info</i><span>Jour et heure lus dans tes mots par le serveur. Aucun invité, aucune notification. Vérifie la date et l'heure : rien n'est écrit avant ton toucher.</span></div>"
+      + (a.avertissements || []).map(x => '<div class="signal fort"><i>à vérifier</i><span>' + esc(x) + '</span></div>').join('') + '</div>'   /* [S55] */
       + '<div class="rang"><button class="danger" data-ignorer="1">Ne pas créer</button>'
       + '<button class="primaire" data-creer="' + esc(a.cible) + '">Créer</button></div></div>';
     const bC = tour('JARVIS', '', false);
@@ -690,13 +705,15 @@ function rendreDecision(d) {
   if (d.outil === 'agenda' && d.decide === 'AUTORISE') {
     const a = d.agenda || {};
     const bornes = String(a.periode || (d.plan && d.plan.target) || '').split('..');
-    const quand = bornes.length === 2 && bornes[0] !== bornes[1] ? bornes[0] + ' → ' + bornes[1] : bornes[0];
+    const quand = a.libelle || (bornes.length === 2 && bornes[0] !== bornes[1] ? bornes[0] + ' → ' + bornes[1] : bornes[0]);   /* [S51] jamais une date ISO seule */
     const echec = d.etape === 'OUTIL_ECHEC';
     const hA = '<div class="decision autorise"><div class="plan">Lecture de ton agenda — <span class="mono">' + esc(quand) + '</span></div>'
       + '<div class="verdict"><b>Autorisé</b><span class="code">lecture seule</span>'
       + (echec ? '<span class="code mono">' + esc(d.motif || '') + '</span>' : '') + '</div>'
       + '<div class="signaux">'
       + (echec ? '' : '<div class="signal info"><i>info</i><span>' + esc(String(a.evenements || 0)) + ' événement(s)'
+          + (Array.isArray(a.sources) && a.sources.length ? ' · lu : ' + esc(a.sources.map(x => x === 'JARVIS' ? 'agenda JARVIS' : 'agenda principal').join(' + ')) : '')   /* [S50] */
+          + (Array.isArray(a.nonLus) && a.nonLus.length ? ' · non lu : ' + esc(a.nonLus.map(x => (x.source === 'JARVIS' ? 'agenda JARVIS' : 'agenda principal') + ' (' + x.code + ')').join(', ')) : '')
           + (a.tronque ? ', liste incomplète' : '') + ". Rien n'a été modifié.</span></div>")
       + "<div class=\"signal info\"><i>info</i><span>Le contenu de l'agenda est externe (une invitation peut venir de n'importe qui) : "
       + 'une action sensible demandée ensuite exigera ta frappe.</span></div></div></div>';
@@ -1300,10 +1317,11 @@ Voix.init();   /* [S32] micro visible seulement si le navigateur sait dicter */
 const ETAPES_GOOGLE = { CLE: 'Clé du compte de service', AGENDA: 'Agenda JARVIS', ECRITURE: "Droit d'écriture" };
 function afficherDiagnostic(r) {
   $('googleMessage').textContent = (r && r.message) || 'Pas de réponse du serveur.';
-  $('googleEtapes').innerHTML = ((r && r.etapes) || []).map(e => '<div>' + (e.ok ? '✓ ' : '✗ ') + esc(ETAPES_GOOGLE[e.etape] || e.etape)
-    + (e.ok ? '' : ' : ' + esc(e.code)) + '</div>').join('')
+  /* [S52] la valeur BRUTE renvoyee par Google, et « ? » quand elle ne prouve rien */
+  $('googleEtapes').innerHTML = ((r && r.etapes) || []).map(e => '<div>' + (e.ok === true ? '✓ ' : e.ok === false ? '✗ ' : '? ') + esc(ETAPES_GOOGLE[e.etape] || e.etape)
+    + (e.ok === true ? '' : ' : ' + esc(e.code)) + (e.etape === 'ECRITURE' ? ' (accessRole = « ' + esc(e.valeur || 'absent') + ' »)' : '') + '</div>').join('')
     + (r && r.compte ? '<div>Compte de service (à qui partager l\'agenda) : <span class="mono">' + esc(r.compte) + '</span></div>' : '');
-  $('etatGoogle').textContent = r && r.ok ? 'prêt' : 'à régler';
+  $('etatGoogle').textContent = r && r.ok ? 'prêt' : r && r.code === 'ECRITURE_NON_CONFIRMEE' ? 'à confirmer' : 'à régler';
 }
 (async () => {
   try {

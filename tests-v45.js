@@ -209,7 +209,8 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   await t('V16', 'le reseau ne se touche qu\'avec un permis ne dans la transaction (verification du code)', async () => {
     const src = require('fs').readFileSync(path.join(DIR, 'server.js'), 'utf8');
     const lire = (src.match(/AGENDA\.lire\(/g) || []).length, permis = (src.match(/AGENDA\.permis\(/g) || []).length;
-    const dansEffet = /g\.executer\(demande, \(action\) => \{ permis = AGENDA\.permis\(action\)/.test(src);
+    /* v4.6.7 [S50] : AGENDA peut etre absent (agenda JARVIS seul) : « if (AGENDA) » devant */
+    const dansEffet = /g\.executer\(demande, \(action\) => \{ (if \(AGENDA\) )?permis = AGENDA\.permis\(action\)/.test(src);
     return { ok: lire === 1 && permis === 1 && dansEffet, info: 'lire x' + lire + ', permis x' + permis + (dansEffet ? ', dans l\'effet' : ', HORS effet') };
   });
 

@@ -33,7 +33,7 @@ const NOM = 'MANIFESTE.json';
 const FICHIERS = Object.freeze([
   'server.js', 'index.html', 'package.json',
   'jarvis-5.28.3.js', 'jarvis-plus-5.29.js', 'jarvis-vigilance.js', 'jarvis-memoire.js',
-  'jarvis-agenda.js', 'jarvis-ecriture.js', 'jarvis-elevation.js', 'jarvis-manifeste.js'
+  'jarvis-agenda.js', 'jarvis-ecriture.js', 'jarvis-elevation.js', 'jarvis-manifeste.js', 'jarvis-verite.js'   /* [S49] v4.6.7 */
 ]);
 
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');

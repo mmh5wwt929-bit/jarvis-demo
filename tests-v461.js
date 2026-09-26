@@ -98,7 +98,8 @@ const lancer = async (dir, env = {}) => {
 };
 const santeDe = async (dir, env) => { const s = await lancer(dir, env); s.arreter(); return s.sante; };
 const ESSENTIELS = ['server.js', 'index.html', 'package.json', 'MANIFESTE.json', 'jarvis-5.28.3.js', 'jarvis-plus-5.29.js',
-  'jarvis-vigilance.js', 'jarvis-memoire.js', 'jarvis-agenda.js', 'jarvis-ecriture.js', 'jarvis-elevation.js', 'jarvis-manifeste.js'];
+  'jarvis-vigilance.js', 'jarvis-memoire.js', 'jarvis-agenda.js', 'jarvis-ecriture.js', 'jarvis-elevation.js', 'jarvis-manifeste.js',
+  'jarvis-verite.js'];   /* v4.6.7 : le module verite */
 const copie = () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-v461-'));
   for (const f of ESSENTIELS) if (fs.existsSync(path.join(DIR, f))) fs.copyFileSync(path.join(DIR, f), path.join(d, f));
@@ -127,7 +128,8 @@ const verifierCli = (dir) => {
   await t('D2', "la réponse se tait après un plan normal : délai, motif clair, rien de mémorisé", async () => {
     const sid = await session('92.1.1.2'); const n0 = appels.length;
     comportements.push('normal', 'muet');
-    const { r, ms } = await chronoDire(sid, 'quelle heure est-il', '92.1.1.2');
+    /* v4.6.7 [S54] : « quelle heure est-il » est repondu par le serveur sans modele ; autre question */
+    const { r, ms } = await chronoDire(sid, 'quelle est la capitale du Portugal', '92.1.1.2');
     const faits = appels.slice(n0);
     return { ok: !r.pendue && ms < DELAI * 1000 + 1500 && r.decide === 'SANS_OBJET' && r.motif === 'DELAI_IA_DEPASSE' && r.reponse === null
       && faits.length === 2 && faits[1].detruit === 1,

@@ -167,10 +167,12 @@ const t = async (id, nom, f) => { let r; try { r = await f(); } catch (e) { r = 
   const nG = creationsGoogle();
   const ci = await dire(sidI, 'ok');
   const ki = ci.aConfirmer ? await appel('/api/confirmer', { sessionId: sidI, action: 'CREATE', resource: 'AGENDA_JARVIS', cible: ci.aConfirmer.cible }) : {};
-  await t('C5', "session teintee par une invitation piegee : le modele propose un evenement -> CARTE seulement ; rien sans le geste", async () =>
-    ({ ok: ci.decide === 'CONFIRMATION_REQUISE' && creationsGoogle() === nG + (ki.decision ? 1 : 0) && ci.plancher === 'CONTENT_DERIVED'
-        && ki.decision && ki.decision.decide === 'AUTORISE' && (ki.decision.trace || {}).intention.nature === 'CONFIRMATION_GESTE',
-       info: 'plancher ' + ci.plancher + ' ; ' + ci.decide + ' ; apres geste : ' + (ki.decision || {}).decide + ' (' + ((ki.decision || {}).trace || { intention: {} }).intention.nature + ')' }));
+  /* [v4.6.7 - S55] plus strict : le jour et l'heure viennent des MOTS TAPES.
+   * « ok » n'en contient aucun : le modele (pousse par l'invitation) n'obtient
+   * meme plus de carte ; le serveur demande « Quel jour ? ». */
+  await t('C5', "session teintee par une invitation piegee : le modele propose un evenement sur « ok » -> pas de carte (rien de tape), rien ecrit", async () =>
+    ({ ok: ci.decide === 'SANS_OBJET' && !ci.aConfirmer && ci.motif === 'JOUR_ABSENT' && creationsGoogle() === nG && ci.plancher === 'CONTENT_DERIVED' && !ki.decision,
+       info: 'plancher ' + ci.plancher + ' ; ' + ci.decide + ' ' + (ci.motif || '') + ' ; créations +' + (creationsGoogle() - nG) }));
 
   /* annulation */
   const tx1 = d1.transactionId;
@@ -201,12 +203,13 @@ const t = async (id, nom, f) => { let r; try { r = await f(); } catch (e) { r = 
   await t('C8', "suppression non verifiee (l'evenement est toujours la) : ECHEC honnete ; nouvel essai -> supprime et verifie", async () =>
     ({ ok: f1.etat === 'ECHEC' && f1.code === 'TOUJOURS_PRESENT' && f2.etat === 'COMPENSE', info: f1.etat + ' ' + f1.code + ' ; puis ' + f2.etat }));
   const nG2 = google.appels.length;
-  plans.push({ action: 'DELETE', resource: 'AGENDA', target: 'Entraînement U18' });
+  /* [v4.6.7 - S49] « supprime … » : le SERVEUR montre les cartes des evenements
+   * crees dans la session, sans modele (aucun plan consomme), sans Google */
   const del = await dire(sid, "supprime l'entraînement de demain");
   plans.push({ action: 'CREATE', resource: 'AGENDA_JARVIS', target: 'demain soir|60|truc' });
   const inv = await dire(sid, 'ajoute un truc demain soir');
-  await t('C9', "supprimer/modifier un evenement existant : refuse sans rien appeler ; cible sans heure : on redemande", async () =>
-    ({ ok: del.motif === 'ACTION_AGENDA_NON_PRISE_EN_CHARGE' && inv.motif === 'CIBLE_INVALIDE' && google.appels.length === nG2,
+  await t('C9', "« supprime l'entraînement » : les cartes du serveur, rien supprimé sans le toucher ; « demain soir » sans heure : « À quelle heure ? »", async () =>
+    ({ ok: del.motif === 'SUPPRESSION_A_CONFIRMER' && Array.isArray(del.aSupprimer) && del.aSupprimer.length > 0 && inv.motif === 'HEURE_ABSENTE' && google.appels.length === nG2,
        info: del.motif + ' ; ' + inv.motif + ' ; appels Google ' + (google.appels.length - nG2) }));
 
   /* [v4.6.5 - S43] la carte « Creer » suit la regle des cartes : un nouveau

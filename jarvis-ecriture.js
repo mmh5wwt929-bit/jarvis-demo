@@ -37,6 +37,18 @@
  *    « AGENDA_INACCESSIBLE » : API non activee, agenda introuvable, partage en
  *    lecture seule, cle revoquee, compte supprime, horloge ; JSON du compte mal
  *    colle (illisible / pas un compte de service / cle privee abimee).
+ *
+ * 1.2 (v4.6.7, 26 sept) — VU EN LIGNE
+ *  - [D] diagnostic : le champ accessRole de events.list disait « lecture seule »
+ *    alors que la premiere creation reelle a reussi. Il n'est plus un verdict :
+ *    sa valeur BRUTE est rendue ; « writer »/« owner » = PRET ; autre chose =
+ *    ECRITURE_NON_CONFIRMEE (pas « lecture seule ») ; une creation reelle
+ *    reussie dans ce processus fait foi (ECRITURE_PROUVEE).
+ *  - [B] lister(permis) : lecture des evenements de l'agenda JARVIS sur une
+ *    periode (events.list, singleEvents), au meme format que jarvis-agenda.js ;
+ *    permis de lecture a usage unique ne dans l'effet d'un READ AGENDA
+ *    autorise (T6). Ce qui est lu est un contenu EXTERNE : titres et notes
+ *    nettoyes et bornes, jamais des consignes.
  * ========================================================================== */
 const https = require('https');
 const crypto = require('crypto');
@@ -44,7 +56,8 @@ const { URL } = require('url');
 const AG = require('./jarvis-agenda.js');
 
 const LIMITES_ECRITURE = Object.freeze({ delaiMs: 10000, maxOctets: 256 * 1024, creationsParJour: 20,
-  titreMax: 100, dureeMin: 5, dureeMax: 24 * 60, joursAvant: 1, joursApres: 366, permisMs: 30 * 1000 });
+  titreMax: 100, dureeMin: 5, dureeMax: 24 * 60, joursAvant: 1, joursApres: 366, permisMs: 30 * 1000,
+  maxLus: 100, lieuMax: 100, descriptionMax: 300 });   /* [1.2] lecture */
 const HOTES = new Set(['oauth2.googleapis.com', 'www.googleapis.com']);
 const PORTEE = 'https://www.googleapis.com/auth/calendar.events';
 const B32HEX = '0123456789abcdefghijklmnopqrstuv';
@@ -180,7 +193,7 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
   async function appeler(methode, url, corps, jetonAcces) {
     const u = new URL(url);
     if (u.protocol !== 'https:' || !HOTES.has(u.hostname)) return { ok: false, code: 'HOTE_INTERDIT' };
-    const entetes = { 'User-Agent': 'JARVIS-ecriture/1.1', Accept: 'application/json' };
+    const entetes = { 'User-Agent': 'JARVIS-ecriture/1.2', Accept: 'application/json' };
     if (jetonAcces) entetes.Authorization = 'Bearer ' + jetonAcces;
     let charge = null;
     if (corps != null) {
@@ -215,6 +228,7 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
    * au plus UN evenement a venir). La reponse de Google porte le niveau d'acces
    * du compte de service sur cet agenda : il faut « writer » (ou « owner »). */
   let dernierDiag = null;
+  let ecritureProuvee = null;           /* [1.2] date de la derniere creation reelle reussie */
   async function diagnostic() {
     if (dernierDiag && maintenant() - dernierDiag.ts < 20000) return { ...dernierDiag.r, recent: true };
     const etapes = [];
@@ -225,11 +239,17 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
     const r = await appeler('GET', base + '?maxResults=1&singleEvents=true&timeMin=' + encodeURIComponent(new Date(maintenant()).toISOString()), null, j.jeton);
     if (!r.ok) { etapes.push(Object.freeze({ etape: 'AGENDA', ok: false, code: r.code })); return fin({ ok: false, code: r.code }); }
     if (r.status !== 200 || !r.json) { const code = erreurGoogle(r.status, r.json); etapes.push(Object.freeze({ etape: 'AGENDA', ok: false, code })); return fin({ ok: false, code }); }
-    const role = String(r.json.accessRole || '');
-    const ecrit = role === 'writer' || role === 'owner';
+    /* [1.2] [D] la valeur BRUTE, jamais un verdict tire de ce seul champ */
+    const brut = typeof r.json.accessRole === 'string' ? r.json.accessRole : null;
+    const acces = brut && /^[a-zA-Z]{1,20}$/.test(brut) ? brut : null;
+    const ecrit = acces === 'writer' || acces === 'owner';
     etapes.push(Object.freeze({ etape: 'AGENDA', ok: true, code: 'AGENDA_TROUVE' }));
-    etapes.push(Object.freeze({ etape: 'ECRITURE', ok: ecrit, code: ecrit ? 'ECRITURE_PERMISE' : 'AGENDA_LECTURE_SEULE' }));
-    return fin({ ok: ecrit, code: ecrit ? 'PRET' : 'AGENDA_LECTURE_SEULE', acces: /^[a-zA-Z]{1,20}$/.test(role) ? role : null });
+    if (ecrit || ecritureProuvee) {
+      etapes.push(Object.freeze({ etape: 'ECRITURE', ok: true, code: ecrit ? 'ECRITURE_PERMISE' : 'ECRITURE_PROUVEE', valeur: acces }));
+      return fin({ ok: true, code: 'PRET', acces, prouvee: !!ecritureProuvee });
+    }
+    etapes.push(Object.freeze({ etape: 'ECRITURE', ok: null, code: 'ECRITURE_NON_CONFIRMEE', valeur: acces }));
+    return fin({ ok: false, code: 'ECRITURE_NON_CONFIRMEE', acces, prouvee: false });
   }
 
   return Object.freeze({
@@ -264,13 +284,57 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
         guestsCanInviteOthers: false, guestsCanModify: false, reminders: { useDefault: true } };
       const r = await appeler('POST', base + '?sendUpdates=none', corps, j.jeton);
       if (!r.ok) return { ok: false, code: r.code };
-      if (r.status === 200) { creations.set(jour, (creations.get(jour) || 0) + 1); return { ok: true, code: 'CREE', preuve: permis.id }; }
+      if (r.status === 200) { creations.set(jour, (creations.get(jour) || 0) + 1); ecritureProuvee = maintenant(); dernierDiag = null; return { ok: true, code: 'CREE', preuve: permis.id }; }
       if (r.status === 409) {   /* idempotence : c'est le notre ? */
         const l = await lire(permis.id, j.jeton);
         if (l.ok && !l.absent && marque(l.evenement) === permis.transactionId) return { ok: true, code: 'DEJA_CREE', preuve: permis.id };
         return { ok: false, code: 'CONFLIT_IDENTIFIANT' };
       }
       return { ok: false, code: erreurGoogle(r.status, r.json) };   /* [1.1] */
+    },
+    /* [1.2] [B] LECTURE de l'agenda JARVIS : permis ne dans l'effet d'un READ
+     * AGENDA autorise (T6), pour la periode exacte de la transaction. */
+    permisLecture(action) {
+      if (!action || action.action !== 'READ' || action.resource !== 'AGENDA') throw new Error('PERMIS_REFUSE');
+      const periode = AG.periodeDe(action.target, maintenant(), zone);
+      if (!periode) throw new Error('PERIODE_INVALIDE');
+      const p = Object.freeze({ lecture: true, periode, transactionId: String(action.transactionId || '') });
+      permisEmis.set(p, { expire: maintenant() + L.permisMs, utilise: false });
+      return p;
+    },
+    async lister(permis) {
+      const e = (permis && typeof permis === 'object' && permis.lecture === true) ? permisEmis.get(permis) : undefined;
+      if (!e) return { ok: false, code: 'PERMIS_INCONNU' };
+      if (e.utilise) return { ok: false, code: 'PERMIS_DEJA_UTILISE' };
+      e.utilise = true;
+      if (maintenant() > e.expire) return { ok: false, code: 'PERMIS_EXPIRE' };
+      const j = await jeton(); if (!j.ok) return { ok: false, code: j.code };
+      const pe = permis.periode;
+      const r = await appeler('GET', base + '?singleEvents=true&orderBy=startTime&maxResults=' + L.maxLus
+        + '&timeMin=' + encodeURIComponent(new Date(pe.debutMs).toISOString()) + '&timeMax=' + encodeURIComponent(new Date(pe.finMs).toISOString()), null, j.jeton);
+      if (!r.ok) return { ok: false, code: r.code };
+      if (r.status !== 200 || !r.json) return { ok: false, code: erreurGoogle(r.status, r.json) };
+      const items = Array.isArray(r.json.items) ? r.json.items : [];
+      const evenements = [];
+      const jour = /^\d{4}-\d{2}-\d{2}$/;
+      const veille = (d) => new Date(Date.parse(d + 'T00:00:00Z') - 86400000).toISOString().slice(0, 10);   /* fin exclusive -> incluse */
+      for (const it of items.slice(0, L.maxLus)) {
+        if (!it || typeof it !== 'object' || it.status === 'cancelled' || !it.start || !it.end) continue;
+        let ev;
+        if (typeof it.start.date === 'string' && jour.test(it.start.date) && typeof it.end.date === 'string' && jour.test(it.end.date)) {
+          const fin = veille(it.end.date);
+          ev = { journee: true, debut: it.start.date, fin: fin < it.start.date ? it.start.date : fin };
+        } else {
+          const d = Date.parse(it.start.dateTime), f = Date.parse(it.end.dateTime);
+          if (!Number.isFinite(d) || !Number.isFinite(f)) continue;
+          ev = { journee: false, debut: new Date(d).toISOString(), fin: new Date(Math.max(d, f)).toISOString() };
+        }
+        evenements.push(Object.freeze({ ...ev, titre: nettoyerTitre(it.summary, L.titreMax) || '(sans titre)',
+          lieu: nettoyerTitre(it.location, L.lieuMax), description: nettoyerTitre(it.description, L.descriptionMax),
+          recurrent: typeof it.recurringEventId === 'string', approximatif: false, parJarvis: !!marque(it) }));
+      }
+      return { ok: true, periode: pe.cle, evenements, total: evenements.length,
+        tronque: typeof r.json.nextPageToken === 'string' || items.length > L.maxLus };
     },
     /* Compensation : cible = la cible gelee rendue par compensationDebut. */
     async supprimer(cible) {
@@ -293,4 +357,4 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
   });
 }
 
-module.exports = { creerEcriture, validerCible, idEvenement, lireCompte, examinerCompte, erreurGoogle, erreurJeton, jwt, base32hex, LIMITES_ECRITURE, HOTES, VERSION: '1.1' };
+module.exports = { creerEcriture, validerCible, idEvenement, lireCompte, examinerCompte, erreurGoogle, erreurJeton, jwt, base32hex, LIMITES_ECRITURE, HOTES, VERSION: '1.2' };

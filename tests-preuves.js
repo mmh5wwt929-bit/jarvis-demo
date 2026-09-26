@@ -287,7 +287,8 @@ const pasDEffet = (r) => r.decide !== 'EN_ATTENTE' && r.decide !== 'AUTORISE' &&
     const src = fs.readFileSync(path.join(DIR, 'server.js'), 'utf8');
     const lignes = src.split('\n');
     const effets = lignes.map((l, i) => ({ l, i })).filter(x => /\.executer\(|\.finaliser\(/.test(x.l) && !/^\s*(\*|\/\/|\/\*)/.test(x.l));
-    const attendus = [/permis = AGENDA\.permis\(action\)/, /permis = ECRITURE\.permis\(action\)/, /memorise: true/, /prepare: true/, /recu: rep\.ok === true/, /target: 'secret'/, /s\.g\.finaliser\(b\.jeton\)/];
+    /* [v4.6.7 - S50] le meme point d'effet de lecture emet aussi le permis de l'agenda JARVIS */
+    const attendus = [/permis = AGENDA\.permis\(action\);.*permisJ = ECRITURE\.permisLecture\(action\)/, /permis = ECRITURE\.permis\(action\)/, /memorise: true/, /prepare: true/, /recu: rep\.ok === true/, /target: 'secret'/, /s\.g\.finaliser\(b\.jeton\)/];
     const inconnus = effets.filter(x => !attendus.some(re => re.test(x.l)));
     const isole = /hote_compromis: \(\) => \{\s*const \{ session: g, entree \} = creerSessionGouvernee\(\);/.test(src);
     const nComp = (src.match(/\.compensationDebut\(/g) || []).length, nConst = (src.match(/\.constaterEffet\(/g) || []).length;
