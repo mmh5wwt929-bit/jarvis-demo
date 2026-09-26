@@ -283,7 +283,8 @@ const pasDEffet = (r) => r.decide !== 'EN_ATTENTE' && r.decide !== 'AUTORISE' &&
   });
 
   /* ============================== P5 ============================== */
-  await t('E1', 'P5', "inventaire : exactement 7 points d'effet (dont la creation d'evenement), 1 compensation, 1 constat d'effet ; finaliser seulement dans /api/finaliser", async () => {
+  /* [v4.8 - S64] 8 points : la lecture d'agenda existe deux fois (question tapee, point du jour a l'ouverture), meme permis */
+  await t('E1', 'P5', "inventaire : exactement 8 points d'effet (dont la creation d'evenement et 2 lectures d'agenda), 1 compensation, 1 constat d'effet ; finaliser seulement dans /api/finaliser", async () => {
     const src = fs.readFileSync(path.join(DIR, 'server.js'), 'utf8');
     const lignes = src.split('\n');
     const effets = lignes.map((l, i) => ({ l, i })).filter(x => /\.executer\(|\.finaliser\(/.test(x.l) && !/^\s*(\*|\/\/|\/\*)/.test(x.l));
@@ -292,7 +293,8 @@ const pasDEffet = (r) => r.decide !== 'EN_ATTENTE' && r.decide !== 'AUTORISE' &&
     const inconnus = effets.filter(x => !attendus.some(re => re.test(x.l)));
     const isole = /hote_compromis: \(\) => \{\s*const \{ session: g, entree \} = creerSessionGouvernee\(\);/.test(src);
     const nComp = (src.match(/\.compensationDebut\(/g) || []).length, nConst = (src.match(/\.constaterEffet\(/g) || []).length;
-    return { ok: effets.length === 7 && inconnus.length === 0 && isole && nComp === 1 && nConst === 1, info: effets.length + ' points, compensation x' + nComp + ', constat x' + nConst + (inconnus.length ? ' ; INCONNUS lignes ' + inconnus.map(x => x.i + 1).join(',') : '') + (isole ? ' ; demo isolee' : ' ; DEMO NON ISOLEE') };
+    const lectures = effets.filter(x => attendus[0].test(x.l)).length;
+    return { ok: effets.length === 8 && lectures === 2 && inconnus.length === 0 && isole && nComp === 1 && nConst === 1, info: effets.length + ' points, compensation x' + nComp + ', constat x' + nConst + (inconnus.length ? ' ; INCONNUS lignes ' + inconnus.map(x => x.i + 1).join(',') : '') + (isole ? ' ; demo isolee' : ' ; DEMO NON ISOLEE') };
   });
   nouvelleIp(); sid = await session();
   const bizarres = await Promise.all([

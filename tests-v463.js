@@ -51,7 +51,7 @@ let port = BASE + 10;
 const lancer = async (env = {}) => {
   const p = port++;
   const enfant = spawn(process.execPath, ['-r', PRECHARGE, 'server.js'], { cwd: DIR, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { PATH: process.env.PATH, ANTHROPIC_API_KEY: 'test', PORT: String(p), ...env } });
+    env: { PATH: process.env.PATH, ANTHROPIC_API_KEY: 'test', PORT: String(p), JARVIS_SANTE_PUBLIQUE: 'detail' /* [v4.8] */, ...env } });
   let sortie = ''; enfant.stdout.on('data', (d) => { sortie += d; }); enfant.stderr.on('data', (d) => { sortie += d; });
   let pret = false;
   for (let i = 0; i < 150 && !pret && enfant.exitCode === null; i++) {
@@ -160,7 +160,7 @@ const session = async () => (await appel('/api/session', {})).sessionId;
   const nu = await (await fetch(B + '/health', { headers: { 'CF-Connecting-IP': '81.2.2.2' } })).json();
   await t('H1', 'instance protégée, /health SANS clé : ni agenda, ni écriture, ni élévation, ni IP ; versions, manifeste et verdict gardés', async () => {
     const tus = ['agenda', 'ecriture', 'elevation', 'tonIp', 'ip', 'ipDepuis', 'delaiIa'].filter(k => k in nu);
-    return { ok: tus.length === 0 && /^v4\.6\.[3-9]$/.test(nu.passerelle) && nu.acces === 'protege' && nu.config === 'non-declaree'
+    return { ok: tus.length === 0 && /^v4\.(6\.[3-9]|[7-9]\.\d+)$/.test(nu.passerelle) && nu.acces === 'protege' && nu.config === 'non-declaree'
                && typeof nu.empreinte === 'string' && typeof nu.manifeste === 'string',
              info: tus.length ? 'dit encore : ' + tus.join(', ') : Object.keys(nu).join(',') };
   });
@@ -204,8 +204,8 @@ const session = async () => (await appel('/api/session', {})).sessionId;
 
   const demo = await lancer({ JARVIS_CODE_SECOURS: CODE });
   const hd = await (await demo.brut('/health')).json();
-  await t('H5', 'contre-épreuve : la démo publique garde son /health détaillé (rien à cacher), sans champ « config »', async () =>
-    ({ ok: hd.acces === 'public' && hd.elevation === 'inactif' && hd.agenda === 'inactif' && !('config' in hd) && /^v4\.6\.[3-9]$/.test(hd.passerelle),
+  await t('H5', 'contre-épreuve : la démo publique (JARVIS_SANTE_PUBLIQUE=detail depuis la v4.8) détaille son /health, sans champ « config »', async () =>
+    ({ ok: hd.acces === 'public' && hd.elevation === 'inactif' && hd.agenda === 'inactif' && !('config' in hd) && /^v4\.(6\.[3-9]|[7-9]\.\d+)$/.test(hd.passerelle),
        info: hd.acces + ' ' + hd.elevation + ' ' + ('config' in hd ? 'config!' : '') }));
 
   /* ====================== [S39] LIMITE HORAIRE ====================== */
@@ -282,7 +282,7 @@ const session = async () => (await appel('/api/session', {})).sessionId;
   const sante = $('sante');
   await t('P5', "« état du serveur » (pied de page) : le détail complet, avec la clé de la page", async () => {
     let j = null; try { j = JSON.parse(sante.textContent); } catch { /* illisible */ }
-    return { ok: !!lienSante && !sante.hidden && j && j.elevation === 'code' && /^v4\.6\.[3-9]$/.test(j.passerelle), info: lienSante ? String(sante.textContent).slice(0, 60) : 'pas de lien' };
+    return { ok: !!lienSante && !sante.hidden && j && j.elevation === 'code' && /^v4\.(6\.[3-9]|[7-9]\.\d+)$/.test(j.passerelle), info: lienSante ? String(sante.textContent).slice(0, 60) : 'pas de lien' };
   });
 
   const chezSoi = w.messageLimite({ motif: 'LIMITE_IP_HORAIRE', reessayerDans: 600 }), jourSoi = w.messageLimite({ motif: 'PLAFOND_GLOBAL_JOURNALIER' });

@@ -27,11 +27,29 @@
  *    on demande, on ne choisit pas.
  *
  * Jours : nombre de jours depuis 1970-01-01 (UTC), comme jarvis-agenda.js.
+ *
+ * 1.1 (v4.7, 26 sept) — VU EN LIGNE sur la v4.6.7
+ *  - titreTape() : le titre lu dans les mots tapes, quand le modele n'en donne
+ *    pas (« Ajoute hand mercredi » -> « Hand ») ; sans lui, la reponse « 18h »
+ *    a « A quelle heure ? » repartait de zero (« Quel jour ? »).
+ *  - questionDate() accepte quel/quelle/quels/quelles et jour/jours.
+ *  - autreObjet() : une suppression qui vise un fichier, un mail, un paiement…
+ *    n'est pas une suppression d'evenement.
+ *  - imiteServeur() : une phrase que seul le serveur ecrit (« touche
+ *    Supprimer », « disparition verifiee », « confirme par Google »…) dans une
+ *    reponse du modele est une imitation : elle est retiree.
+ *
+ * 1.2 (v4.8, 26 sept) — LES SERIES
+ *  - lireSerie() : dans les mots tapes, le jour de la semaine (un seul), la
+ *    date de fin (« jusqu'au 19 decembre », « jusqu'a fin juin »), le debut
+ *    (« a partir du 7 octobre »), et ce qui n'est pas « chaque semaine ».
+ *  - finNue() : une reponse nue a « Jusqu'a quand ? » (« 19 decembre »).
+ *  - demandeSerie() reconnait aussi « ajoute hand mercredi jusqu'au … ».
  * ========================================================================== */
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const AG = require('./jarvis-agenda.js');
 
-const VERSION = '1.0';
+const VERSION = '1.2';
 const JOUR_MS = 86400000;
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const JOURS_COURTS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
@@ -191,8 +209,8 @@ function questionContradiction(r) {
 }
 
 /* ------------------------------------ questions de date : sans le modele -- */
-const RE_Q_JOUR = /(^| )(quel jour (sommes nous|est on|on est|nous sommes|est il|est ce|c est|aujourd hui)|on est quel jour|c est quel jour|nous sommes quel jour|quelle (est la )?date|quelle date|on est le combien|nous sommes le combien|la date d aujourd hui|la date du jour|quel jour)( |$)/;
-const RE_Q_HEURE = /(^| )(quelle heure|il est quelle heure|l heure qu il est|l heure)( |$)/;
+const RE_Q_JOUR = /(^| )(quel jour (sommes nous|est on|on est|nous sommes|est il|est ce|c est|aujourd hui)|on est quel jour|c est quel jour|nous sommes quel jour|quel (est la )?date|quel date|on est le combien|nous sommes le combien|la date d aujourd hui|la date du jour|quel jour)( |$)/;
+const RE_Q_HEURE = /(^| )(quel heure|il est quel heure|l heure qu il est|l heure)( |$)/;
 const RE_Q_TOMBE = /(^| )(quel jour|tombe|c est un|est un|quel jour de la semaine)( |$)/;
 /* On ne repond sans modele QUE si la phrase entiere est une question de date :
  * chaque mot doit appartenir a ce vocabulaire (sinon « a quelle heure est mon
@@ -204,7 +222,9 @@ const VOCAB_TOMBE = new Set(('tombe sera etait un une semaine demain apres avant
   + '1er ' + RE_MOIS.split('|').join(' ') + ' ' + RE_JOURS.split('|').join(' ')).split(' '));
 /* reponse exacte, ou null (la question part alors au modele, avec la date) */
 function questionDate(texte, maintenantMs, zone = 'Europe/Paris') {
-  const t = norm(texte).replace(/[?!.,;:]+/g, ' ').replace(/\s+/g, ' ').trim();
+  /* [1.1] « quelle jours sommes nous » : accords ramenes a « quel jour » */
+  const t = norm(texte).replace(/[?!.,;:]+/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/(^| )quel(le)?s?(?= |$)/g, '$1quel').replace(/(^| )jours(?= |$)/g, '$1jour').replace(/(^| )heures(?= |$)/g, '$1heure');
   const liste = t ? t.split(' ') : [];
   if (!liste.length || liste.length > 12) return null;
   const l = local(maintenantMs, zone);
@@ -387,7 +407,8 @@ const RE_CREER = /(^| )(ajout|rajout|cree |creer|creez|mets |met |note |noter|no
 const RE_SERIE = new RegExp('(^| )((tous|toutes) les (' + RE_JOURS + ')s?|(tous|toutes) les (jours|semaines|matins|soirs|deux semaines|15 jours|quinze jours)'
   + '|chaque (' + RE_JOURS + '|jour|semaine|matin|soir)|hebdomadaire|hebdo|quotidien|quotidienne|(' + RE_JOURS + ')s)( |$)');
 const creationDemandee = (texte) => RE_CREER.test(mots(texte));
-const demandeSerie = (texte) => { const p = mots(texte); return RE_CREER.test(p) && RE_SERIE.test(p); };
+const RE_JOUR_SEUL = new RegExp('(^| )(' + RE_JOURS + ')s?(?! (1er|\\d))( |$)');
+const demandeSerie = (texte) => { const p = mots(texte); return RE_CREER.test(p) && (RE_SERIE.test(p) || (/ jusqu/.test(p) && RE_JOUR_SEUL.test(p))); };   /* [1.2] */
 const RE_AGENDA = /(^| )(agenda|calendrier|evenement|rendez vous|rdv|creneau)( |$)/;
 /* la personne demande-t-elle une action (creer, supprimer, envoyer, payer) ? */
 const demandeAction = (texte) => intentionSuppression(texte).presente || RE_CREER.test(mots(texte))
@@ -395,6 +416,110 @@ const demandeAction = (texte) => intentionSuppression(texte).presente || RE_CREE
 /* une reponse qui refuse ou renonce (« 18h c'est trop tard, laisse tomber ») */
 const renonce = (texte) => /(^| )(non|pas|laisse|laisser|oublie|oublier|rien|stop|tant pis)( |$)/.test(mots(texte));
 const parleAgenda = (texte) => RE_AGENDA.test(mots(texte));
+
+/* ------------------------------------------- titre tape : [1.1] -- */
+/* Les mots de la personne, moins les verbes de creation, les dates, les
+ * heures, les durees et les mots de liaison : « Ajoute hand mercredi » ->
+ * « Hand » ; « ajoute entraînement U18 jeudi à 18h30 pendant 1h30 » ->
+ * « Entraînement U18 ». Au plus 6 mots ; '' si rien ne reste. */
+const VIDES_TITRE = new Set(('ajoute ajouter ajoutes rajoute rajouter cree creer crees creez mets met mettre note noter notez programme programmer '
+  + 'planifie planifier inscris inscrire bloque bloquer enregistre enregistrer cale caler un une le la les l de du des d a au aux pour sur dans en '
+  + 'mon ma mes ton ta tes agenda calendrier evenement evenements que qu j je ai il y avoir stp svp s te plait jarvis moi me '
+  + 'demain aujourd hui aujourdhui apres avant hier soir matin midi minuit prochain prochaine dernier derniere suivant suivante huit ce cet cette '
+  + 'pendant durant duree heure heures h min minute minutes mn demi demie et quart jusqu jusque entre vers partir semaine semaines jour jours tous toutes chaque '
+  + 'fin debut mi compter des hebdo hebdomadaire serie fois par lundis mardis mercredis jeudis vendredis samedis dimanches '   /* [1.2] series */
+  + 'er ' + RE_JOURS.split('|').join(' ') + ' ' + RE_MOIS.split('|').join(' ')).split(' '));
+function titreTape(texte) {
+  const brut = String(separer(texte).propres || '').replace(/[«»"“”()[\]{}<>|]/g, ' ');
+  const garde = [];
+  for (const mot of brut.split(/\s+/)) {
+    const n = norm(mot).replace(/[^a-z0-9]+/g, ' ').trim();
+    if (!n) continue;
+    const parties = n.split(' ');
+    if (parties.every(x => VIDES_TITRE.has(x) || /^\d{1,2}(h\d{0,2}|:\d{2})?$/.test(x) || /^\d{4}$/.test(x) || /^(1er|\d{1,2})$/.test(x))) continue;
+    garde.push(mot.replace(/^[^\p{L}\d]+|[^\p{L}\d]+$/gu, ''));
+  }
+  const t = garde.filter(Boolean).slice(0, 6).join(' ').slice(0, 100).trim();
+  return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
+}
+
+/* --------------------------------- suppression d'autre chose : [1.1] -- */
+const RE_AUTRE_OBJET = /(^| )(fichier|fichiers|dossier|dossiers|mail|mails|e mail|email|emails|courriel|courriels|message|messages|facture|factures|paiement|paiements|virement|virements|photo|photos|document|documents|contact|contacts|souvenir|souvenirs|memoire|compte|comptes|envoi|envois)( |$)/;
+const autreObjet = (texte) => RE_AUTRE_OBJET.test(mots(texte));
+
+/* ------------------------------ phrases que seul le serveur ecrit : [1.1] -- */
+const RE_SERVEUR_SEUL = /(touche « ?(supprimer( la s[ée]rie)?|cr[ée]er( les \d+ s[ée]ances)?|ne pas cr[ée]er|confirmer) ?»|rien n'est (supprim[ée]|[ée]crit) avant ton toucher|disparition v[ée]rifi[ée]e|confirm[ée] par google|jour et heure lus dans tes mots|cr[ée][ée] par jarvis dans cette session|ne sont pas encore possibles : c'est la prochaine [ée]tape)/i;
+function imiteServeur(texte) {
+  const s = String(texte == null ? '' : texte);
+  const retirees = [];
+  const lignes = s.split('\n').map((ligne) => {
+    const morceaux = ligne.match(/[^.!?…]+[.!?…]*\s*|[.!?…]+\s*/g) || [ligne];
+    return morceaux.filter((m) => { if (RE_SERVEUR_SEUL.test(m)) { retirees.push(m.trim()); return false; } return true; }).join('').replace(/\s+$/, '');
+  });
+  const propre = lignes.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return { texte: retirees.length ? propre : s, retirees };
+}
+
+/* ------------------------------------------------- series : [1.2] -- */
+/* Le texte, pour les series : minuscules, sans accents ni ponctuation. */
+const nettoye = (texte) => ' ' + norm(separer(texte).propres).replace(/['’]/g, ' ').replace(/[^a-z0-9\/: ]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+const dernierDuMois = (y, mo) => jourDe(y, mo + 1, 1) - 1;
+const RE_FIN_CLAUSE = / jusqu(?:e|es)?( .*?)(?= tous | toutes | chaque | a partir | a compter | des le | a \d| de \d| vers \d| pour |$)/;
+const RE_DEBUT_CLAUSE = new RegExp(' (?:a partir|a compter|des(?= le | aujourd| demain| (?:' + RE_JOURS + ') | \\d))(?: du| de la| de l| de| d)?( .*?)(?= tous | toutes | chaque | jusqu| a \\d| de \\d| vers \\d| pour |$)');
+const RE_NON_HEBDO = / ((tous|toutes) les (jours|matins|soirs|mois|ans|deux semaines|15 jours|quinze jours)|chaque (jour|matin|soir|mois|annee)|quotidien|quotidienne|mensuel|mensuelle|une semaine sur deux|un .{0,12} sur deux) /;
+/* une date de fin lue dans une expression (« au 19 decembre », « fin juin »,
+ * « en juin », « la fin de l'annee ») ; bare = reponse nue : un jour de la
+ * semaine seul n'y est jamais une fin. null si illisible. */
+function finDe(clause, maintenantMs, zone, bare) {
+  const auj = local(maintenantMs, zone).jour, c = ' ' + String(clause || '').trim() + ' ';
+  const annee = /( |^)(\d{4})( |$)/.exec(c), y0 = civil(auj).y;
+  if (/ fin (de l |d |de cette )?annee /.test(c)) { let j = dernierDuMois(annee ? +annee[2] : y0, 12); if (j < auj) j = dernierDuMois(y0 + 1, 12); return { jour: j, expr: "fin de l'année" }; }
+  const mm = new RegExp(' (?:(fin|debut|mi) (?:de |du mois de |d )?|(?:en|au mois de|a la fin de|a la fin du mois de|a fin) )?(' + RE_MOIS + ')\\.?(?: (\\d{4}))? ').exec(c);
+  const avecNumero = new RegExp(' (1er|\\d{1,2}) (' + RE_MOIS + ')| \\d{1,2}/\\d{1,2}| \\d{4} \\d{2} \\d{2}| le (1er|\\d{1,2}) ').test(c.replace(/-/g, ' '));
+  if (mm && !avecNumero) {
+    if (mm[1] === 'debut' || mm[1] === 'mi') return null;   /* « debut decembre » : quel jour ? on demande */
+    const mo = MOIS[mm[2]], ya = mm[3] ? +mm[3] : null;
+    let j = ya ? dernierDuMois(ya, mo) : dernierDuMois(y0, mo);
+    if (!ya && j < auj) j = dernierDuMois(y0 + 1, mo);
+    return { jour: j, expr: 'fin ' + MOIS_AFF[mo - 1] + (ya ? ' ' + ya : '') };
+  }
+  const r = resoudreDates(clause, maintenantMs, zone);
+  if (r.contradictions.length || r.plages.length) return null;
+  const vus = r.dates.filter(d => !bare || /\d/.test(d.expr));
+  const jours = [...new Set(vus.map(d => d.jour))];
+  if (jours.length !== 1) return null;
+  const d = vus.find(x => x.jour === jours[0]);
+  return { jour: d.jour, expr: d.expr };
+}
+function lireSerie(texte, maintenantMs, zone = 'Europe/Paris') {
+  let t = nettoye(texte);
+  let fin = null, finIllisible = null, debut = null, debutIllisible = null;
+  const mf = RE_FIN_CLAUSE.exec(t);
+  if (mf) { t = t.replace(mf[0], ' '); fin = finDe(mf[1], maintenantMs, zone, false); if (!fin) finIllisible = mf[1].trim().slice(0, 40) || '?'; }
+  const md = RE_DEBUT_CLAUSE.exec(t);
+  if (md) { t = t.replace(md[0], ' '); const r = resoudreDates(md[1], maintenantMs, zone); const j = [...new Set(r.dates.map(d => d.jour))];
+    if (j.length === 1 && !r.contradictions.length) debut = { jour: j[0], expr: r.dates[0].expr }; else debutIllisible = md[1].trim().slice(0, 40) || '?'; }
+  const nonHebdo = RE_NON_HEBDO.test(t);
+  const jours = [];
+  const re = new RegExp(' (' + RE_JOURS + ')s?(?= )(?! (1er|\\d))', 'g'); let m;
+  while ((m = re.exec(t))) { const w = JOURS.indexOf(m[1]); if (!jours.includes(w)) jours.push(w); re.lastIndex = m.index + m[0].length; }
+  return { jours, nonHebdo, fin, finIllisible, debut, debutIllisible };
+}
+/* le titre d'une serie : les mots tapes, sans ceux d'une fin ou d'un debut
+ * illisibles (« jusqu'aux vacances » ne donne pas « Hand vacances ») */
+function titreSerie(texte, maintenantMs, zone = 'Europe/Paris') {
+  const t = titreTape(texte); if (!t) return '';
+  const l = lireSerie(texte, maintenantMs, zone);
+  const hors = new Set([l.finIllisible, l.debutIllisible].filter(Boolean).join(' ').split(' ').filter(Boolean));
+  const r = t.split(' ').filter(w => !hors.has(norm(w).replace(/[^a-z0-9]+/g, ''))).join(' ');
+  return r ? r.charAt(0).toUpperCase() + r.slice(1) : '';
+}
+/* reponse nue a « Jusqu'a quand ? » : « 19 decembre », « fin juin », « jusqu'au 19/12 » */
+function finNue(texte, maintenantMs, zone = 'Europe/Paris') {
+  const t = nettoye(texte);
+  if (/ jusqu/.test(t)) { const l = lireSerie(texte, maintenantMs, zone); return l.fin; }
+  return finDe(t, maintenantMs, zone, true);
+}
 
 /* ------------------------------------------ deux agendas, une liste -- */
 /* [B] Chaque evenement garde sa SOURCE ; un meme evenement vu dans les deux
@@ -421,4 +546,5 @@ function texteFusion(evenements, zone = 'Europe/Paris') {
 module.exports = Object.freeze({ VERSION, resoudreDates, dateUnique, tableDates, avertissementNuit, questionContradiction, questionDate,
   corrigerJours, retirerAffirmations, affirme, intentionSuppression, suppressionNue, titreNomme, resoudreHeures,
   creationDemandee, demandeSerie, parleAgenda, demandeAction, renonce, fusionner, texteFusion, mots,
+  titreTape, autreObjet, imiteServeur, lireSerie, finNue, titreSerie,
   libelle, libellePeriode, local, iso, jourDe, jourSemaine, civil });

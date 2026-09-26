@@ -46,7 +46,7 @@ let port = BASE + 10;
 const lancer = async (env = {}, plans = []) => {
   const p = port++;
   const enfant = spawn(process.execPath, ['-r', PRECHARGE, 'server.js'], { cwd: DIR, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { PATH: process.env.PATH, ANTHROPIC_API_KEY: 'test', PORT: String(p), FAUX_PLANS: JSON.stringify(plans), ...env } });
+    env: { PATH: process.env.PATH, ANTHROPIC_API_KEY: 'test', PORT: String(p), FAUX_PLANS: JSON.stringify(plans), JARVIS_SANTE_PUBLIQUE: 'detail' /* [v4.8] */, ...env } });
   let sortie = ''; enfant.stdout.on('data', (d) => { sortie += d; }); enfant.stderr.on('data', (d) => { sortie += d; });
   let sante = null;
   for (let i = 0; i < 150 && !sante && enfant.exitCode === null; i++) {
@@ -99,7 +99,7 @@ const B = 'http://localhost:' + BASE;
   const envoi = { action: 'SEND', resource: 'EMAIL', target: 'pierre@exemple.fr' };
   const mal = await lancer({ JARVIS_CLE_ACCES: CLE, JARVIS_CODE_SECOURS: 'abcdefghijkl' }, [envoi]);
   await t('C2', "code avec des lettres : /health « erreur-config » (plus « inactif »), le journal le crie", async () =>
-    ({ ok: mal.sante && /^v4\.6\.[2-9]$/.test(mal.sante.passerelle) && mal.sante.elevation === 'erreur-config' && /MAL CONFIGUREE/.test(mal.sortie()) && /12 a 64 chiffres/.test(mal.sortie()),
+    ({ ok: mal.sante && /^v4\.(6\.[2-9]|[7-9]\.\d+)$/.test(mal.sante.passerelle) && mal.sante.elevation === 'erreur-config' && /MAL CONFIGUREE/.test(mal.sortie()) && /12 a 64 chiffres/.test(mal.sortie()),
        info: mal.sante && (mal.sante.passerelle + ' ' + mal.sante.elevation) }));
 
   await t('C3', "code illisible : l'envoi irréversible reste BLOQUÉ (avant v4.6.2 il partait sans code ni Face ID)", async () => {

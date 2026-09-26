@@ -11,7 +11,8 @@
  *    pas toucher a l'agenda principal : il n'y a simplement pas acces.
  *  - Portee demandee : calendar.events (evenements seulement).
  *  - JAMAIS d'invites (inviter envoie un e-mail : irreversible), jamais de
- *    notification (sendUpdates=none), jamais de recurrence, pas de visio.
+ *    notification (sendUpdates=none), pas de visio. Recurrence : seulement
+ *    chaque semaine, avec une fin (53 seances au plus) [1.3].
  *  - Deux hotes joignables, en https : oauth2.googleapis.com, www.googleapis.com.
  *
  * GARDE-FOUS
@@ -49,6 +50,15 @@
  *    permis de lecture a usage unique ne dans l'effet d'un READ AGENDA
  *    autorise (T6). Ce qui est lu est un contenu EXTERNE : titres et notes
  *    nettoyes et bornes, jamais des consignes.
+ *
+ * 1.3 (v4.8, 26 sept) — LES SERIES
+ *  - Cible « AAAA-MM-JJTHH:MM|minutes|titre|HEBDO:AAAA-MM-JJ » : chaque semaine,
+ *    le meme jour, de la premiere a la DERNIERE seance (date obligatoire, meme
+ *    jour de la semaine, 1 a 52 semaines plus tard : 2 a 53 seances).
+ *  - Chez Google : UN evenement recurrent (RRULE FREQ=WEEKLY;COUNT=n), donc une
+ *    seule transaction, une seule marque, et une seule suppression qui retire
+ *    toutes les seances (verifiee comme avant : l'evenement a disparu).
+ *  - Une serie compte pour une creation dans le plafond de 20 par jour.
  * ========================================================================== */
 const https = require('https');
 const crypto = require('crypto');
@@ -57,7 +67,8 @@ const AG = require('./jarvis-agenda.js');
 
 const LIMITES_ECRITURE = Object.freeze({ delaiMs: 10000, maxOctets: 256 * 1024, creationsParJour: 20,
   titreMax: 100, dureeMin: 5, dureeMax: 24 * 60, joursAvant: 1, joursApres: 366, permisMs: 30 * 1000,
-  maxLus: 100, lieuMax: 100, descriptionMax: 300 });   /* [1.2] lecture */
+  maxLus: 100, lieuMax: 100, descriptionMax: 300,   /* [1.2] lecture */
+  serieJoursMax: 364 });   /* [1.3] une serie : 52 semaines au plus entre la 1re et la derniere seance */
 const HOTES = new Set(['oauth2.googleapis.com', 'www.googleapis.com']);
 const PORTEE = 'https://www.googleapis.com/auth/calendar.events';
 const B32HEX = '0123456789abcdefghijklmnopqrstuv';
@@ -129,11 +140,12 @@ const nettoyerTitre = (t, max) => String(t == null ? '' : t)
   .replace(/[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u202A-\u202E\u2066-\u2069|]/g, ' ')
   .replace(/[<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max).trim();
 
-/* La cible canonique d'une creation : « AAAA-MM-JJTHH:MM|minutes|titre ».
+/* La cible canonique d'une creation : « AAAA-MM-JJTHH:MM|minutes|titre »,
+ * ou pour une serie [1.3] « …|titre|HEBDO:AAAA-MM-JJ » (derniere seance).
  * Tout le reste est refuse (null). */
 function validerCible(cible, maintenantMs, zone, L = LIMITES_ECRITURE) {
-  if (typeof cible !== 'string' || cible.length > 200) return null;
-  const m = /^\s*(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})\s*\|\s*(\d{1,4})\s*\|(.+)$/.exec(cible);
+  if (typeof cible !== 'string' || cible.length > 220) return null;
+  const m = /^\s*(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})\s*\|\s*(\d{1,4})\s*\|(.+?)(?:\|\s*HEBDO:(\d{4})-(\d{2})-(\d{2}))?\s*$/.exec(cible);
   if (!m) return null;
   const [y, mo, d, h, mi, duree] = [+m[1], +m[2], +m[3], +m[4], +m[5], +m[6]];
   if (!(mo >= 1 && mo <= 12 && d >= 1 && d <= 31 && h <= 23 && mi <= 59)) return null;
@@ -145,10 +157,28 @@ function validerCible(cible, maintenantMs, zone, L = LIMITES_ECRITURE) {
   const debutMs = AG.versUtc(zone, y, mo, d, h, mi, 0), finMs = debutMs + duree * 60000;
   if (debutMs < maintenantMs - L.joursAvant * 86400000 || debutMs > maintenantMs + L.joursApres * 86400000) return null;
   const debut = partiesLocales(debutMs, zone), fin = partiesLocales(finMs, zone);
-  const cle = y + '-' + deux(mo) + '-' + deux(d) + 'T' + deux(h) + ':' + deux(mi) + '|' + duree + '|' + titre;
-  const jour = new Intl.DateTimeFormat('fr-FR', { timeZone: zone, weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(debutMs));
-  const lisible = jour + ', ' + deux(debut.h) + ':' + deux(debut.mi) + ' → ' + deux(fin.h) + ':' + deux(fin.mi) + ' · ' + titre;
-  return Object.freeze({ cle, titre, duree, debutMs, finMs, debutLocal: localIso(debut), finLocal: localIso(fin), lisible });
+  /* [1.3] serie : la derniere seance, meme jour de la semaine, 1 a 52 semaines apres */
+  let serie = null;
+  if (m[8]) {
+    const fy = +m[8], fmo = +m[9], fd = +m[10], vf = new Date(Date.UTC(fy, fmo - 1, fd));
+    if (vf.getUTCFullYear() !== fy || vf.getUTCMonth() !== fmo - 1 || vf.getUTCDate() !== fd) return null;
+    const ecart = Math.round((vf.getTime() - Date.UTC(y, mo - 1, d)) / 86400000);
+    if (ecart < 7 || ecart > L.serieJoursMax || ecart % 7 !== 0) return null;
+    serie = Object.freeze({ nb: ecart / 7 + 1, derniere: fy + '-' + deux(fmo) + '-' + deux(fd), anneeDerniere: fy });
+  }
+  const cle = y + '-' + deux(mo) + '-' + deux(d) + 'T' + deux(h) + ':' + deux(mi) + '|' + duree + '|' + titre + (serie ? '|HEBDO:' + serie.derniere : '');
+  const heures = deux(debut.h) + ':' + deux(debut.mi) + ' → ' + deux(fin.h) + ':' + deux(fin.mi);
+  let lisible;
+  if (serie) {
+    const dm = new Intl.DateTimeFormat('fr-FR', { timeZone: 'UTC', day: 'numeric', month: 'long' });
+    const nomJour = new Intl.DateTimeFormat('fr-FR', { timeZone: zone, weekday: 'long' }).format(new Date(debutMs));
+    lisible = 'tous les ' + nomJour + 's, ' + heures + ' · ' + titre + ' · du ' + dm.format(new Date(Date.UTC(y, mo - 1, d)))
+      + ' au ' + dm.format(new Date(Date.parse(serie.derniere + 'T00:00:00Z'))) + (serie.anneeDerniere !== y ? ' ' + serie.anneeDerniere : '') + ' (' + serie.nb + ' séances)';
+  } else {
+    const jour = new Intl.DateTimeFormat('fr-FR', { timeZone: zone, weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(debutMs));
+    lisible = jour + ', ' + heures + ' · ' + titre;
+  }
+  return Object.freeze({ cle, titre, duree, debutMs, finMs, debutLocal: localIso(debut), finLocal: localIso(fin), lisible, serie });
 }
 
 /* ---- transport https garde ---- */
@@ -193,7 +223,7 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
   async function appeler(methode, url, corps, jetonAcces) {
     const u = new URL(url);
     if (u.protocol !== 'https:' || !HOTES.has(u.hostname)) return { ok: false, code: 'HOTE_INTERDIT' };
-    const entetes = { 'User-Agent': 'JARVIS-ecriture/1.2', Accept: 'application/json' };
+    const entetes = { 'User-Agent': 'JARVIS-ecriture/1.3', Accept: 'application/json' };
     if (jetonAcces) entetes.Authorization = 'Bearer ' + jetonAcces;
     let charge = null;
     if (corps != null) {
@@ -278,8 +308,9 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
       const j = await jeton(); if (!j.ok) return { ok: false, code: j.code };
       const v = permis.cible;
       const corps = { id: permis.id, summary: v.titre,
-        description: 'Créé par JARVIS à ta demande (transaction ' + permis.transactionId + ').',
+        description: 'Créé par JARVIS à ta demande (' + (v.serie ? 'série de ' + v.serie.nb + ' séances, ' : '') + 'transaction ' + permis.transactionId + ').',
         start: { dateTime: v.debutLocal, timeZone: zone }, end: { dateTime: v.finLocal, timeZone: zone },
+        ...(v.serie ? { recurrence: ['RRULE:FREQ=WEEKLY;COUNT=' + v.serie.nb] } : {}),   /* [1.3] */
         extendedProperties: { private: { jarvisTx: permis.transactionId } },
         guestsCanInviteOthers: false, guestsCanModify: false, reminders: { useDefault: true } };
       const r = await appeler('POST', base + '?sendUpdates=none', corps, j.jeton);
@@ -357,4 +388,4 @@ function creerEcriture({ compte, agendaId, zone = 'Europe/Paris', transport = tr
   });
 }
 
-module.exports = { creerEcriture, validerCible, idEvenement, lireCompte, examinerCompte, erreurGoogle, erreurJeton, jwt, base32hex, LIMITES_ECRITURE, HOTES, VERSION: '1.2' };
+module.exports = { creerEcriture, validerCible, idEvenement, lireCompte, examinerCompte, erreurGoogle, erreurJeton, jwt, base32hex, LIMITES_ECRITURE, HOTES, VERSION: '1.3' };

@@ -380,7 +380,7 @@ setTimeout(() => fatale('delai de 150 s depasse'), 150000);
        info: tableauChat.status + ' ' + (tableauChat.erreur || tableauChat.decide) + ' ; ' + tableau.status + ' ' + (tableau.erreur || tableau.etat) }));
   const h = await appel('/api/health');
   await t('H1', '/health : passerelle v4.6.5 ou plus, couche 5.30.2 ou plus', async () =>
-    ({ ok: /^v4\.6\.([5-9]|\d\d)$/.test(h.passerelle) && /^5\.30\.([2-9]|\d\d)$/.test(h.couche), info: h.passerelle + ' ' + h.couche }));
+    ({ ok: /^v4\.(6\.([5-9]|\d\d)|[7-9]\.\d+)$/.test(h.passerelle) && /^5\.30\.([2-9]|\d\d)$/.test(h.couche), info: h.passerelle + ' ' + h.couche }));
 
   /* ============================== LA PAGE ============================== */
   const { JSDOM, VirtualConsole } = require(process.env.JSDOM || 'jsdom');

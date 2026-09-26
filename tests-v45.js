@@ -82,9 +82,9 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   await dort(400);
   const reelNow = Date.now; let decalage = 0; Date.now = () => reelNow() + decalage;
 
-  await t('V1', '/health : agenda actif, passerelle v4.5.x ou v4.6.x, couche 5.29.12 ou 5.30.x', async () => {
+  await t('V1', '/health : agenda actif, passerelle v4.5.x à v4.9.x, couche 5.29.12 ou 5.30.x', async () => {
     const h = await appel('/health');
-    return { ok: h.agenda === 'actif' && /^v4\.[56](\.\d+)?$/.test(h.passerelle) && /^5\.(29\.12|30\.\d+)$/.test(h.couche) && h.acces === 'protege', info: JSON.stringify({ agenda: h.agenda, passerelle: h.passerelle, couche: h.couche }) };
+    return { ok: h.agenda === 'actif' && /^v4\.[5-9](\.\d+)?$/.test(h.passerelle) && /^5\.(29\.12|30\.\d+)$/.test(h.couche) && h.acces === 'protege', info: JSON.stringify({ agenda: h.agenda, passerelle: h.passerelle, couche: h.couche }) };
   });
   await t('V2', "sans la cle d'acces, rien : ni session, ni agenda", async () => {
     const s = await appel('/api/session', {}, null);
@@ -187,7 +187,7 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
 
   /* ---- la meme adresse sur une instance PUBLIQUE ---- */
   const pub = spawn(process.execPath, ['-e', "process.env.PORT='3959';require(" + JSON.stringify(path.join(DIR, 'server.js')) + ')'],
-    { env: { ...process.env, JARVIS_CLE_ACCES: '', JARVIS_AGENDA_ICAL: SECRET, ANTHROPIC_API_KEY: 'test' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    { env: { ...process.env, JARVIS_CLE_ACCES: '', JARVIS_AGENDA_ICAL: SECRET, ANTHROPIC_API_KEY: 'test', JARVIS_SANTE_PUBLIQUE: 'detail' /* [v4.8] */ }, stdio: ['ignore', 'pipe', 'pipe'] });
   let sortiePub = ''; pub.stdout.on('data', d => { sortiePub += d; }); pub.stderr.on('data', d => { sortiePub += d; });
   await dort(900);
   const hp = await fetch('http://localhost:3959/health').then(r => r.json()).catch(() => ({}));
@@ -210,8 +210,9 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
     const src = require('fs').readFileSync(path.join(DIR, 'server.js'), 'utf8');
     const lire = (src.match(/AGENDA\.lire\(/g) || []).length, permis = (src.match(/AGENDA\.permis\(/g) || []).length;
     /* v4.6.7 [S50] : AGENDA peut etre absent (agenda JARVIS seul) : « if (AGENDA) » devant */
-    const dansEffet = /g\.executer\(demande, \(action\) => \{ (if \(AGENDA\) )?permis = AGENDA\.permis\(action\)/.test(src);
-    return { ok: lire === 1 && permis === 1 && dansEffet, info: 'lire x' + lire + ', permis x' + permis + (dansEffet ? ', dans l\'effet' : ', HORS effet') };
+    /* v4.8 [S64] : deux lectures (question tapee, point du jour), chacune avec SON permis ne dans l'effet */
+    const effets = (src.match(/g\.executer\(demande, \(action\) => \{ (if \(AGENDA\) )?permis = AGENDA\.permis\(action\)/g) || []).length, dansEffet = effets === permis;
+    return { ok: lire === 2 && permis === 2 && dansEffet, info: 'lire x' + lire + ', permis x' + permis + (dansEffet ? ', dans l\'effet' : ', HORS effet') };
   });
 
   /* ---- [S20] cible retapee = action confirmee (vu en ligne le 23 sept) ---- */

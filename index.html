@@ -9,6 +9,15 @@
 <meta property="og:url" content="https://jarvis-demo-24y8.onrender.com/">
 <meta property="og:title" content="JARVIS — la couche de sécurité d'un assistant IA personnel">
 <meta property="og:description" content="Avant chaque action, JARVIS vérifie d'où vient l'intention. Un e-mail piégé tente de faire transférer des factures, le noyau refuse. Lance les attaques toi-même.">
+<!-- [v4.7] l'appli sur l'ecran d'accueil (sans service worker) -->
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="/icone-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#161b22">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="JARVIS">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <style>
 :root{
   --encre:#0d1117;        /* fond */
@@ -34,6 +43,8 @@
 /* [hidden] doit gagner sur les display:flex des classes (.rang le masquait mal) */
 [hidden]{display:none!important}
 html,body{height:100%}
+/* [v4.7] les marges de l'encoche et de la barre d'accueil prennent la couleur de l'en-tete et du pied */
+html{background:var(--ardoise)}
 body{
   background:var(--encre);color:var(--texte);
   font:400 15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
@@ -71,7 +82,7 @@ main{flex:1;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
   gap:1px;background:var(--regle);min-height:0}
 .colonne{background:var(--encre);display:flex;flex-direction:column;min-height:0;overflow-y:auto}
 .bloc{border-bottom:1px solid var(--regle)}
-.bloc>h2{font-size:12.5px;font-weight:500;color:var(--sourd);padding:13px 20px 9px}
+.bloc h2{font-size:12.5px;font-weight:500;color:var(--sourd);padding:13px 20px 9px}
 
 /* ---------- CONVERSATION ---------- */
 #fil{flex:1;overflow-y:auto;padding:6px 20px 16px;display:flex;flex-direction:column;gap:14px;min-height:0}
@@ -214,11 +225,13 @@ footer{border-top:1px solid var(--regle);background:var(--ardoise);
   body{min-height:100%}
   main{flex:none;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto}
   .colonne{overflow:visible}
-  .colonne:first-child{height:max(420px,calc(100vh - var(--haut-entete,0px)));
-    height:max(420px,calc(100svh - var(--haut-entete,0px)))}
+  /* [v4.7] dans l'appli (plein ecran), l'encoche et la barre d'accueil
+   * comptent : sans elles, la saisie tombait sous le bord de l'ecran */
+  .colonne:first-child{height:max(420px,calc(100vh - var(--haut-entete,0px) - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)));
+    height:max(420px,calc(100svh - var(--haut-entete,0px) - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)))}
   .mesures{width:100%;margin-left:0;gap:14px}
   .bandeau{padding:12px 16px;gap:10px 22px}
-  .accroche,.plancher,.bloc>h2,.actions-lecture,.registre,.chaine,.vide{padding-left:16px;padding-right:16px}
+  .accroche,.plancher,.bloc h2,.actions-lecture,.registre,.chaine,.vide{padding-left:16px;padding-right:16px}
   #fil{padding-left:16px;padding-right:16px}
   .saisie,footer{padding-left:16px;padding-right:16px}
 }
@@ -255,29 +268,84 @@ footer{border-top:1px solid var(--regle);background:var(--ardoise);
 }
 button,select,input,textarea,a{touch-action:manipulation;-webkit-tap-highlight-color:rgba(88,166,255,.18)}
 textarea,input:not([type]),input[type=text]{-webkit-appearance:none;appearance:none}
+
+/* ---------- v4.7 : LA CONVERSATION D'ABORD ----------
+ * En-tete sur une ligne (JARVIS + pastille du plancher) ; le detail (jauge,
+ * origine, mesures) s'ouvre en touchant la pastille. Les blocs de defense se
+ * replient sous un « + » ; la trace se replie sous chaque carte. */
+.bandeau{padding:10px 20px;align-items:center;flex-wrap:nowrap}
+.pastille{margin-left:auto;display:flex;align-items:center;gap:8px;border-radius:999px;padding:6px 12px;font-size:12.5px;min-width:0}
+.pastille .plancher-val{font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pastille .point{display:block;width:9px;height:9px;border-radius:50%;flex-shrink:0}
+.pastille::after{content:'+';color:var(--sourd);font-size:15px;line-height:1}
+.pastille[aria-expanded="true"]::after{content:'\2212'}
+.entete-detail{padding:0 0 12px}
+.entete-detail .accroche{padding-top:2px}
+.entete-detail .plancher{padding-bottom:10px}
+.entete-detail .mesures{margin:0;padding:0 20px 6px;width:auto}
+.marque-detail{padding:0 20px;color:var(--sourd);font-size:11px}
+.titre-defense{padding:14px 20px 6px;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--sourd);border-bottom:1px solid var(--regle)}
+details.bloc>summary{list-style:none;cursor:pointer;display:flex;align-items:center;-webkit-user-select:none;user-select:none}
+details.bloc>summary::-webkit-details-marker{display:none}
+details.bloc>summary h2{flex:1;min-width:0;padding-bottom:13px}
+details.bloc>summary::after{content:'+';color:var(--sourd);font-size:18px;line-height:1;padding:0 20px}
+details.bloc[open]>summary::after{content:'\2212'}
+details.bloc[open]>summary h2{color:var(--texte)}
+.corps{padding:0 20px 14px}
+.corps p{margin-bottom:6px}
+.accueil-actions{margin-top:8px}
+details.trace{margin-top:5px;font-size:12px;color:var(--sourd);max-width:62ch}
+details.trace>summary{list-style:none;cursor:pointer;display:inline-block;padding:4px 0;text-decoration:underline;text-underline-offset:3px}
+details.trace>summary::-webkit-details-marker{display:none}
+details.trace>summary::before{content:'+ '}
+details.trace[open]>summary::before{content:'\2212  '}
+details.trace .trace-texte{margin-top:4px;padding:8px 10px;background:var(--ardoise);border:1px solid var(--regle);border-radius:6px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--texte)}
+body.perso .demo-seul{display:none!important}
+/* [v4.8] point du jour : repliable, ferme il le reste (ce navigateur) */
+details.point-du-jour{background:var(--ardoise);border:1px solid var(--regle);border-radius:7px;padding:0 13px}
+details.point-du-jour>summary{list-style:none;cursor:pointer;padding:10px 0;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap}
+details.point-du-jour>summary::-webkit-details-marker{display:none}
+details.point-du-jour>summary::after{content:'+';margin-left:auto;color:var(--sourd);font-size:17px;line-height:1}
+details.point-du-jour[open]>summary::after{content:'\2212'}
+.pdj-titre{font-weight:600;color:var(--lumiere);font-size:14px}
+.pdj-resume{color:var(--sourd);font-size:12.5px}
+.pdj-corps{padding:0 0 11px}
+.pdj-jour{margin-top:8px}
+.pdj-jour b{font-size:13px;font-weight:600;color:var(--texte)}
+.pdj-jour ul{list-style:none;margin:4px 0 0}
+.pdj-jour li{font-size:14px;padding:2px 0;overflow-wrap:anywhere}
+.pdj-jour li .mono{color:var(--signal);margin-right:6px}
+.pdj-src{font-size:10.5px;color:var(--sourd);border:1px solid var(--regle);border-radius:4px;padding:0 4px;margin-left:5px}
+.pdj-vide{font-size:13px;color:var(--sourd);margin-top:2px}
+.pdj-note{font-size:11.5px;color:var(--sourd);margin-top:9px}
+@media(max-width:900px){
+  .corps,.titre-defense,.entete-detail .mesures,.marque-detail{padding-left:16px;padding-right:16px}
+  details.bloc>summary::after{padding:0 16px}
+}
 </style>
 </head>
 <body>
 
 <header>
   <div class="bandeau">
-    <div class="marque">JARVIS <span>noyau 5.28.3 · couche 5.30.1</span></div>
+    <div class="marque">JARVIS</div>
+    <button class="pastille" id="pastille" type="button" aria-expanded="false" aria-controls="enteteDetail"
+      aria-label="Plancher de confiance : toucher pour le détail"><i class="point b3" id="pPoint"></i><span class="plancher-val n3" id="pVal">intention directe</span></button>
+  </div>
+  <div class="entete-detail" id="enteteDetail" hidden>
+    <p class="accroche">La couche de sécurité d'un assistant personnel : avant chaque action, elle vérifie d'où vient l'intention.</p>
+    <div class="plancher">
+      <div class="plancher-tete"><h1>Plancher de confiance de la session</h1></div>
+      <div class="jauge"><i class="b3" id="pBar"></i></div>
+      <div class="origine" id="pOrigine">Rien d'externe n'a encore été lu.</div>
+    </div>
     <div class="mesures">
       <div class="mesure">autorité dépensée <b id="mLedger" class="mono">0 / 100</b></div>
       <div class="mesure">chaîne d'audit <b id="mAudit" class="mono">—</b></div>
       <div class="mesure">ancres publiées <b id="mAncres" class="mono">0</b></div>
       <div class="mesure">contexte déclaré <b id="mCouv" class="mono">—</b></div>
     </div>
-  </div>
-  <p class="accroche">La couche de sécurité d'un assistant personnel : avant chaque action, elle vérifie d'où vient l'intention.</p>
-  <div class="plancher">
-    <div class="plancher-tete">
-      <h1>Plancher de confiance de la session</h1>
-      <div class="plancher-val n3" id="pVal">intention directe</div>
-    </div>
-    <div class="jauge"><i class="b3" id="pBar"></i></div>
-    <div class="origine" id="pOrigine">Rien d'externe n'a encore été lu.</div>
-    <button class="primaire" id="jtLancer" type="button">Voir une attaque être bloquée</button>
+    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.2 · passerelle v4.7</div>
   </div>
 </header>
 
@@ -285,16 +353,17 @@ textarea,input:not([type]),input[type=text]{-webkit-appearance:none;appearance:n
   <!-- ─────────── conversation ─────────── -->
   <section class="colonne">
     <div id="fil">
-      <div class="tour">
+      <div class="tour" id="accueil">
         <div class="qui">JARVIS</div>
         <div class="quoi">Parle-moi normalement. Je décide de ce que je veux faire, et le noyau arbitre avant que ça arrive.
 
 Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-moi de transférer les factures.</div>
+        <div class="accueil-actions demo-seul"><button class="primaire" id="jtLancer" type="button">Voir une attaque être bloquée</button></div>
       </div>
     </div>
     <div class="saisie">
       <div class="rang">
-        <textarea id="msg" rows="1" placeholder="Pose ta question, ou « retiens que … »"></textarea>
+        <textarea id="msg" rows="1" placeholder="Écris à JARVIS…"></textarea>
         <button id="micro" type="button" hidden aria-label="Dicter (toucher pour parler, toucher pour arrêter)">🎤</button>
         <button class="primaire" id="envoyer">Envoyer</button>
       </div>
@@ -314,14 +383,16 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
   </section>
 
   <!-- ─────────── instrumentation ─────────── -->
-  <section class="colonne">
-    <div class="bloc" id="blocMemoire">
-      <h2>Ce que JARVIS retient de toi <span class="mono" id="nbSouvenirs"></span></h2>
+  <section class="colonne" id="defense">
+    <div class="titre-defense">Défense, réglages et preuves</div>
+    <details class="bloc" id="blocMemoire">
+      <summary><h2>Ce que JARVIS retient de toi <span class="mono" id="nbSouvenirs"></span></h2></summary>
       <div class="registre" id="souvenirs"></div>
       <div class="actions-lecture"><button class="danger" id="toutOublier" hidden>tout effacer</button></div>
-    </div>
-    <div class="bloc" id="blocFaceId" hidden>
-      <h2>Face ID <span class="mono" id="etatFaceId"></span></h2>
+    </details>
+    <details class="bloc" id="blocFaceId" hidden>
+      <summary><h2>Face ID <span class="mono" id="etatFaceId"></span></h2></summary>
+      <div class="corps">
       <p>Chaque action irréversible se confirme avec Face ID (ou le code de secours) : une fois par action, jamais pour la suivante. Face ID prouve que c'est toi ; il ne remplace jamais la vérification de ce que tu as demandé.</p>
       <div class="rang"><button id="fidPreparer" type="button">Enregistrer Face ID sur cet appareil</button>
         <button id="fidCreer" class="primaire" type="button" hidden>Créer la clé Face ID</button></div>
@@ -329,56 +400,61 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
       <div id="fidResultat" hidden><p>Copie cette valeur dans Render → variable <b>JARVIS_PASSKEYS</b> (après une virgule s'il y en a déjà une), puis redémarre le service. C'est une clé publique : elle ne permet rien seule.</p>
         <textarea id="fidValeur" rows="3" readonly></textarea>
         <div class="rang"><button id="fidCopier" type="button">Copier</button></div></div>
-    </div>
+      </div>
+    </details>
 
-    <div class="bloc" id="blocGoogle" hidden>
-      <h2>Agenda JARVIS (Google) <span class="mono" id="etatGoogle"></span></h2>
-      <p>Vérifie la clé Google, l'agenda JARVIS et le droit d'y écrire. Rien n'est créé pendant la vérification.</p>
-      <div class="rang"><button id="googleVerifier" type="button">Vérifier la connexion Google</button></div>
+    <details class="bloc" id="blocGoogle" hidden>
+      <summary><h2>Agenda JARVIS (Google) <span class="mono" id="etatGoogle"></span></h2></summary>
+      <div class="corps">
+      <p><b>Vérifier</b> lit la clé Google, l'agenda JARVIS et le droit d'y écrire : rien n'est créé.
+        <b>Tester l'écriture</b> crée un événement de test (demain, 04:00), le supprime aussitôt et vérifie qu'il a disparu.</p>
+      <div class="rang"><button id="googleVerifier" type="button">Vérifier la connexion Google</button>
+        <button id="googleTester" type="button">Tester l'écriture</button></div>
       <p id="googleMessage"></p>
       <div id="googleEtapes"></div>
-    </div>
+      </div>
+    </details>
 
-    <div class="bloc">
-      <h2>Ce que l'agent a lu</h2>
+    <details class="bloc" id="blocLu">
+      <summary><h2>Ce que l'agent a lu</h2></summary>
       <div class="actions-lecture">
         <button data-lire="email">un e-mail piégé</button>
         <button data-lire="web">une page web</button>
         <button data-lire="outil">la sortie d'un outil</button>
         <button id="reset">nouvelle session</button>
       </div>
-    </div>
+    </details>
 
-    <div class="bloc">
-      <h2>Les six mitigations, exécutées</h2>
+    <details class="bloc" id="blocMitigations">
+      <summary><h2>Les six mitigations, exécutées</h2></summary>
       <div class="actions-lecture"><button id="lancerM">Lancer M1 à M6</button></div>
       <div class="registre" id="mitigations">
         <div class="vide">Chaque mitigation lance son exploit réel contre une instance vivante.</div>
       </div>
-    </div>
+    </details>
 
-    <div class="bloc">
-      <h2>Autres attaques contre le noyau vivant</h2>
+    <details class="bloc" id="blocAttaques">
+      <summary><h2>Autres attaques contre le noyau vivant</h2></summary>
       <div class="actions-lecture">
         <button id="toutAttaquer">Lancer les 8</button>
       </div>
       <div class="registre" id="attaques"><div class="vide">Aucune attaque lancée.</div></div>
-    </div>
+    </details>
 
-    <div class="bloc">
-      <h2>Journal d'audit</h2>
+    <details class="bloc" id="blocJournal">
+      <summary><h2>Journal d'audit</h2></summary>
       <div class="actions-lecture">
         <button id="verifier">Vérifier l'intégrité</button>
         <button id="rayon">Rayon d'impact</button>
       </div>
       <div class="chaine" id="chaine"><div class="vide">La chaîne se construira ici.</div></div>
-    </div>
+    </details>
 
-    <div class="bloc">
-      <h2>Banc de tests du noyau</h2>
+    <details class="bloc" id="blocTests">
+      <summary><h2>Banc de tests du noyau</h2></summary>
       <div class="actions-lecture"><button id="tests">Lancer les 16 suites</button></div>
       <div class="registre" id="resTests"><div class="vide">Aucun test lancé.</div></div>
-    </div>
+    </details>
   </section>
 </main>
 
@@ -407,6 +483,38 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
   const maj = () => document.documentElement.style.setProperty('--haut-entete', h.offsetHeight + 'px');
   maj(); if ('ResizeObserver' in window) new ResizeObserver(maj).observe(h); else addEventListener('resize', maj);
 })();
+/* [v4.7] la pastille ouvre / ferme le detail du plancher */
+document.getElementById('pastille').addEventListener('click', () => {
+  const d = document.getElementById('enteteDetail');
+  d.hidden = !d.hidden;
+  document.getElementById('pastille').setAttribute('aria-expanded', String(!d.hidden));
+});
+/* [v4.7] blocs replies par defaut ; ceux que tu ouvres restent ouverts (ce
+ * navigateur seulement ; sans stockage, tout reste simplement replie) */
+(function () {
+  const NOM = 'jarvis_ouverts';
+  let ouverts = [];
+  try { ouverts = JSON.parse(localStorage.getItem(NOM) || '[]'); } catch (e) { ouverts = []; }
+  if (!Array.isArray(ouverts)) ouverts = [];
+  const blocs = [...document.querySelectorAll('details.bloc[id]')];
+  for (const b of blocs) {
+    if (ouverts.includes(b.id)) b.open = true;
+    b.addEventListener('toggle', () => {
+      try { localStorage.setItem(NOM, JSON.stringify(blocs.filter(x => x.open).map(x => x.id))); } catch (e) {}
+    });
+  }
+})();
+/* [v4.7] montrer un element range dans un bloc replie ou dans le detail de
+ * l'en-tete (parcours guide, resultats) */
+function devoiler(el) {
+  for (let x = el; x; x = x.parentElement) {
+    if (x.tagName === 'DETAILS' && !x.open) x.open = true;
+    if (x.id === 'enteteDetail' && x.hidden) {
+      x.hidden = false;
+      const p = document.getElementById('pastille'); if (p) p.setAttribute('aria-expanded', 'true');
+    }
+  }
+}
 const API = location.origin;
 /* L'identifiant de session est emis par le serveur, plus invente par le navigateur. */
 let sid = null, sessionEnCours = null;
@@ -518,6 +626,7 @@ function majEtat(d) {
     v.className = 'plancher-val n' + p.n;
     b.style.width = (p.n / 3 * 100) + '%';
     b.className = 'b' + p.n;
+    if ($('pPoint')) $('pPoint').className = 'point b' + p.n;   /* [v4.7] */
     const inf = d.influences || [];
     $('pOrigine').textContent = inf.length
       ? p.aide + ' Origine : ' + inf.map(i => i.source).join(', ')
@@ -601,6 +710,9 @@ function md(texte) {
 /* [S29] La trace en une ligne, construite depuis les etats (jamais depuis le
  * texte du modele), affichee en texte echappe. */
 const CLASSES = { IRREVERSIBLE: 'irréversible', REVERSIBLE: 'réversible', COMPENSABLE: 'compensable' };   /* [S42] */
+/* [v4.7] vu en ligne : la trace finissait en anglais (« → executed. ») */
+const ETATS_FR = { PROPOSED: 'proposé', PENDING: 'en attente', EXECUTED: 'exécuté', COMPENSATING: 'annulation en cours',
+  COMPENSATED: 'annulé', FAILED: 'échoué', CANCELLED: 'abandonné', EXPIRED: 'expiré', REVOKED: 'révoqué' };
 function resumeTrace(t) {
   const i = t.intention || {}, c = t.confirmation || {}, e = t.effet || {};
   const source = i.nature === 'FRAPPE' ? 'ta frappe « ' + i.frappe + ' »'
@@ -616,7 +728,21 @@ function resumeTrace(t) {
     + (c.mode === 'CLIC_APRES_FENETRE' ? ' → retenu 10 s → confirmé par ton clic' + elev : c.mode === 'SANS_FENETRE' ? ' → exécuté sans fenêtre' : '')
     + (e.reel ? (e.reel.ok ? ' → effet réel confirmé' : ' → effet réel ÉCHOUÉ (' + e.reel.code + ')') : '')
     + (e.compense ? ' → annulé (disparition vérifiée)' : '')
-    + ' → ' + String(e.etat || '').toLowerCase() + '.';
+    + (e.compense && e.etat === 'COMPENSATED' ? '.' : ' → ' + (ETATS_FR[e.etat] || String(e.etat || '').toLowerCase()) + '.');
+}
+/* [v4.7] la trace ne prend plus une bulle : repliee sous la derniere carte
+ * de JARVIS (« + détail »), toujours construite depuis les etats. */
+function ajouterTrace(t) {
+  const tours = document.querySelectorAll('#fil .tour:not(.moi)');
+  const sous = tours[tours.length - 1] || tour('JARVIS', '', false);
+  const d = document.createElement('details');
+  d.className = 'trace';
+  d.innerHTML = '<summary>détail</summary><div class="trace-texte">' + esc(resumeTrace(t)) + '</div>';
+  /* ouverte, la trace se montre (sinon elle restait cachee sous la saisie) */
+  d.addEventListener('toggle', () => { if (d.open && typeof d.scrollIntoView === 'function') d.scrollIntoView({ block: 'nearest' }); });
+  sous.appendChild(d);
+  $('fil').scrollTop = $('fil').scrollHeight;
+  return d;
 }
 /* [S42] Vu en ligne le 25 sept : une action relancee par TA cible retapee
  * s'affichait « Claude veut envoyer ». La carte dit qui lance l'action. */
@@ -651,9 +777,10 @@ function rendreDecision(d) {
   if (Array.isArray(d.aSupprimer) && d.aSupprimer.length) {
     if (d.reponse) tour('JARVIS', d.reponse, false);
     for (const e of d.aSupprimer) {
-      const hS = '<div class="decision attente creation"><div class="plan">Créé par JARVIS dans cette session</div>'
+      const hS = '<div class="decision attente creation"><div class="plan">' + (e.serie ? 'Série créée' : 'Créé') + ' par JARVIS dans cette session</div>'
         + '<div class="evenement">' + esc(e.lisible) + '</div>'
-        + '<div class="rang"><button class="danger" data-compenser="' + esc(e.transactionId) + '">Supprimer</button></div></div>';
+        + '<div class="rang"><button class="danger" data-compenser="' + esc(e.transactionId) + '"' + (e.serie ? ' data-serie="1"' : '') + '>'
+        + (e.serie ? 'Supprimer la série' : 'Supprimer') + '</button></div></div>';   /* [v4.8] */
       tour('JARVIS', '', false).querySelector('.quoi').outerHTML = hS;
     }
     $('fil').scrollTop = $('fil').scrollHeight;
@@ -671,13 +798,13 @@ function rendreDecision(d) {
    * ecrit avant le toucher sur « Creer ». */
   if (d.decide === 'CONFIRMATION_REQUISE' && d.aConfirmer) {
     const a = d.aConfirmer;
-    const hC = '<div class="decision attente creation"><div class="plan">Créer dans ton agenda JARVIS</div>'
+    const hC = '<div class="decision attente creation"><div class="plan">' + (a.serie ? 'Créer une série dans ton agenda JARVIS' : 'Créer dans ton agenda JARVIS') + '</div>'
       + '<div class="evenement">' + esc(a.lisible) + '</div>'
       + '<div class="verdict"><b>À confirmer</b><span class="code">annulable ensuite</span></div>'
       + "<div class=\"signaux\"><div class=\"signal info\"><i>info</i><span>Jour et heure lus dans tes mots par le serveur. Aucun invité, aucune notification. Vérifie la date et l'heure : rien n'est écrit avant ton toucher.</span></div>"
       + (a.avertissements || []).map(x => '<div class="signal fort"><i>à vérifier</i><span>' + esc(x) + '</span></div>').join('') + '</div>'   /* [S55] */
       + '<div class="rang"><button class="danger" data-ignorer="1">Ne pas créer</button>'
-      + '<button class="primaire" data-creer="' + esc(a.cible) + '">Créer</button></div></div>';
+      + '<button class="primaire" data-creer="' + esc(a.cible) + '">' + (a.serie ? 'Créer les ' + esc(String(a.serie)) + ' séances' : 'Créer') + '</button></div></div>';   /* [v4.8] */
     const bC = tour('JARVIS', '', false);
     bC.querySelector('.quoi').outerHTML = hC;
     $('fil').scrollTop = $('fil').scrollHeight;
@@ -685,14 +812,16 @@ function rendreDecision(d) {
   }
   if (d.outil === 'agenda-jarvis') {
     if (d.decide === 'AUTORISE' && d.etape === 'COMPLET' && d.evenement) {
-      const hE = '<div class="decision autorise creation"><div class="plan">Créé dans ton agenda JARVIS</div>'
+      const sE = !!d.evenement.serie;   /* [v4.8] */
+      const hE = '<div class="decision autorise creation"><div class="plan">' + (sE ? 'Série créée' : 'Créé') + ' dans ton agenda JARVIS</div>'
         + '<div class="evenement">' + esc(d.evenement.lisible) + '</div>'
         + '<div class="verdict"><b>Fait</b><span class="code">confirmé par Google</span></div>'
-        + '<div class="rang"><button class="danger" data-compenser="' + esc(d.evenement.transactionId) + '">Supprimer</button></div></div>';
+        + '<div class="rang"><button class="danger" data-compenser="' + esc(d.evenement.transactionId) + '"' + (sE ? ' data-serie="1"' : '') + '>'
+        + (sE ? 'Supprimer la série' : 'Supprimer') + '</button></div></div>';
       const bE = tour('JARVIS', '', false);
       bE.querySelector('.quoi').outerHTML = hE;
     } else if (d.reponse) tour('JARVIS', d.reponse, false);
-    if (d.trace) tour('JARVIS', resumeTrace(d.trace), false);
+    if (d.trace) ajouterTrace(d.trace);
     $('fil').scrollTop = $('fil').scrollHeight;
     return;
   }
@@ -901,7 +1030,7 @@ async function finaliserJeton(jeton) {
   if (r.etat === 'EXECUTE') {
     clore(jeton, 'Envoyé.');
     tour('JARVIS', 'Envoyé.', false);
-    if (r.trace) tour('JARVIS', resumeTrace(r.trace), false);   /* [S29] */
+    if (r.trace) ajouterTrace(r.trace);   /* [S29] [v4.7] */
     if (r.reponse) tour('Claude', r.reponse, false);
     return;
   }
@@ -1047,7 +1176,7 @@ async function envoyer() {
   $('envoyer').disabled = true;
   perimerTout();   /* [S40] le serveur fait de meme a la reception du message */
   tour('Toi', (voix ? '🎤 ' : '') + m, true);
-  $('msg').value = '';
+  $('msg').value = ''; $('msg').style.height = '';   /* [v4.7] le champ reprend sa hauteur */
   try {
     const corps = { message:m, souvenirs: Memoire.liste() };
     if (voix) corps.canal = 'voix';
@@ -1175,8 +1304,8 @@ document.addEventListener('click', async (ev) => {
     majEtat(r);
     tour('JARVIS', r.message || (r.erreur === 'CREATION_INTROUVABLE' ? 'Cet événement vient d\'une session terminée : supprime-le dans Google Agenda.'
       : r.etat === 'REFUSE' ? 'Déjà annulé, ou rien à annuler (' + (r.motif || '') + ').' : 'Suppression impossible.'), false);
-    if (r.trace) tour('JARVIS', resumeTrace(r.trace), false);
-    if (r.etat === 'COMPENSE' || r.etat === 'REFUSE') t.textContent = r.etat === 'COMPENSE' ? 'Supprimé' : 'Supprimer';
+    if (r.trace) ajouterTrace(r.trace);
+    if (r.etat === 'COMPENSE' || r.etat === 'REFUSE') t.textContent = r.etat === 'COMPENSE' ? (t.dataset.serie ? 'Série supprimée' : 'Supprimé') : (t.dataset.serie ? 'Supprimer la série' : 'Supprimer');
     else { t.disabled = false; t.textContent = 'Réessayer la suppression'; }
   }
   /* [S31] Face ID : navigator.credentials.get est appele SANS attente avant,
@@ -1211,6 +1340,22 @@ document.addEventListener('click', async (ev) => {
     let r = null; try { r = await api('/api/ecriture/diagnostic'); } catch (e) { r = null; }
     if (!limiteAtteinte(r || {})) afficherDiagnostic(r);
     t.disabled = false;
+  }
+  /* [v4.7] la vraie preuve : creer puis supprimer un evenement de test,
+   * gouverne comme une creation (permis, effet constate, disparition verifiee) */
+  if (t.id === 'googleTester') {
+    t.disabled = true; $('googleVerifier').disabled = true;
+    $('googleMessage').textContent = 'Test en cours : création puis suppression…'; $('googleEtapes').innerHTML = '';
+    let r = null; try { r = await api('/api/ecriture/test', {}); } catch (e) { r = null; }
+    if (!limiteAtteinte(r || {})) {
+      $('googleMessage').textContent = (r && r.message) || 'Pas de réponse du serveur : rien de vérifié.';
+      if (r) {
+        majEtat(r);
+        $('etatGoogle').textContent = r.ok ? 'écriture prouvée' : 'à régler';
+        if (r.trace) $('googleEtapes').innerHTML = '<div class="mono">' + esc(resumeTrace(r.trace)) + '</div>';
+      }
+    }
+    t.disabled = false; $('googleVerifier').disabled = false;
   }
   if (t.id === 'micro') Voix.basculer();
   if (t.id === 'fidPreparer') await FaceId.preparerEnregistrement();
@@ -1315,6 +1460,13 @@ $('envoyer').addEventListener('click', envoyer);
 Voix.init();   /* [S32] micro visible seulement si le navigateur sait dicter */
 /* [S48] bloc Agenda JARVIS : seulement si des variables Google sont posées */
 const ETAPES_GOOGLE = { CLE: 'Clé du compte de service', AGENDA: 'Agenda JARVIS', ECRITURE: "Droit d'écriture" };
+/* [v4.7] ton instance (agenda Google relie) : l'accueil parle de ton usage,
+ * plus de la demo ; le parcours guide reste sur la demo publique */
+function accueilPerso() {
+  document.body.classList.add('perso');
+  const q = $('accueil') && $('accueil').querySelector('.quoi');
+  if (q) q.textContent = "Parle-moi normalement : une question, ou ton agenda (« qu'ai-je demain ? », « ajoute hand mercredi à 18h »). Rien n'est écrit sans ton toucher.";
+}
 function afficherDiagnostic(r) {
   $('googleMessage').textContent = (r && r.message) || 'Pas de réponse du serveur.';
   /* [S52] la valeur BRUTE renvoyee par Google, et « ? » quand elle ne prouve rien */
@@ -1327,8 +1479,44 @@ function afficherDiagnostic(r) {
   try {
     const g = await api('/api/ecriture');
     if (g && g.configuree) { $('blocGoogle').hidden = false; $('etatGoogle').textContent = g.actif ? 'relié' : 'variable à corriger';
+      accueilPerso();
       if (g.message) $('googleMessage').textContent = g.message; }
   } catch (x) { /* instance publique ou hors ligne */ }
+})();
+
+/* [v4.8] POINT DU JOUR : aujourd'hui et demain, lus a l'ouverture par le
+ * serveur (lecture gouvernee, sans IA). Affiche en tete du fil, repliable ;
+ * ferme, il reste ferme aux ouvertures suivantes (ce navigateur) et son
+ * resume (« aujourd'hui : 2 evenements ») reste visible. Titres echappes :
+ * un titre d'invitation est un contenu externe. */
+const POINT_FERME = 'jarvis_point_ferme';
+function afficherPointDuJour(r) {
+  if (!r || !r.actif || $('pointDuJour')) return;
+  let ferme = false; try { ferme = localStorage.getItem(POINT_FERME) === '1'; } catch (e) { ferme = false; }
+  const d = document.createElement('details');
+  d.className = 'point-du-jour'; d.id = 'pointDuJour';
+  let h = '<summary><span class="pdj-titre">Point du jour</span> <span class="pdj-resume">' + esc(r.ok ? r.resume : 'indisponible') + '</span></summary><div class="pdj-corps">';
+  if (!r.ok) h += '<p class="pdj-vide">' + esc(r.message || 'Lecture impossible.') + '</p>';
+  else for (const j of (r.jours || [])) {
+    h += '<div class="pdj-jour"><b>' + esc(j.libelle) + '</b>' + ((j.evenements || []).length
+      ? '<ul>' + j.evenements.map(e => '<li><span class="mono">' + esc(e.heure) + '</span>' + esc(e.titre)
+          + (/JARVIS/.test(e.agenda || '') ? '<span class="pdj-src">JARVIS</span>' : '') + '</li>').join('') + '</ul>'
+      : '<p class="pdj-vide">Rien.</p>') + '</div>';
+  }
+  if (r.ok && (r.nonLus || []).length) h += '<p class="pdj-note">Non lu : ' + esc(r.nonLus.map(x => x.raison).join(' ; ')) + '</p>';
+  if (r.ok && r.tronque) h += '<p class="pdj-note">Liste incomplète.</p>';
+  h += "<p class=\"pdj-note\">Lu à l'ouverture, en lecture seule ; rien n'est transmis à l'IA.</p></div>";
+  d.innerHTML = h;
+  d.open = !ferme;
+  d.addEventListener('toggle', () => { try { localStorage.setItem(POINT_FERME, d.open ? '0' : '1'); } catch (e) {} });
+  const t = document.createElement('div');
+  t.className = 'tour'; t.innerHTML = '<div class="qui">JARVIS</div>';
+  t.appendChild(d);
+  const acc = $('accueil');
+  if (acc && acc.parentNode === $('fil')) acc.insertAdjacentElement('afterend', t); else $('fil').appendChild(t);
+}
+(async () => {
+  try { afficherPointDuJour(await api('/api/point-du-jour')); } catch (x) { /* instance publique ou hors ligne : rien */ }
 })();
 
 /* [S31] bloc Face ID : seulement sur une instance ou l'elevation existe */
@@ -1433,6 +1621,7 @@ api('/api/integrite').then(r => majEtat({ integrite: r })).catch(() => {});   /*
     const el = document.querySelector(sel);
     if (!el) return;
     cible = el;
+    if (typeof devoiler === 'function') devoiler(el);   /* [v4.7] blocs replies */
     el.classList.add('jt-vise');
     const doux = matchMedia('(prefers-reduced-motion: reduce)').matches;
     el.scrollIntoView({ behavior: doux ? 'auto' : 'smooth', block: 'center' });
@@ -1467,6 +1656,7 @@ api('/api/integrite').then(r => majEtat({ integrite: r })).catch(() => {});   /*
     if (e.clic) {
       const b = document.querySelector(e.clic);
       if (b) {
+        if (typeof devoiler === 'function') devoiler(b);   /* [v4.7] */
         bSuiv.disabled = true;
         const lent = setTimeout(() => { qX.textContent = TEXTE_REVEIL; bSuiv.textContent = 'Patiente…'; }, 3000);
         b.click();

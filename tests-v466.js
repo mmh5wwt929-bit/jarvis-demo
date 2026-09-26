@@ -154,7 +154,7 @@ https.request = (url, opts, cb) => {
        info: dg.status + ' ' + (dg.message || dg.erreur || dg.brut || '').slice(0, 60) }));
   await t('S2', "garde : sans la clé d'accès, le diagnostic est refusé (401)", async () => ({ ok: sansCle.status === 401, info: String(sansCle.status) }));
   await t('S3', "garde : /api/health (avec la clé) → écriture « actif », passerelle v4.6.x", async () =>
-    ({ ok: bon.sante && bon.sante.ecriture === 'actif' && /^v4\.6\.\d+$/.test(bon.sante.passerelle), info: bon.sante && (bon.sante.passerelle + ' ecriture ' + bon.sante.ecriture) }));
+    ({ ok: bon.sante && bon.sante.ecriture === 'actif' && /^v4\.[6-9]\.\d+$/.test(bon.sante.passerelle), info: bon.sante && (bon.sante.passerelle + ' ecriture ' + bon.sante.ecriture) }));
   bon.arreter();
 
   const mal = await lancer({ JARVIS_CLE_ACCES: CLE, JARVIS_GOOGLE_COMPTE: '{"type": "service_account", "client_email": "x@y", "private_key": "-----BEGIN PRIVATE', JARVIS_AGENDA_JARVIS: AGENDA_ID });

@@ -26,7 +26,7 @@ https.request = (o, cb) => {
       ? '{"action":"SEND","resource":"EMAIL","target":"marc@exemple.fr"}' : 'ok' }] })); r.emit('end'); };
   q.setTimeout = () => q; q.destroy = () => {}; return q;
 };
-Object.assign(process.env, { ANTHROPIC_API_KEY: 'test', PORT: '3971' });
+Object.assign(process.env, { ANTHROPIC_API_KEY: 'test', PORT: '3971', JARVIS_SANTE_PUBLIQUE: 'detail' /* [v4.8] */ });
 const log = console.log; console.log = () => {};
 require(path.join(DIR, 'server.js'));
 const B = 'http://localhost:3971';
@@ -45,7 +45,7 @@ const existe = async (sid, ip) => (await post('/api/annuler', { sessionId: sid, 
 function serveurAvec(env, port) {
   return new Promise((ok) => {
     const p = spawn(process.execPath, ['-e', `process.env.PORT='${port}';console.log=()=>{};require(${JSON.stringify(path.join(DIR, 'server.js'))})`],
-      { env: { ...process.env, ANTHROPIC_API_KEY: 'test', ...env }, stdio: 'ignore' });
+      { env: { ...process.env, ANTHROPIC_API_KEY: 'test', JARVIS_SANTE_PUBLIQUE: 'detail' /* [v4.8] */, ...env }, stdio: 'ignore' });
     setTimeout(() => ok(p), 900);
   });
 }

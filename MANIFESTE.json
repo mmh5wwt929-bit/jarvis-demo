@@ -1,19 +1,20 @@
 {
   "format": 1,
-  "passerelle": "v4.6.7",
-  "empreinte": "e4cc9c2b8460",
+  "passerelle": "v4.8.0",
+  "empreinte": "2a7b9429fc83",
   "fichiers": {
-    "server.js": "22fd3cb3bfccdd020ecc3f0568f4bcdc57c05e2c5bddb7fceb002eef31c745a2",
-    "index.html": "e2b89485a3ea202023ff1905d6250af0d465c9039e612835d8b9772f5bb5e9b3",
+    "server.js": "26ff1985c3cafac9a93fec8e66c9610132fc7ca78962883d9e40d8d7de42a0d5",
+    "index.html": "4e981b02770534f7454dff57301b14dc0ae7acf556f90aa2c333aadcb5d2a35e",
     "package.json": "570aeab2c5dd22edfcaab8f1c8e97c273d60a3d813fd5cc9c2d8adc35964845d",
     "jarvis-5.28.3.js": "0eb75bec3cdfab34fbc44f7c0360f6c2357451489702fc14c347890b35c58350",
     "jarvis-plus-5.29.js": "4ed8a502ba6afc05f15077892b624530f56faa4fbfd46d661a84aaee81661959",
     "jarvis-vigilance.js": "e03e944f0ab0f1791e1e04a1f1b69605d513ecbf19f098153b6981b7029c7536",
     "jarvis-memoire.js": "03aa5392110721528fa082ece86a0612d1f45ba19c1930af78c061627c1f8e88",
     "jarvis-agenda.js": "93e48c4efe19779e56fbdd2bff15068852985bd9c501966b3f1c48162d6d4d85",
-    "jarvis-ecriture.js": "4792fc4af9b99874e94829373c1d099cab9e7349a89d301b10bce4e1dadd3bbe",
+    "jarvis-ecriture.js": "9cc1591623ba92c96e0d7c0a0c9e70a239bb852780c4d3b51781665cde296406",
     "jarvis-elevation.js": "75a3a05bee0071f7a6df73727acc98f3bd3b506eca1a8d598207ac2350637f94",
-    "jarvis-manifeste.js": "56279784a2f8d4cf2b28a39472e15ccb7bdeb72da7960624b22bd8e124c33e39",
-    "jarvis-verite.js": "4c12688856043fda3c25e101a772d825011a421dc8ccea5f9bc461eb6bd27b99"
+    "jarvis-manifeste.js": "f2ce32d8d5adf0605a37f8be1850fb51aed1d10e3964f238eece5c41c8b4bddf",
+    "jarvis-verite.js": "e83e3287560ce84c0d3289333a49a882f51398ec4be358bae2febb5b43217481",
+    "jarvis-appli.js": "18718984c02930bc6b328e2b8f2ea86b0b9f4166f6af373d8b67fb822679bd59"
   }
 }

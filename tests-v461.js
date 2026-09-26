@@ -87,7 +87,7 @@ let port = BASE + 10;
 const lancer = async (dir, env = {}) => {
   const p = port++;
   const enfant = spawn(process.execPath, ['server.js'], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { PATH: process.env.PATH, ANTHROPIC_API_KEY: 'test', PORT: String(p), ...env } });
+    env: { PATH: process.env.PATH, ANTHROPIC_API_KEY: 'test', PORT: String(p), JARVIS_SANTE_PUBLIQUE: 'detail' /* [v4.8] */, ...env } });
   let sortie = ''; enfant.stdout.on('data', (d) => { sortie += d; }); enfant.stderr.on('data', (d) => { sortie += d; });
   let sante = null;
   for (let i = 0; i < 150 && !sante && enfant.exitCode === null; i++) {
@@ -99,7 +99,7 @@ const lancer = async (dir, env = {}) => {
 const santeDe = async (dir, env) => { const s = await lancer(dir, env); s.arreter(); return s.sante; };
 const ESSENTIELS = ['server.js', 'index.html', 'package.json', 'MANIFESTE.json', 'jarvis-5.28.3.js', 'jarvis-plus-5.29.js',
   'jarvis-vigilance.js', 'jarvis-memoire.js', 'jarvis-agenda.js', 'jarvis-ecriture.js', 'jarvis-elevation.js', 'jarvis-manifeste.js',
-  'jarvis-verite.js'];   /* v4.6.7 : le module verite */
+  'jarvis-verite.js', 'jarvis-appli.js'];   /* v4.6.7 : le module verite ; v4.7 : l'appli */
 const copie = () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-v461-'));
   for (const f of ESSENTIELS) if (fs.existsSync(path.join(DIR, f))) fs.copyFileSync(path.join(DIR, f), path.join(d, f));

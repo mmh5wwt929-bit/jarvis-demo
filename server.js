@@ -247,6 +247,35 @@
  *         heure » repondus sans modele.
  *   [S55] G creation : jour, heure et duree lus dans les mots tapes, jamais
  *         choisis par le modele ; heure absente -> « A quelle heure ? ».
+ *
+ * v4.7 — LA CONVERSATION D'ABORD (retours du 26 sept sur la v4.6.7) :
+ *   [S56] titre lu dans les mots tapes quand le modele n'en donne pas ; la
+ *         reponse « 18h » a « A quelle heure ? » garde le jour ; sans titre,
+ *         « Quel titre ? ».
+ *   [S57] suppression reconnue avec une faute ou une formulation libre (« supprime
+ *         le teste ») des qu'un evenement a ete cree dans la session ; « annule le
+ *         paiement » pendant une action retenue : le serveur dit ce qui est annule.
+ *   [S58] le modele n'imite plus le serveur : les messages du serveur lui sont
+ *         montres comme tels dans l'historique, et une phrase que seul le
+ *         serveur ecrit est retiree de sa reponse.
+ *   [S59] « Tester l'ecriture » : un evenement de test cree puis supprime, par
+ *         le circuit gouverne (geste, noyau, effet constate, disparition verifiee).
+ *   [S60] page : conversation plein ecran, sections de defense repliables,
+ *         trace repliee sous chaque carte et en francais, bouton « Tester
+ *         l'ecriture ».
+ *   [S61] appli sur l'ecran d'accueil : manifeste web et icones (dessinees par
+ *         jarvis-appli.js), routes publiques, CSP manifest-src ; sans service
+ *         worker ni cache hors ligne.
+ *
+ * v4.8 — SERIES, POINT DU JOUR, /health DISCRET (26 sept) :
+ *   [S62] /health d'une instance publique : statut, versions, empreinte ;
+ *         JARVIS_SANTE_PUBLIQUE=detail pour l'exploitant qui veut le detail.
+ *   [S63] H series chaque semaine : jour, heure, duree et FIN lus dans les
+ *         mots tapes par le serveur (sans modele) ; fin obligatoire, 12 mois
+ *         au plus ; une carte, UN evenement recurrent chez Google, « Supprimer
+ *         la serie » retire toutes les seances (disparition verifiee).
+ *   [S64] point du jour a l'ouverture : aujourd'hui et demain, ecrit par le
+ *         serveur, lecture gouvernee, sans modele ni effet sur le plancher.
  * ========================================================================== */
 
 const http = require('http');
@@ -266,6 +295,10 @@ const EC = require('./jarvis-ecriture.js');                 /* [S30] */
 const EL = require('./jarvis-elevation.js');                /* [S31] */
 const MF = require('./jarvis-manifeste.js');                /* [S34] */
 const V = require('./jarvis-verite.js');                    /* [S49]-[S55] */
+/* [S61] l'appli : un fichier absent ne doit jamais empecher JARVIS de demarrer
+ * (le manifeste d'integrite, lui, le signale) */
+let APPLI = null;
+try { APPLI = require('./jarvis-appli.js'); } catch { APPLI = null; }
 /* [S34] empreintes du code CHARGE : calculees une fois, jamais par requete.
  * Un manifeste absent ou illisible ne bloque pas le demarrage : /health le dit. */
 const MANIFESTE = (() => { try { return MF.verifier(__dirname); } catch { return null; } })();
@@ -276,6 +309,10 @@ const nombreEnv = (nom, defaut, min, max) => { const n = parseInt(process.env[no
 /* [S13] Acces protege. Ferme par defaut : une cle trop courte arrete tout,
  * plutot que de laisser croire a une instance protegee qui ne l'est pas. */
 const CLE_ACCES = process.env.JARVIS_CLE_ACCES || '';
+/* [S62] instance publique : /health reduit (statut, versions, empreinte).
+ * JARVIS_SANTE_PUBLIQUE=detail rend le detail a l'exploitant qui le veut
+ * (depannage, tests) ; sans effet sur une instance protegee (la cle suffit). */
+const SANTE_PUBLIQUE_DETAILLEE = String(process.env.JARVIS_SANTE_PUBLIQUE || '').trim().toLowerCase() === 'detail';
 if (CLE_ACCES && CLE_ACCES.length < 20) {
   console.error('ERREUR : JARVIS_CLE_ACCES doit faire au moins 20 caracteres (sinon, retire-la).');
   process.exit(1);
@@ -307,7 +344,7 @@ function cspPour(html) {
   const empreintes = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
     .map(m => "'sha256-" + crypto.createHash('sha256').update(m[1], 'utf8').digest('base64') + "'");
   return ["default-src 'none'", 'script-src ' + empreintes.join(' '), "style-src 'unsafe-inline'",
-    "img-src 'self' data:", "connect-src 'self'", "base-uri 'none'", "form-action 'none'",
+    "img-src 'self' data:", "connect-src 'self'", "manifest-src 'self'" /* [S61] */, "base-uri 'none'", "form-action 'none'",
     "frame-ancestors 'none'"].join('; ');
 }
 
@@ -701,11 +738,12 @@ function outilsPourPrompt() {
     return "Tu n'as encore aucun outil réel et pas d'accès à Internet : aucun e-mail ne part, aucun fichier n'existe, aucun paiement n'a lieu. Le noyau arbitre les actions pour de vrai, puis leur exécution est simulée. Si la personne pourrait croire qu'une action a réellement eu lieu, dis clairement qu'elle est simulée.";
   const outils = ["lire l'agenda de la personne" + (AGENDA && ECRITURE ? " (son agenda principal et l'agenda dédié « JARVIS »)" : ECRITURE ? " (l'agenda dédié « JARVIS »)" : '')
     + ', à sa demande, arbitré par le noyau'];
-  if (ECRITURE) outils.push("créer UN événement à la fois dans l'agenda dédié « JARVIS » : le serveur montre une carte avec le jour, l'heure et la durée lus dans les mots de la personne, rien n'est écrit avant son toucher sur « Créer », et elle l'annule avec le bouton « Supprimer » de cette carte");
+  if (ECRITURE) outils.push("créer UN événement, ou une série chaque semaine avec une date de fin (« tous les mercredis à 18h jusqu'au 19 décembre »), dans l'agenda dédié « JARVIS » : le serveur montre une carte avec ce qu'il a lu dans les mots de la personne, rien n'est écrit avant son toucher sur « Créer », et elle l'annule avec le bouton « Supprimer » de cette carte (« Supprimer la série » retire toutes les séances)");   /* [S63] */
   return 'TES OUTILS RÉELS, déclarés par le serveur (la seule vérité sur tes capacités) : ' + outils.join(' ; ') + '. '
-    + (ECRITURE ? "Pas encore possible : modifier un événement, supprimer un événement que JARVIS n'a pas créé dans cette session, créer une série (« tous les mercredis ») : c'est prévu dans une prochaine version. "
+    + (ECRITURE ? "Pas encore possible : modifier un événement, supprimer un événement que JARVIS n'a pas créé dans cette session, annuler une seule séance d'une série, une série sans date de fin ou autre que chaque semaine. "
       : "Créer, modifier ou supprimer un événement : pas sur cette instance. ")
     + "Ce n'est jamais toi qui lis, crées ou supprimes : c'est le serveur, et c'est lui qui annonce le résultat. N'écris donc jamais « c'est fait », « j'ai créé », « j'ai ajouté » ou « j'ai supprimé » : si la personne demande une de ces actions et que rien n'a été préparé, dis-le et propose la phrase à taper. "
+    + "Dans l'historique, « [Affiché par le serveur JARVIS…] » est un message du serveur : ne le recopie jamais, n'imite ni ses cartes ni ses boutons (« touche Supprimer », « confirmé par Google »…). "
     + "Pas d'accès à Internet. Tout le reste (e-mails, fichiers, paiements) est simulé : le noyau arbitre pour de vrai, puis l'exécution est simulée. Si la personne pourrait croire qu'une action a réellement eu lieu, dis clairement qu'elle est simulée.";
 }
 /* [S54] la date et l'heure du SERVEUR ; les dates tapees, resolues par lui */
@@ -852,12 +890,17 @@ function actionEcrite(texte) {
 }
 const TEXTE_SIMULATION = "En simulation : rien n'est réellement parti.";
 
-function memoriser(s, sessionId, question, reponse) {
+/* [S58] auteur : 'serveur' (defaut) ou 'modele'. Vu en ligne le 26 sept : le
+ * modele a recopie un message du serveur (« Rien n'est supprime avant ton
+ * toucher… » + l'evenement en gras, sans bouton). Un message ecrit par le
+ * serveur lui est desormais montre COMME TEL, resume, jamais comme sa parole. */
+function memoriser(s, sessionId, question, reponse, auteur = 'serveur') {
   if (!sessionId || sessionId === 'anon') return;
   const n = LIMITES.historiqueCaracteres;
   const q = String(question == null ? '' : question).trim().slice(0, n);
-  const r = String(reponse == null ? '' : reponse).trim().slice(0, n);
+  let r = String(reponse == null ? '' : reponse).trim().slice(0, n);
   if (!q || !r) return;   /* un message vide dans l'historique ferait echouer tous les appels suivants */
+  if (auteur !== 'modele') r = '[Affiché par le serveur JARVIS, pas par toi : ' + r.replace(/\s+/g, ' ').slice(0, 160) + (r.length > 160 ? '…' : '') + ']';
   if (!s.historique) s.historique = [];
   s.historique.push({ role: 'user', content: q }, { role: 'assistant', content: r });
   while (s.historique.length > LIMITES.historiqueMax) s.historique.splice(0, 2);
@@ -1115,11 +1158,68 @@ async function lireAgenda(s, sessionId, texte, plan, avant) {
   const net = rep.ok ? reponseVerifiee(rep.texte, true, false, false) : null;
   const nuit = r ? V.avertissementNuit(r) : null;   /* [C] « demain » tape entre 0 h et 5 h : la date en evidence */
   const reponse = net ? net.texte + (nuit ? '\n\n(' + nuit + ')' : '') : null;
-  if (reponse) memoriser(s, sessionId, texte, reponse);
+  if (reponse) memoriser(s, sessionId, texte, reponse, 'modele');
   return sortie({ decide: 'AUTORISE', etape: 'COMPLET', motif: rep.ok ? null : rep.erreur,
     reponse, usage: rep.usage, transactionId: exe.transactionId || null,   /* [S29] tracable */
     agenda: { periode: periode.cle, libelle, evenements: f.evenements.length, tronque, sources: lus.map(x => x.nom),
       nonLus: echecs.map(x => ({ source: x.nom, code: x.r.code })), doublons: f.doublons } });
+}
+
+/* ==========================================================================
+ * [S64] POINT DU JOUR — a l'ouverture de la page : aujourd'hui et demain.
+ *  - lecture GOUVERNEE, comme « qu'ai-je demain ? » : READ AGENDA demande a
+ *    la couche, permis nes dans l'effet (T6), transaction tracable ;
+ *  - ecrit par le SERVEUR : aucun appel au modele (ni quota, ni invention) ;
+ *  - AFFICHE seulement : rien n'entre dans l'historique, les verdicts ou le
+ *    contexte du modele. Le plancher ne baisse donc pas (G1 : seul ce que le
+ *    modele lit est une influence), et un titre d'invitation piege ne peut
+ *    rien demander : il n'est lu par aucune IA ;
+ *  - une fois par session (5 min) : le rechargement de la page en ouvre une.
+ * ======================================================================== */
+const plurielEvt = (n) => n === 0 ? 'rien' : n === 1 ? '1 événement' : n + ' événements';
+async function pointDuJour(s) {
+  if (!AGENDA && !ECRITURE) return { actif: false };
+  if (s.pointDuJour && Date.now() - s.pointDuJour.ts < 5 * 60 * 1000) return s.pointDuJour.r;
+  const g = s.g, now = Date.now(), auj = V.local(now, FUSEAU).jour;
+  const garder = (r) => { s.pointDuJour = { ts: Date.now(), r }; return r; };
+  const periode = AG.periodeDe(V.iso(auj) + '..' + V.iso(auj + 1), now, FUSEAU);
+  if (!periode) return garder({ actif: true, ok: false, code: 'PERIODE_INVALIDE', message: 'Point du jour indisponible.' });
+  const demande = g.demander({ action: 'READ', resource: 'AGENDA', target: periode.cle });
+  if (demande.decide !== 'AUTORISE')
+    return garder({ actif: true, ok: false, code: demande.motif || 'REFUSE', message: 'Le noyau a refusé la lecture (' + propre(demande.motif || 'refus', 40) + ').' });
+  let permis = null, permisJ = null;
+  const exe = g.executer(demande, (action) => { if (AGENDA) permis = AGENDA.permis(action); if (ECRITURE) permisJ = ECRITURE.permisLecture(action); return { lecture: 'autorisee' }; });
+  if (exe.etat !== 'EXECUTE' || (!permis && !permisJ))
+    return garder({ actif: true, ok: false, code: exe.motif || 'PERMIS_REFUSE', message: 'Le noyau a bloqué la lecture (' + propre(exe.motif || 'permis refusé', 40) + ').' });
+  const [lu, luJ] = await Promise.all([permis ? AGENDA.lire(permis) : null, permisJ ? ECRITURE.lister(permisJ) : null]);
+  const sources = [lu && { nom: 'principal', r: lu }, luJ && { nom: 'JARVIS', r: luJ }].filter(Boolean);
+  const lus = sources.filter(x => x.r.ok), echecs = sources.filter(x => !x.r.ok);
+  const raison = (x) => x.nom === 'JARVIS' ? erreurEcriture(x.r.code) : erreurAgenda(x.r.code);
+  const nonLus = echecs.map(x => ({ source: x.nom, code: x.r.code, raison: NOMS_AGENDA[x.nom] + ' : ' + raison(x) }));
+  if (!lus.length)
+    return garder({ actif: true, ok: false, code: echecs[0].r.code, transactionId: exe.transactionId, nonLus,
+      message: "Je n'ai pas pu lire ton agenda : " + nonLus.map(x => x.raison).join(' ; ') + '.' });
+  const f = V.fusionner(lus.map(x => ({ source: x.nom, evenements: x.r.evenements })), FUSEAU);
+  const bornes = (j) => { const c = V.civil(j); return [AG.versUtc(FUSEAU, c.y, c.mo, c.d), (() => { const n = V.civil(j + 1); return AG.versUtc(FUSEAU, n.y, n.mo, n.d); })()]; };
+  const jours = [auj, auj + 1].map((j) => {
+    const [a, b] = bornes(j), lignes = [];
+    for (const e of f.evenements) {
+      const agenda = e.sources.join(' + ');
+      if (e.journee) {
+        const d0 = Date.parse(e.debut + 'T00:00:00Z') / 86400000, d1 = Date.parse(e.fin + 'T00:00:00Z') / 86400000;
+        if (d0 <= j && j <= d1) lignes.push({ heure: 'journée', titre: e.titre, agenda, serie: !!e.recurrent });
+        continue;
+      }
+      const d = Date.parse(e.debut), fn = Date.parse(e.fin);
+      if (!(d < b && fn > a) && !(d === fn && d >= a && d < b)) continue;
+      const hl = (ms, dedans) => { if (!dedans) return '…'; const l = V.local(ms, FUSEAU); return hhmm(l.h, l.mi); };
+      lignes.push({ heure: hl(d, d >= a) + ' → ' + hl(fn, fn <= b), titre: e.titre, agenda, serie: !!e.recurrent });
+    }
+    return { jour: V.iso(j), libelle: (j === auj ? "Aujourd'hui" : 'Demain') + ', ' + V.libelle(j, false), evenements: lignes };
+  });
+  return garder({ actif: true, ok: true, transactionId: exe.transactionId, jours, nonLus,
+    tronque: f.tronque || lus.some(x => x.r.tronque),
+    resume: "aujourd'hui : " + plurielEvt(jours[0].evenements.length) + ' · demain : ' + plurielEvt(jours[1].evenements.length) });
 }
 
 /* ==========================================================================
@@ -1186,7 +1286,67 @@ function quandTape(texte, precedent) {
     semaineSuivante: !!d.ambigu, expr: d.expr, nuit: V.avertissementNuit(r) };
 }
 /* le titre propose par le modele, seul champ qu'il fournit */
-const titreDe = (target) => { const p = String(target || '').split('|'); return (p.length >= 3 ? p.slice(2).join(' ') : p.length === 1 && !/^\s*\d{4}-\d{2}-\d{2}/.test(p[0]) ? p[0] : '').trim(); };
+/* [S56] le titre est le dernier champ qui n'est ni une date, ni une heure, ni
+ * un nombre, quel que soit le nombre de champs que le modele a ecrits */
+const titreDe = (target) => {
+  const p = String(target || '').split('|').map(x => x.trim()).filter(Boolean)
+    .filter(x => !/^\d{4}-\d{2}-\d{2}(T[\d:]*)?$/.test(x) && !/^T?\d{1,2}(:\d{2})?$/.test(x) && !/^\d{1,4}$/.test(x)
+      && x !== 'CONVERSATION');   /* la valeur par defaut du planificateur, jamais un titre */
+  return (p.length ? p[p.length - 1] : '').slice(0, 100);
+};
+
+/* [S63] H une serie : un jour de la semaine, une heure, une duree et une FIN,
+ * lus dans les mots tapes (la demande et, s'il y en a, la reponse a la
+ * question du serveur). La fin est obligatoire : une serie sans fin oubliee
+ * encombrerait l'agenda pour toujours ; 12 mois au plus. */
+const TEXTE_SERIE = "Je ne crée que des séries chaque semaine, sur un seul jour : par exemple « ajoute hand tous les mercredis à 18h jusqu'au 19 décembre ».";
+function quandSerie(texte, precedent) {
+  const now = Date.now(), auj = V.local(now, FUSEAU).jour;
+  const a = V.lireSerie(texte, now, FUSEAU), p = precedent ? V.lireSerie(precedent, now, FUSEAU) : null;
+  if (a.nonHebdo || (!a.jours.length && p && p.nonHebdo)) return { question: TEXTE_SERIE, motif: 'SERIE_NON_HEBDOMADAIRE', abandon: true };
+  const jours = a.jours.length ? a.jours : p ? p.jours : [];
+  if (jours.length > 1) return { question: "Une série, c'est un seul jour par semaine : redemande pour chaque jour, par exemple « … tous les mardis … » puis « … tous les jeudis … ».", motif: 'SERIE_PLUSIEURS_JOURS', abandon: true };
+  /* une reponse nue (« 19 décembre », « fin juin ») donne la fin */
+  const nue = precedent && !a.fin && !a.finIllisible ? V.finNue(texte, now, FUSEAU) : null;
+  const fin = a.fin || nue || (p && !a.finIllisible ? p.fin : null);
+  const finIll = fin ? null : (a.finIllisible || (p && p.finIllisible) || null);
+  const deb = a.debut || (p && !a.debutIllisible ? p.debut : null);
+  const debIll = deb ? null : (a.debutIllisible || (p && p.debutIllisible) || null);
+  if (debIll) return { question: 'Je ne lis pas le début « ' + String(debIll).slice(0, 40) + " » : écris-le comme « à partir du 7 octobre ».", motif: 'DEBUT_ILLISIBLE' };
+  if (finIll) return { question: 'Je ne lis pas la fin « ' + String(finIll).slice(0, 40) + " » : écris une date, par exemple « jusqu'au 19 décembre » ou « jusqu'à fin juin ».", motif: 'FIN_ILLISIBLE' };
+  const hA = V.resoudreHeures(texte), hQ = precedent ? V.resoudreHeures(precedent) : null;
+  const h = !hQ || hA.heures.length ? { ...hA, duree: hA.duree != null ? hA.duree : hQ && !hA.ambigu ? hQ.duree : null }
+    : { ...hQ, duree: hA.duree != null ? hA.duree : hQ.duree };
+  if (h.ambigu) return { question: 'Quelle heure exactement ? Je lis ' + (h.heures.length > 1 ? h.heures.map(x => hhmm(x.h, x.mi)).join(' et ') : 'deux durées différentes') + ' dans ta demande.', motif: 'HEURE_AMBIGUE' };
+  const manque = [];
+  if (!jours.length) manque.push('jour');
+  if (!h.debut) manque.push('heure');
+  if (!fin) manque.push('fin');
+  if (manque.length) {
+    const Q = { jour: 'Quel jour de la semaine ?', heure: 'À quelle heure ?', fin: "Jusqu'à quand ?" };
+    const EX = { jour: 'le mercredi', heure: '18h', fin: "jusqu'au 19 décembre" };
+    return { question: manque.map(x => Q[x]).join(' ') + (manque.includes('fin') ? ' Une série a toujours une date de fin, 12 mois au plus.' : '')
+      + ' Réponds par exemple « ' + manque.map(x => EX[x]).join(' ') + ' ».',
+      motif: manque.length > 1 ? 'SERIE_INCOMPLETE' : { jour: 'SERIE_JOUR_ABSENT', heure: 'HEURE_ABSENTE', fin: 'FIN_ABSENTE' }[manque[0]] };
+  }
+  const w = jours[0], avertissements = [];
+  let premier;
+  if (deb) {
+    const base = Math.max(deb.jour, auj);
+    premier = base + ((w - V.jourSemaine(base) + 7) % 7);
+    if (deb.jour < auj) avertissements.push('« ' + deb.expr + ' » est passé : la série commence ' + V.libelle(premier, false) + '.');
+  } else {
+    const e = (w - V.jourSemaine(auj) + 7) % 7;
+    premier = auj + (e || 7);                                  /* [C] le PROCHAIN, jamais aujourd'hui sans le dire */
+    if (!e) avertissements.push("Demandé un " + V.libelle(auj, false).split(' ')[0] + " : la série commence la semaine prochaine. Pour commencer aujourd'hui, ajoute « à partir d'aujourd'hui ».");
+  }
+  if (fin.jour < premier) return { question: 'La fin (' + V.libelle(fin.jour, false) + ') arrive avant la première séance (' + V.libelle(premier, false) + ") : jusqu'à quand ?", motif: 'FIN_AVANT_DEBUT' };
+  const ecart = fin.jour - premier;
+  if (ecart < 7) return { question: "Avec cette fin, il n'y aurait qu'une séance (" + V.libelle(premier, false) + ") : donne une fin plus lointaine, ou demande un seul événement, sans « tous les ».", motif: 'SERIE_TROP_COURTE' };
+  if (ecart > 366) return { question: 'Une série dure 12 mois au plus : choisis une fin au plus tard le ' + V.libelle(premier + 364, false) + '.', motif: 'SERIE_TROP_LONGUE' };
+  const nb = Math.min(53, Math.floor(ecart / 7) + 1);
+  return { jour: premier, derniere: premier + (nb - 1) * 7, nb, debut: h.debut, duree: h.duree == null ? 60 : h.duree, dureeParDefaut: h.duree == null, avertissements };
+}
 
 async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour) {
   const g = s.g;
@@ -1196,15 +1356,25 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
   let v = null, corrige = null;
   const avertissements = [];
   if (!plan.confirme) {
-    const titre = titreDe(plan.target);
-    const q = quandTape(texte, precedent);
+    const serie = plan.serie === true;   /* [S63] */
+    /* [S56] le titre du modele, sinon celui des mots tapes (« hand ») */
+    const titre = titreDe(plan.target) || (serie ? V.titreSerie(precedent || '', Date.now(), FUSEAU) || V.titreSerie(texte, Date.now(), FUSEAU)
+      : V.titreTape(precedent || '') || V.titreTape(texte));
+    const q = serie ? quandSerie(texte, precedent) : quandTape(texte, precedent);
+    const retenir = (attendTitre) => { s.questionCreation = { texte: String((precedent ? precedent + ' ' : '') + texte).slice(-300), titre: titre.slice(0, 100), attendTitre, serie, tour: tour || 0, ts: Date.now() }; };
     if (q.question) {
-      /* la reponse NUE au prochain message sera relue avec celui-ci */
-      if (titre && q.motif !== 'DATE_CONTRADICTOIRE') s.questionCreation = { texte: String((precedent ? precedent + ' ' : '') + texte).slice(-300), titre: titre.slice(0, 100), tour: tour || 0, ts: Date.now() };
+      /* la reponse NUE au prochain message sera relue avec celui-ci (avant :
+       * seulement si le modele avait donne un titre -> « 18h » repartait de zero) */
+      if (q.motif !== 'DATE_CONTRADICTOIRE' && !q.abandon) retenir(false);
       noterVerdict(s, { decide: 'SANS_OBJET', action: 'CREATE', target: propre(titre || '?', 60), motif: q.motif });
       return dire(q.question, { decide: 'SANS_OBJET', etape: 'SERVEUR', motif: q.motif });
     }
-    v = titre ? ECRITURE.validerCible(V.iso(q.jour) + 'T' + hhmm(q.debut.h, q.debut.mi) + '|' + q.duree + '|' + titre) : null;
+    if (!titre) {
+      retenir(true);
+      noterVerdict(s, { decide: 'SANS_OBJET', action: 'CREATE', target: '?', motif: 'TITRE_ABSENT' });
+      return dire('Quel titre pour ' + (serie ? 'cette série' : 'cet événement') + ' ? Réponds par exemple « entraînement U18 ».', { decide: 'SANS_OBJET', etape: 'SERVEUR', motif: 'TITRE_ABSENT' });
+    }
+    v = titre ? ECRITURE.validerCible(V.iso(q.jour) + 'T' + hhmm(q.debut.h, q.debut.mi) + '|' + q.duree + '|' + titre + (serie ? '|HEBDO:' + V.iso(q.derniere) : '')) : null;
     if (v) {
       /* ce que le modele proposait, s'il proposait autre chose : dit, jamais suivi */
       const m = /^\s*(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})\s*\|\s*(\d{1,4})\s*\|/.exec(String(plan.target || ''));
@@ -1215,6 +1385,8 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
       if (q.dureeParDefaut) avertissements.push('Durée non précisée : 1 h par défaut (écris « pendant 1h30 » ou « de 18h à 19h30 » pour une autre durée).');
       if (q.semaineSuivante) avertissements.push('« ' + q.expr + " » tapé un " + q.expr + " : c'est celui de la semaine prochaine. Pour aujourd'hui, écris « aujourd'hui ».");
       if (q.nuit) avertissements.push(q.nuit);
+      if (q.avertissements) avertissements.push(...q.avertissements);   /* [S63] */
+      if (v.serie) avertissements.push(v.serie.nb + ' séances : vérifie la première et la dernière date. « Supprimer la série » les retirera toutes ; une seule séance se retire dans Google Agenda.');
       if (v.debutMs < Date.now()) avertissements.push('Cette heure est déjà passée.');
     }
   } else {
@@ -1230,13 +1402,14 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
     s.propositions.set(v.cle, { ts: Date.now(), etat: 'PROPOSEE' });
     if (s.propositions.size > 20) s.propositions.delete(s.propositions.keys().next().value);
     noterVerdict(s, { decide: 'EN_ATTENTE', action: 'CREATE', target: v.cle, motif: 'CONFIRMATION_REQUISE' });
-    return dire("Je te propose de créer dans l'agenda JARVIS : " + v.lisible + ". Vérifie la date et l'heure, puis touche « Créer »."
+    return dire((v.serie ? "Je te propose de créer dans l'agenda JARVIS la série : " + v.lisible + ". Vérifie les dates et l'heure, puis touche « Créer les " + v.serie.nb + " séances »."
+      : "Je te propose de créer dans l'agenda JARVIS : " + v.lisible + ". Vérifie la date et l'heure, puis touche « Créer ».")
       + (avertissements.length ? ' ' + avertissements.join(' ') : ''),
       { decide: 'CONFIRMATION_REQUISE', etape: 'G1_GESTE', motif: null, classe: 'COMPENSABLE', corrige,
-        aConfirmer: { action: 'CREATE', resource: 'AGENDA_JARVIS', cible: v.cle, lisible: v.lisible, avertissements } });
+        aConfirmer: { action: 'CREATE', resource: 'AGENDA_JARVIS', cible: v.cle, lisible: v.lisible, avertissements, serie: v.serie ? v.serie.nb : 0 } });
   }
   const demande = g.demander({ action: 'CREATE', resource: 'AGENDA_JARVIS', target: v.cle },
-    { manuel: true, compensation: "supprimer l'événement créé dans l'agenda JARVIS" });
+    { manuel: true, compensation: v.serie ? "supprimer la série créée dans l'agenda JARVIS (toutes ses séances)" : "supprimer l'événement créé dans l'agenda JARVIS" });
   const sortie = (reponse, o) => dire(reponse, { ...o, note: demande.note, classe: demande.classe });
   if (demande.decide !== 'AUTORISE') {
     noterVerdict(s, { decide: 'REFUSE', action: 'CREATE', target: v.cle, motif: demande.motif });
@@ -1258,13 +1431,14 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
     return sortie("Le noyau avait autorisé la création, mais elle n'a pas abouti : " + erreurEcriture(cree.code) + ". Rien n'a été créé.",
       { decide: 'AUTORISE', etape: 'OUTIL_ECHEC', motif: cree.code, transactionId: exe.transactionId, trace });
   }
-  s.creations.set(exe.transactionId, { lisible: v.lisible, titre: v.titre });
+  s.creations.set(exe.transactionId, { lisible: v.lisible, titre: v.titre, serie: v.serie ? v.serie.nb : 0 });
   if (s.creations.size > 50) s.creations.delete(s.creations.keys().next().value);
   noterVerdict(s, { decide: 'AUTORISE', action: 'CREATE', target: v.cle, motif: null });
   return sortie((cree.code === 'DEJA_CREE' ? "Cet événement existait déjà pour cette transaction : aucun doublon. " : "C'est fait : ")
-    + v.lisible + " est dans ton agenda JARVIS. « Supprimer » l'annule.",
+    + (v.serie ? 'la série ' + v.lisible + " est dans ton agenda JARVIS. « Supprimer la série » retire toutes les séances."
+      : v.lisible + " est dans ton agenda JARVIS. « Supprimer » l'annule."),
     { decide: 'AUTORISE', etape: 'COMPLET', motif: null, transactionId: exe.transactionId, trace,
-      evenement: { lisible: v.lisible, transactionId: exe.transactionId } });
+      evenement: { lisible: v.lisible, transactionId: exe.transactionId, serie: v.serie ? v.serie.nb : 0 } });
 }
 
 /* [S49] [S51] la reponse du modele, avant d'etre montree ou gardee :
@@ -1273,23 +1447,42 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
  * Les deux corrections sont dites a la personne. */
 function reponseVerifiee(texte, sansAction, passif = true, strict = true) {
   const c = V.corrigerJours(texte, Date.now(), FUSEAU);
-  const r = sansAction ? V.retirerAffirmations(c.texte, { passif, strict }) : { texte: c.texte, retirees: [] };
+  const im = V.imiteServeur(c.texte);   /* [S58] ce que seul le serveur ecrit */
+  const r = sansAction ? V.retirerAffirmations(im.texte, { passif, strict }) : { texte: im.texte, retirees: [] };
   const notes = [];
+  if (im.retirees.length) notes.push('(JARVIS a retiré une phrase qui imitait un message du serveur : les cartes et les boutons viennent de JARVIS seul.)');
   if (r.retirees.length) notes.push("(JARVIS a retiré une phrase qui annonçait une action : rien n'a été créé, supprimé ni envoyé pendant ce message.)");
   if (c.corrections.length) notes.push('(JARVIS a corrigé le jour de la semaine : ' + c.corrections.map(x => 'le ' + x.libelle.split(' ').slice(1).join(' ') + ' est un ' + x.vrai).join(' ; ') + '.)');
   const corps = String(r.texte || '').trim();
-  return { texte: (corps ? corps + (notes.length ? '\n\n' : '') : '') + notes.join('\n'), retirees: r.retirees, corrections: c.corrections };
+  return { texte: (corps ? corps + (notes.length ? '\n\n' : '') : '') + notes.join('\n'), retirees: r.retirees.concat(im.retirees), imitations: im.retirees.length, corrections: c.corrections };
 }
 /* une reponse ecrite par le SERVEUR (aucun modele), conservee dans l'historique */
 function reponseServeur(s, sessionId, texte, reponse, motif, extra = {}) {
   memoriser(s, sessionId, texte, reponse);
   return { decide: 'SANS_OBJET', etape: 'SERVEUR', motif, reponse, plan: { action: 'AUCUNE' }, ...extra, ...etatDe(s) };
 }
-const TEXTE_SERIE = "Les séries (« tous les mercredis ») ne sont pas encore possibles : c'est la prochaine étape. "
-  + "Pour l'instant, je crée un événement à la fois, par exemple « ajoute hand mercredi à 18h pendant 1h30 ».";
 const TEXTE_SANS_ECRITURE = () => CLE_ACCES
   ? "Aucun agenda JARVIS n'est relié : ajoute JARVIS_GOOGLE_COMPTE et JARVIS_AGENDA_JARVIS dans Render (voir le guide)."
   : "C'est la démo publique : elle ne crée aucun événement réel.";
+
+/* [S30] [S59] « Supprimer » : la compensation, en deux temps et verifiee (K2).
+ * Seulement pour un evenement cree dans CETTE session. Utilisee par le bouton
+ * « Supprimer » et par « Tester l'ecriture ». */
+async function compenserCreation(s, id, tx) {
+  const c0 = s.creations.get(tx);
+  if (!c0 || !ECRITURE) return { erreur: 'CREATION_INTROUVABLE' };
+  const d = s.g.compensationDebut(tx);
+  if (d.etat !== 'COMPENSATING') return { etat: d.etat, motif: d.motif || null };
+  const r = await ECRITURE.supprimer(d.cible);
+  const f = s.g.compensationFin(tx, d.jeton, { verifie: r.verifie === true, resultat: { code: r.code } });
+  if (f.etat === 'COMPENSE') c0.supprime = true;   /* [S49] plus propose par « Supprimer » tape */
+  const message = f.etat === 'COMPENSE' ? (c0.serie ? 'Série supprimée : ' + c0.lisible + " — toutes les séances ont disparu de l'agenda JARVIS (disparition vérifiée)."
+      : 'Supprimé : ' + c0.lisible + " n'est plus dans l'agenda JARVIS (disparition vérifiée).")
+    : "La suppression n'est pas vérifiée : " + erreurEcriture(r.code) + '. Tu peux réessayer.';
+  memoriser(s, id, "Supprime l'événement « " + c0.lisible + ' ».', message);
+  noterVerdict(s, { decide: f.etat === 'COMPENSE' ? 'AUTORISE' : 'REFUSE', action: 'COMPENSER', target: c0.lisible, motif: f.etat === 'COMPENSE' ? null : r.code });
+  return { etat: f.etat, code: r.code, message, trace: s.g.trace(tx) };
+}
 
 /* ==========================================================================
  * LE CŒUR — un message, gouverne par la couche
@@ -1370,15 +1563,24 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
     /* [S49] « annule » pendant qu'une action irreversible attendait : ce
      * message l'a deja annulee (une carte ne survit pas au message suivant) ;
      * le SERVEUR le dit, exactement */
-    if (isup.presente && V.suppressionNue(texte) && Array.isArray(o.annulees) && o.annulees.length)
+    if (isup.presente && (V.suppressionNue(texte) || isup.annulation) && Array.isArray(o.annulees) && o.annulees.length)   /* [S57] « annule le paiement » aussi */
       return reponseServeur(s, sessionId, texte, 'Annulé : ' + o.annulees.map(a => (a.action === 'SEND' ? "l'envoi à " : a.action === 'PAY' ? 'le paiement à ' : propre(a.action, 20) + ' vers ')
         + propre(a.target, 80)).join(', ') + ". Rien n'est parti.", 'ACTION_ANNULEE');
     const vivants = [...s.creations.entries()].filter(([, c]) => !c.supprime).slice(-5).reverse();
-    if (ECRITURE && isup.presente && (V.suppressionNue(texte) || isup.agenda || vivants.some(([, c]) => V.titreNomme(texte, c.titre || '')))) {
-      if (vivants.length)
-        return reponseServeur(s, sessionId, texte, "Rien n'est supprimé avant ton toucher : " + (vivants.length === 1
-          ? "touche « Supprimer » sous l'événement ci-dessous." : 'touche « Supprimer » sous celui à retirer.'), 'SUPPRESSION_A_CONFIRMER',
-          { outil: 'agenda-jarvis', aSupprimer: vivants.map(([tx, c]) => ({ transactionId: tx, lisible: c.lisible })) });
+    /* [S57] vu en ligne : « Supprime le teste stp » (l'evenement s'appelait
+     * « test ») n'etait pas reconnu, et le modele a imite la carte. Des qu'un
+     * evenement a ete cree dans la session et que la demande ne vise pas autre
+     * chose (fichier, mail, paiement…), le serveur montre les cartes : rien
+     * n'est supprime sans le toucher, une carte de trop ne coute rien. */
+    if (ECRITURE && isup.presente && !V.autreObjet(texte)
+        && (vivants.length || V.suppressionNue(texte) || isup.agenda || o.avaitProposition)) {
+      if (vivants.length) {
+        const seul = vivants.length === 1 ? vivants[0][1] : null, series = vivants.some(([, c]) => c.serie);   /* [S63] */
+        return reponseServeur(s, sessionId, texte, "Rien n'est supprimé avant ton toucher : " + (seul
+          ? (seul.serie ? 'touche « Supprimer la série » sous la série ci-dessous.' : "touche « Supprimer » sous l'événement ci-dessous.") : 'touche le bouton sous celui à retirer.')
+          + (series ? " Une série part en entier (toutes ses séances) ; une seule séance se retire dans Google Agenda." : ''), 'SUPPRESSION_A_CONFIRMER',
+          { outil: 'agenda-jarvis', aSupprimer: vivants.map(([tx, c]) => ({ transactionId: tx, lisible: c.lisible, serie: c.serie || 0 })) });
+      }
       if (o.avaitProposition)
         return reponseServeur(s, sessionId, texte, "Rien n'a été créé : la proposition précédente est abandonnée.", 'PROPOSITION_ABANDONNEE');
       return reponseServeur(s, sessionId, texte, "Rien n'a été supprimé. Je ne peux supprimer qu'un événement créé par JARVIS dans cette session, "
@@ -1386,14 +1588,30 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
     }
     if (!ECRITURE && isup.presente && isup.agenda)
       return reponseServeur(s, sessionId, texte, "Rien n'a été supprimé : cette instance ne crée ni ne supprime aucun événement.", 'RIEN_A_SUPPRIMER');
-    /* [S53] E une serie demandee : la reponse du serveur, la meme a chaque fois */
-    if (V.demandeSerie(texte)) return reponseServeur(s, sessionId, texte, ECRITURE ? TEXTE_SERIE : TEXTE_SANS_ECRITURE(), 'SERIE_NON_PRISE_EN_CHARGE');
+    /* [S63] H une serie demandee : lue par le SERVEUR (jour, heure, fin),
+     * sans modele ; sans ecriture, la meme reponse a chaque fois [S53] */
+    if (V.demandeSerie(texte)) {
+      if (!ECRITURE) return reponseServeur(s, sessionId, texte, TEXTE_SANS_ECRITURE(), 'SERIE_NON_PRISE_EN_CHARGE');
+      planReponse = { action: 'CREATE', resource: 'AGENDA_JARVIS', target: '', serie: true, pourquoi: 'série demandée : jour, heure et fin lus par le serveur' };
+    }
     /* [S55] G reponse NUE (« 18h », « mercredi ») a « A quelle heure ? » /
      * « Quel jour ? » pose au message precedent : les deux messages tapes sont
      * relus ensemble par le serveur ; le titre est celui de la question */
-    if (ECRITURE && question && question.tour === (o.tour || 0) - 1 && Date.now() - question.ts < 10 * 60 * 1000
-        && !isup.presente && !V.creationDemandee(texte) && !V.renonce(texte) && texte.trim().split(/\s+/).length <= 8
-        && (V.resoudreHeures(texte).heures.length || V.resoudreDates(texte, Date.now(), FUSEAU).dates.length)) {
+    const reponseNue = !planReponse && ECRITURE && question && question.tour === (o.tour || 0) - 1 && Date.now() - question.ts < 10 * 60 * 1000
+        && !isup.presente && !V.creationDemandee(texte) && !V.renonce(texte) && texte.trim().split(/\s+/).length <= 8;
+    if (reponseNue && question.serie) {   /* [S63] reponse a une question sur une serie */
+      const maintenant = Date.now();
+      if (question.attendTitre || V.resoudreHeures(texte).heures.length || V.resoudreDates(texte, maintenant, FUSEAU).dates.length
+          || V.lireSerie(texte, maintenant, FUSEAU).jours.length || V.finNue(texte, maintenant, FUSEAU)) {
+        precedent = question.texte;
+        planReponse = { action: 'CREATE', resource: 'AGENDA_JARVIS', serie: true, pourquoi: 'réponse à la question du serveur (série)',
+          target: '||' + (question.attendTitre ? (V.titreTape(texte) || propre(texte, 100).trim()) : question.titre) };
+      }
+    } else if (reponseNue && question.attendTitre) {   /* [S56] reponse a « Quel titre ? » */
+      precedent = question.texte;
+      const t = V.titreTape(texte) || propre(texte, 100).trim();
+      planReponse = { action: 'CREATE', resource: 'AGENDA_JARVIS', target: '||' + t, pourquoi: 'titre donné en réponse au serveur' };
+    } else if (reponseNue && (V.resoudreHeures(texte).heures.length || V.resoudreDates(texte, Date.now(), FUSEAU).dates.length)) {
       precedent = question.texte;
       planReponse = { action: 'CREATE', resource: 'AGENDA_JARVIS', target: '||' + question.titre, pourquoi: 'réponse à la question du serveur' };
     }
@@ -1446,7 +1664,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
         + "avec le verbe et la cible, par exemple « envoie la facture à nom@exemple.fr ». Ne donne jamais une raison que tu ne connais pas : "
         + "en particulier, ne dis pas qu'il manque un verbe ou une cible s'ils figurent dans son message. Sinon, réponds normalement.", texte));   /* [S47] [S54] */
     const net = rep.ok ? reponseVerifiee(rep.texte, true, true, V.demandeAction(texte)) : null;   /* [S49] rien n'a ete execute */
-    if (net) memoriser(s, sessionId, texte, net.texte);
+    if (net) memoriser(s, sessionId, texte, net.texte, 'modele');
     return { decide: 'SANS_OBJET', etape: 'CONVERSATION', motif: rep.ok ? null : rep.erreur /* [S32] */, plan,
       reponse: net ? net.texte : null, retirees: net ? net.retirees.length : 0, note: g.note({ action: 'READ', resource: 'LOCAL', target: 'CONVERSATION' }),
       classe: 'REVERSIBLE', audit: g.auditDepuis(avant), ...etatDe(s) };
@@ -1569,7 +1787,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
 
   noterVerdict(s, { decide: 'AUTORISE', action: acte, target: plan.target, motif: null });
   const net = rep.ok ? reponseVerifiee(rep.texte, false) : null;   /* [S51] execution simulee : les jours seulement */
-  if (net) memoriser(s, sessionId, texte, net.texte);
+  if (net) memoriser(s, sessionId, texte, net.texte, 'modele');
   return sortie({ decide: 'AUTORISE', etape: 'COMPLET', motif: rep.ok ? null : rep.erreur,
     reponse: net ? net.texte : null, usage: rep.usage });
 }
@@ -1712,7 +1930,9 @@ const serveur = http.createServer((req, res) => {
    * versions (publiques : le depot l'est) et un verdict de configuration. */
   if (u.pathname === '/health' || (u.pathname === '/api/health' && req.method === 'GET')) {
     const verdict = CLE_ACCES ? verdictConfig() : undefined;
-    let detail = !CLE_ACCES;
+    /* [S62] la demo publique non plus ne detaille plus sa configuration :
+     * statut, versions et empreinte (qui prouvent le code en ligne), rien d'autre */
+    let detail = !CLE_ACCES && SANTE_PUBLIQUE_DETAILLEE;
     if (CLE_ACCES && (u.pathname === '/api/health' || req.headers['x-jarvis-cle'] !== undefined)) {
       /* seule une cle PRESENTE est verifiee (et comptee si fausse) : une simple
        * visite de /health n'use jamais le compteur d'essais du proprietaire */
@@ -1721,10 +1941,11 @@ const serveur = http.createServer((req, res) => {
       detail = true;
     }
     if (!detail)
-      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.6.7',
-        acces: 'protege', config: verdict, manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
+      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.8.0',
+        acces: CLE_ACCES ? 'protege' : 'public', ...(CLE_ACCES ? { config: verdict } : {}),
+        manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
         node: String(process.versions.node).split('.')[0] });
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.6.7', verite: V.VERSION,
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.8.0', verite: V.VERSION,
       agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : ECRITURE_MOTIF ? 'erreur-config' : 'inactif',   /* [S30] [S48] */
       ecritureMotif: ECRITURE_MOTIF,
       elevation: ELEVATION_MAL_CONFIGUREE ? 'erreur-config' : !ELEVATION || !ELEVATION.actif ? 'inactif'   /* [S35] */
@@ -1746,6 +1967,17 @@ const serveur = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': cspPour(html) });
       return res.end(html);
     } catch { res.writeHead(500); return res.end('index.html introuvable'); }
+  }
+
+  /* [S61] l'appli : manifeste et icones, publics comme la page (sans cle ni
+   * session : l'ecran d'accueil les demande avant toute cle). Chemins fixes,
+   * contenu fixe, dessine au demarrage. */
+  if (APPLI && (req.method === 'GET' || req.method === 'HEAD')) {
+    const f = APPLI.fichier(u.pathname);
+    if (f && f.corps) {
+      res.writeHead(200, { 'Content-Type': f.type, 'Content-Length': f.corps.length, 'Cache-Control': 'public, max-age=86400' });
+      return res.end(req.method === 'HEAD' ? undefined : f.corps);
+    }
   }
 
   /* [S13] instance protegee : toute l'API derriere la cle, /health et la page restent publics */
@@ -1902,7 +2134,7 @@ const serveur = http.createServer((req, res) => {
         rep = await appelAnthropic(messagesAvec(s, id, confirmation), null, null,
           systemeDe(s, "La personne vient de confirmer l'action irréversible " + propre(att.action, 30) + ' sur '
             + propre(att.target) + " après la fenêtre d'annulation. Le noyau l'a exécutée, en simulation : rien n'est réellement parti. Réponds en une ou deux phrases."));
-        if (rep.ok) memoriser(s, id, confirmation, rep.texte);
+        if (rep.ok) memoriser(s, id, confirmation, rep.texte, 'modele');
       }
       s.enAttente.delete(b.jeton);
       /* [S47] la reponse dit TOUJOURS la simulation : on ne s'en remet pas au modele */
@@ -1945,19 +2177,38 @@ const serveur = http.createServer((req, res) => {
       const id = typeof b.sessionId === 'string' ? b.sessionId : '';   /* [S47] */
       const s = sessionDe(id);
       if (!s) return inconnue();
-      const tx = String(b.transactionId || '').slice(0, 60);
-      const c0 = s.creations.get(tx);
-      if (!c0 || !ECRITURE) return json(404, { erreur: 'CREATION_INTROUVABLE' });
-      const d = s.g.compensationDebut(tx);
-      if (d.etat !== 'COMPENSATING') return json(200, { etat: d.etat, motif: d.motif || null, ...etatDe(s) });
-      const r = await ECRITURE.supprimer(d.cible);
-      const f = s.g.compensationFin(tx, d.jeton, { verifie: r.verifie === true, resultat: { code: r.code } });
-      if (f.etat === 'COMPENSE') c0.supprime = true;   /* [S49] plus propose par « Supprimer » tape */
-      const message = f.etat === 'COMPENSE' ? 'Supprimé : ' + c0.lisible + " n'est plus dans l'agenda JARVIS (disparition vérifiée)."
-        : "La suppression n'est pas vérifiée : " + erreurEcriture(r.code) + '. Tu peux réessayer.';
-      memoriser(s, id, "Supprime l'événement « " + c0.lisible + ' ».', message);
-      noterVerdict(s, { decide: f.etat === 'COMPENSE' ? 'AUTORISE' : 'REFUSE', action: 'COMPENSER', target: c0.lisible, motif: f.etat === 'COMPENSE' ? null : r.code });
-      return json(200, { etat: f.etat, code: r.code, message, trace: s.g.trace(tx), ...etatDe(s) });
+      const r = await compenserCreation(s, id, String(b.transactionId || '').slice(0, 60));
+      if (r.erreur) return json(404, { erreur: r.erreur });
+      return json(200, { ...r, ...etatDe(s) });
+    });
+
+  /* [S59] « Tester l'ecriture » : la seule vraie preuve (Google ne renvoie pas
+   * accessRole au compte de service). Un evenement de test, demain 04:00,
+   * 5 min, cree PAR LE CIRCUIT GOUVERNE (le toucher sur le bouton est le
+   * geste declare a la couche ; noyau, permis, effet constate), puis supprime
+   * par la compensation verifiee. Rien ne reste dans l'agenda. */
+  if (u.pathname === '/api/ecriture/test' && req.method === 'POST')
+    return lire(req, res, async (b) => {
+      const id = typeof b.sessionId === 'string' ? b.sessionId : '';
+      const s = sessionDe(id);
+      if (!s) return inconnue();
+      if (!ECRITURE) return json(200, { ok: false, code: ECRITURE_MOTIF || 'ECRITURE_ABSENTE',
+        message: ECRITURE_MOTIF ? erreurEcriture(ECRITURE_MOTIF) : "Aucun agenda JARVIS n'est relié (variables Google absentes)." });
+      const v = ECRITURE.validerCible(V.iso(V.local(Date.now(), FUSEAU).jour + 1) + "T04:00|5|Test JARVIS (vérification)");
+      if (!v) return json(500, { ok: false, code: 'CIBLE_TEST_INVALIDE' });
+      const c = s.entree.confirmer('CREATE', v.cle);
+      if (!c.ok) return json(400, { ok: false, code: c.motif });
+      const d = await messageGouverne(id, "(test d'écriture demandé)", null, null,
+        { action: 'CREATE', resource: 'AGENDA_JARVIS', target: v.cle, pourquoi: "test d'écriture demandé par un geste" });
+      if (!d || d.etape !== 'COMPLET' || !d.transactionId)
+        return json(200, { ok: false, etape: 'CREATION', code: (d && d.motif) || 'ECHEC',
+          message: "La création de test n'a pas abouti : " + ((d && d.reponse) || 'échec') });
+      const r = await compenserCreation(s, id, d.transactionId);
+      const ok = r.etat === 'COMPENSE';
+      return json(200, { ok, etape: 'SUPPRESSION', code: r.code || r.etat,
+        message: ok ? "Écriture prouvée : un événement de test a été créé chez Google puis supprimé (disparition vérifiée). Rien n'est resté dans ton agenda."
+          : "L'événement de test a été créé, mais sa suppression n'est pas vérifiée (" + erreurEcriture(r.code) + ") : supprime « Test JARVIS (vérification) » de demain 04:00 dans Google Agenda.",
+        trace: r.trace || null, ...etatDe(s) });
     });
 
   /* [S31] ELEVATION — Face ID (cles d'acces) ou code de secours. Le serveur
@@ -2022,9 +2273,17 @@ const serveur = http.createServer((req, res) => {
           : "Prêt : clé acceptée, agenda JARVIS trouvé ; écriture prouvée par une création réelle réussie (Google indique pourtant accessRole = " + role(d) + "). Rien n'a été écrit.")
         : d.code === 'ECRITURE_NON_CONFIRMEE'
           ? "Clé acceptée, agenda JARVIS trouvé. Google indique accessRole = " + role(d) + " : ce champ seul ne prouve pas que l'écriture est refusée. "
-            + "Le vrai test : « ajoute un test demain à 10h », Créer, puis Supprimer. Rien n'a été écrit."
+            + "Le vrai test : le bouton « Tester l'écriture » (crée puis supprime un événement de test). Rien n'a été écrit."
           : erreurEcriture(d.code) }),
       () => json(500, { ok: false, code: 'DIAGNOSTIC_IMPOSSIBLE' }));
+  }
+
+  /* [S64] point du jour a l'ouverture : lecture gouvernee, sans modele */
+  if (u.pathname === '/api/point-du-jour' && req.method === 'GET') {
+    const s = sessionDe(sid());
+    if (!s) return inconnue();
+    return pointDuJour(s).then(r => json(200, { ...r, ...etatDe(s) }),
+      () => json(500, { actif: true, ok: false, code: 'ERREUR_INTERNE', message: 'Point du jour indisponible.' }));
   }
 
   /* [S29] TRACABILITE — une transaction de CETTE session, en lecture seule :

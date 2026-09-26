@@ -33,6 +33,7 @@ process.env.PORT = process.env.PORT || '3997';
 process.env.JARVIS_ACTIONS_HEURE = '20';
 process.env.JARVIS_APPELS_HEURE = '24';
 process.env.JARVIS_APPELS_JOUR = '100000';
+process.env.JARVIS_SANTE_PUBLIQUE = 'detail';   /* [v4.8] /health public reduit par defaut ; ici on observe le detail */
 const B = 'http://localhost:' + process.env.PORT;
 
 const P = require(path.join(DIR, 'jarvis-plus-5.29.js'));

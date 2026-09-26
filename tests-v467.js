@@ -218,7 +218,7 @@ const plansJ = () => journal().filter(x => x.type === 'plan');
     'DTSTART:' + iso(D3).replace(/-/g, '') + 'T080000Z', 'DTEND:' + iso(D3).replace(/-/g, '') + 'T090000Z', 'SUMMARY:Réunion', 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
   const srv = await lancer({ JARVIS_CLE_ACCES: CLE, JARVIS_GOOGLE_COMPTE: COMPTE, JARVIS_AGENDA_JARVIS: AGENDA_ID, JARVIS_AGENDA_ICAL: 'https://agenda.test/basic.ics' });
   await t('S0', 'passerelle v4.6.7, agenda et écriture actifs', async () =>
-    ({ ok: srv.sante && srv.sante.passerelle === 'v4.6.7' && srv.sante.agenda === 'actif' && srv.sante.ecriture === 'actif', info: srv.sante && srv.sante.passerelle }));
+    ({ ok: srv.sante && /^v4\.(6\.7|[7-9]\.\d+)$/.test(srv.sante.passerelle) && srv.sante.agenda === 'actif' && srv.sante.ecriture === 'actif', info: srv.sante && srv.sante.passerelle }));
 
   /* F */
   viderJournal();
@@ -238,8 +238,10 @@ const plansJ = () => journal().filter(x => x.type === 'plan');
   viderJournal();
   const e1 = await srv.chat("Ajoute sur mon calendrier que tous les mercredis et vendredis j'ai handball");
   const e2 = await srv.chat('Ajoute hand tous les mercredis');
-  await t('S4', "E : deux demandes de série → la MÊME réponse du serveur, sans modèle, ni « seulement lire » ni rien d'inventé", async () =>
-    ({ ok: e1.motif === 'SERIE_NON_PRISE_EN_CHARGE' && e1.reponse === e2.reponse && /pas encore possibles/.test(e1.reponse) && conv().length === 0 && plansJ().length === 0,
+  /* [v4.8] les series existent : la reponse reste celle du SERVEUR, sans modele
+   * (deux jours -> « un seul jour par semaine » ; sans heure ni fin -> la question) */
+  await t('S4', "E : deux demandes de série → réponses du serveur, sans modèle, ni « seulement lire » ni rien d'inventé", async () =>
+    ({ ok: e1.motif === 'SERIE_PLUSIEURS_JOURS' && e2.motif === 'SERIE_INCOMPLETE' && e1.etape === 'SERVEUR' && e2.etape === 'SERVEUR' && conv().length === 0 && plansJ().length === 0,
        info: (e1.motif || e1.etape) + ' / ' + (e2.motif || e2.etape) }));
 
   /* G + C : creation */

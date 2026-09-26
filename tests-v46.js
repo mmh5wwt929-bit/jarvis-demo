@@ -121,7 +121,7 @@ const t = async (id, nom, f) => { let r; try { r = await f(); } catch (e) { r = 
 
   await t('H1', '/health : v4.6.x, couche 5.30.x, ecriture active, elevation Face ID + code', async () => {
     const h = await appel('/health');
-    return { ok: /^v4\.6\.\d+$/.test(h.passerelle) && /^5\.30\.\d+$/.test(h.couche) && h.ecriture === 'actif' && h.elevation === 'faceid+code', info: [h.passerelle, h.couche, h.ecriture, h.elevation].join(' ') };
+    return { ok: /^v4\.[6-9]\.\d+$/.test(h.passerelle) && /^5\.30\.\d+$/.test(h.couche) && h.ecriture === 'actif' && h.elevation === 'faceid+code', info: [h.passerelle, h.couche, h.ecriture, h.elevation].join(' ') };
   });
 
   /* ======================= CREATION D'EVENEMENT ======================= */

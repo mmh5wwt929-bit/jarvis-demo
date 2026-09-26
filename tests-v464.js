@@ -200,7 +200,7 @@ setTimeout(() => fatale('delai de 110 s depasse'), 110000);
   /* ============================ /HEALTH ============================ */
   const h = await appel('/api/health');
   await t('H1', '/health : passerelle v4.6.4, couche 5.30.1', async () =>
-    ({ ok: /^v4\.6\.[4-9]$/.test(h.passerelle) && /^5\.30\.[1-9]$/.test(h.couche) /* [v4.6.5] */, info: h.passerelle + ' ' + h.couche }));
+    ({ ok: /^v4\.(6\.[4-9]|[7-9]\.\d+)$/.test(h.passerelle) && /^5\.30\.[1-9]$/.test(h.couche) /* [v4.6.5] */, info: h.passerelle + ' ' + h.couche }));
 
   /* ============================== LA PAGE ============================== */
   const { JSDOM, VirtualConsole } = require(process.env.JSDOM || 'jsdom');
