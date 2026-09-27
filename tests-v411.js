@@ -301,6 +301,134 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
     ({ ok: (cA2.decision || {}).etape === 'COMPLET' && !items(a0, 'Agenda').some(x => /Kiné/.test(x.texte)) && items(a1, 'Agenda').some(x => /Kiné/.test(x.texte)),
        info: ((cA2.decision || {}).etape || '') + ' ; ' + items(a1, 'Agenda').map(x => x.texte).join(' | ').slice(0, 100) }));
 
+  /* ============================ P [S102] LA PAGE : AUJOURD'HUI, ONGLETS, LIGNES REPLIÉES ============================ */
+  const pagesT = [];
+  let JS = null; try { JS = require(process.env.JSDOM || 'jsdom'); } catch { JS = null; }
+  const HTML = (() => { try { return fs.readFileSync(path.join(DIR, 'index.html'), 'utf8'); } catch { return ''; } })();
+  const page = async ({ prive = false, routes = null, avant = null } = {}) => {
+    const vcj = new JS.VirtualConsole(); const err = []; vcj.on('jsdomError', (e) => err.push(e.message));
+    const envois = [];
+    const dom = new JS.JSDOM(HTML, { url: 'http://localhost:1/', runScripts: 'dangerously', virtualConsole: vcj, pretendToBeVisual: true,
+      beforeParse(w) {
+        if (prive) w.localStorage.setItem('jarvis_cle', CLE);
+        if (avant) avant(w);
+        w.fetch = async (url, o) => {
+          const u = String(url), b = o && o.body ? JSON.parse(o.body) : null;
+          envois.push({ u, ...(b || {}) });
+          const perso = routes ? await routes(u, b, w) : undefined;
+          const j = perso !== undefined ? perso : u.includes('/api/session') ? { sessionId: 's1', ...(prive ? { acces: 'protege' } : {}) } : {};
+          return { ok: true, status: 200, headers: new w.Headers({ 'content-type': 'application/json' }), json: async () => j, text: async () => JSON.stringify(j), clone() { return this; } };
+        };
+        w.scrollTo = () => {}; w.HTMLElement.prototype.scrollIntoView = () => {};
+      } });
+    await dort(400);
+    const w = dom.window, d = w.document;
+    const clic = async (el) => { el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true })); await dort(120); };
+    return { w, d, $: (id) => d.getElementById(id), err, envois, clic };
+  };
+  /* ce qu'on VOIT : hors [hidden], hors <details> fermés (leur <summary> seul), hors lignes repliées */
+  const visible = (el) => { if (!el) return ''; const c = el.cloneNode(true);
+    for (const x of [c, ...c.querySelectorAll('.replie')].filter(x => x.classList.contains('replie'))) for (const y of [...x.children]) if (!y.classList.contains('ligne-repliee')) y.remove();
+    for (const x of [...c.querySelectorAll('details:not([open])')]) for (const y of [...x.childNodes]) if (!(y.nodeType === 1 && y.tagName === 'SUMMARY')) y.remove();
+    for (const x of [...c.querySelectorAll('[hidden]')]) x.remove();
+    return c.textContent.replace(/\s+/g, ' '); };
+  if (JS) {
+    const K = (n) => crypto.createHash('sha256').update('k' + n).digest('hex').slice(0, 20);
+    const FL = (n) => 'fl_00000000-0000-4000-8000-00000000000' + n;
+    const POINTS = [
+      { type: 'suspect', priorite: 1, texte: 'Mail suspect — « URGENT facture »', cle: K(1), fil: FL(1), suspect: true, actions: ['mail'] },
+      { type: 'engagement', priorite: 1, texte: 'En retard : tu as promis (lundi 28 septembre)', cle: K(2), fil: FL(2), objet: 'Match samedi', actions: ['repondre', 'rappel'] },
+      { type: 'reponse', priorite: 2, texte: 'Répondre à Luc — « Match samedi »', cle: K(3), fil: FL(2), objet: 'Match samedi', actions: ['repondre', 'mail', 'rappel'] },
+      { type: 'creneau', priorite: 2, texte: 'Rendez-vous proposé : mercredi 30 septembre à 14:00 — « Match samedi »', cle: K(4), fil: FL(2), objet: 'Match samedi', creneau: 0, actions: ['creneau', 'repondre'] },
+      { type: 'contradiction', priorite: 2, texte: 'À vérifier — « Match samedi » : Montants différents', cle: K(5), fil: FL(2), objet: 'Match samedi', actions: ['repondre'] },
+      { type: 'pj', priorite: 3, texte: 'Pièce jointe annoncée mais absente — « Licences »', cle: K(6), fil: FL(3), objet: 'Licences', actions: ['repondre'] },
+      { type: 'relance', priorite: 3, texte: 'Sans réponse depuis 4 jours — « Maillots » : relancer ?', cle: K(7), fil: FL(4), objet: 'Maillots', actions: ['repondre', 'rappel'] }];
+    const GER = (masquer) => { const m = new Set(masquer || []); const its = POINTS.filter(x => !m.has(x.cle));
+      return { actif: true, date: 'lundi 28 septembre', incomplet: false, masques: POINTS.length - its.length, aTraiter: its.length, resume: its.length + ' point(s) à traiter', regle: 'z',
+        sections: [{ titre: 'Agenda', items: [{ type: 'agenda', texte: "Aujourd'hui 18:00–22:00 : Hand", certitude: 'fait' }] }, { titre: 'Mails', items: its }] }; };
+    const POINT = { actif: true, ok: true, resume: "aujourd'hui : Hand 18:00", jours: [{ libelle: "Aujourd'hui, lundi 28 septembre", evenements: [{ heure: '18:00', titre: 'Hand', agenda: 'agenda JARVIS' }] }],
+      mails: { ok: true, nb: 7, suspects: 1, ligne: 'Mails : 7 à traiter' } };
+    const routesP = (u, b) => u.includes('/api/point-du-jour') ? POINT : /\/api\/gerer$/.test(u) ? GER(b && b.masquer) : u.includes('/api/gerer/rappel')
+      ? { ok: true, decide: 'CONFIRMATION_REQUISE', etape: 'G1_GESTE', outil: 'agenda-jarvis', aConfirmer: { action: 'CREATE', resource: 'AGENDA_JARVIS', cible: '2026-09-29T09:00|15|Rappel : Match samedi', lisible: 'mardi 29 septembre, 09:00 → 09:15 · Rappel : Match samedi', titre: 'Rappel : Match samedi', avertissements: [], serie: 0 } }
+      : u.includes('/api/confirmer') ? { decision: { decide: 'AUTORISE', etape: 'COMPLET', outil: 'agenda-jarvis', evenement: { lisible: 'mardi 29 septembre, 09:00 → 09:15 · Rappel : Match samedi', transactionId: 'tx_1', serie: 0 } } }
+      : u.includes('/api/finaliser') ? { etat: 'EXECUTE', reel: true, envoye: true, code: 'ENVOYE', preuve: '18cabc', reponse: "Envoyé pour de vrai, depuis le compte d'essai JARVIS, à luc@club-hand.fr (objet « Re: Match samedi »). Preuve : identifiant du message chez Google « 18cabc ». Vérifié chez Google : dans les Envoyés ✓, dans la même conversation ✓, au bon destinataire ✓." }
+      : undefined;
+    const Pp = await page({ prive: true, routes: routesP }); pagesT.push(Pp);
+    const auj = Pp.$('aujourdhui') || Pp.d.createElement('div'), pdj = Pp.$('pointDuJour');   /* v4.10.2 : pas de vue « Aujourd'hui » */
+    const lignes = auj ? [...auj.querySelectorAll('.auj-point')] : [];
+    await t('P1', "instance privée : onglets (Aujourd'hui / Discuter / Réglages), « Aujourd'hui » ouvert ; le point du jour y est (plus dans la conversation) ; 5 points au plus, chacun avec « Fait » et « Plus tard » ; « Tout voir (7) »", async () =>
+      ({ ok: !!Pp.$('onglets') && Pp.d.body.dataset.onglet === 'aujourdhui' && !!pdj && auj.contains(pdj) && !Pp.$('fil').contains(pdj) && lignes.length === 5
+          && lignes.every(l => l.querySelector('[data-traite="fait"]') && l.querySelector('[data-traite="plustard"]') && l.querySelectorAll('[data-gerer]').length <= 2)
+          && /Tout voir \(7\)/.test(auj.textContent) && /Hand/.test(visible(auj)),
+         info: 'onglet ' + Pp.d.body.dataset.onglet + ' ; pdj ' + (pdj ? (auj && auj.contains(pdj) ? 'aujourdhui' : 'ailleurs') : 'absent') + ' ; lignes ' + lignes.length }));
+    const l2 = lignes[1], k2 = l2 && l2.dataset.point;
+    if (l2) await Pp.clic(l2.querySelector('[data-traite="fait"]'));
+    await dort(150);
+    const st = (() => { try { return JSON.parse(Pp.w.localStorage.getItem('jarvis_traites') || '{}'); } catch { return {}; } })();
+    const derG = Pp.envois.filter(x => /\/api\/gerer$/.test(x.u)).pop() || {};
+    const lignes2 = [...auj.querySelectorAll('.auj-point')];
+    await t('P2', "« Fait » : la clé est gardée sur le téléphone (30 jours), renvoyée au serveur (« masquer ») ; le point disparaît, les suivants remontent, « Annuler » est proposé", async () =>
+      ({ ok: !!k2 && !!st[k2] && st[k2].e === 'fait' && st[k2].j > Date.now() + 29 * J && Array.isArray(derG.masquer) && derG.masquer.includes(k2)
+          && !lignes2.some(l => l.dataset.point === k2) && lignes2.length === 5 && !!auj.querySelector('[data-detraite="' + k2 + '"]'),
+         info: JSON.stringify(st[k2] || null).slice(0, 80) + ' ; masquer ' + JSON.stringify(derG.masquer || null).slice(0, 60) + ' ; lignes ' + lignes2.length }));
+    const bAnn = auj.querySelector('[data-detraite]');
+    if (bAnn) await Pp.clic(bAnn);
+    await dort(150);
+    const st2 = (() => { try { return JSON.parse(Pp.w.localStorage.getItem('jarvis_traites') || '{}'); } catch { return {}; } })();
+    const l3 = [...auj.querySelectorAll('.auj-point')][0];
+    if (l3) await Pp.clic(l3.querySelector('[data-traite="plustard"]'));
+    await dort(150);
+    const st3 = (() => { try { return JSON.parse(Pp.w.localStorage.getItem('jarvis_traites') || '{}'); } catch { return {}; } })();
+    const p3 = l3 && st3[l3.dataset.point];
+    await t('P3', "« Annuler » réaffiche le point ; « Plus tard » le masque jusqu'à demain matin seulement", async () =>
+      ({ ok: !st2[k2] && !!p3 && p3.e === 'plustard' && p3.j > Date.now() && p3.j < Date.now() + 2 * J, info: 'annulé ' + !st2[k2] + ' ; plus tard ' + JSON.stringify(p3 || null).slice(0, 60) }));
+    const bTout = auj.querySelector('[data-voir-gerer]');
+    if (bTout) await Pp.clic(bTout);
+    await dort(150);
+    const carteG = [...Pp.d.querySelectorAll('#fil .decision.gerer')].pop();
+    await t('P4', "« Tout voir » : passe à « Discuter » et montre la liste complète, chaque point avec « Fait » / « Plus tard »", async () =>
+      ({ ok: Pp.d.body.dataset.onglet === 'discuter' && !!carteG && carteG.querySelectorAll('[data-traite="fait"]').length >= 5, info: 'onglet ' + Pp.d.body.dataset.onglet + ' ; carte ' + !!carteG }));
+    Pp.w.eval('afficherGerer')(GER([]));
+    const cartesG = [...Pp.d.querySelectorAll('#fil .decision.gerer')];
+    await t('P5', "une nouvelle liste « à gérer » replie la précédente en UNE ligne (dépliable au toucher)", async () =>
+      ({ ok: cartesG.length >= 2 && cartesG.slice(0, -1).every(c => c.classList.contains('replie') && c.querySelector('.ligne-repliee')) && !cartesG[cartesG.length - 1].classList.contains('replie'),
+         info: cartesG.map(c => c.classList.contains('replie') ? 'replie' : 'ouverte').join(',') }));
+    /* « Me le rappeler » sur « tu as promis » → « Créer » → le point est traité, la carte devient une ligne */
+    const itProm = [...(cartesG[cartesG.length - 1] || Pp.d.createElement('div')).querySelectorAll('.gerer-item')].find(x => /tu as promis/.test(x.textContent));
+    const bRap = itProm && itProm.querySelector('[data-gerer="rappel"]');
+    if (bRap) await Pp.clic(bRap);
+    await dort(100);
+    const cCree = [...Pp.d.querySelectorAll('#fil .creation')].find(x => x.querySelector('[data-creer]'));
+    const titreGros = cCree && cCree.querySelector('.titre-evt');
+    if (cCree) await Pp.clic(cCree.querySelector('[data-creer]'));
+    await dort(150);
+    const st4 = (() => { try { return JSON.parse(Pp.w.localStorage.getItem('jarvis_traites') || '{}'); } catch { return {}; } })();
+    await t('P6', "« Me le rappeler » → « Créer » réussi : le point « tu as promis » est traité (rappel créé) sans autre geste ; la carte « Créer » devient une ligne « ✓ Créé »", async () =>
+      ({ ok: !!cCree && st4[K(2)] && st4[K(2)].e === 'rappel' && cCree.classList.contains('replie') && /✓ Créé : Rappel : Match samedi/.test(cCree.textContent),
+         info: 'carte ' + !!cCree + ' ; point ' + JSON.stringify(st4[K(2)] || null).slice(0, 50) + ' ; ' + (cCree ? cCree.className : '') }));
+    await t('P7', "carte « Créer » : le titre en gros, à part (« Rappel : Match samedi »), puis le jour et l'heure", async () =>
+      ({ ok: !!titreGros && titreGros.textContent === 'Rappel : Match samedi' && !/Rappel : Match samedi/.test((cCree.querySelector('.evenement') || {}).textContent || 'x'),
+         info: titreGros ? titreGros.textContent + ' | ' + (cCree.querySelector('.evenement') || {}).textContent : 'pas de titre' }));
+    /* un vrai e-mail : entier AVANT l'envoi ; une ligne (à qui, quel objet) APRES */
+    Pp.w.eval('rendreDecision')({ decide: 'EN_ATTENTE', etape: 'RETENUE', plan: { action: 'SEND', target: 'luc@club-hand.fr' }, jetonAnnulation: 'jt_mail_1', executableApres: 0,
+      message: 'Retenu 10 s.', mail: { a: 'luc@club-hand.fr', objet: 'Re: Match samedi', texte: 'Bonjour Luc, je serai présent samedi à 11h.' } });
+    const cMail = [...Pp.d.querySelectorAll('#fil .mail-carte')].pop(), dMail = cMail && cMail.closest('.tour');
+    const avantEnvoi = visible(dMail);
+    await Pp.w.eval('finaliserJeton')('jt_mail_1');
+    await dort(150);
+    const apres = visible(dMail), dernier = [...Pp.d.querySelectorAll('#fil .tour')].pop();
+    await t('P8', "vrai e-mail : destinataire, objet et texte visibles AVANT l'envoi ; APRÈS « Envoyé », une ligne « ✓ Envoyé à luc@… — « Re: Match samedi » » (le texte au toucher) et un message court (preuve sous « + détail »)", async () =>
+      ({ ok: /luc@club-hand\.fr/.test(avantEnvoi) && /je serai présent samedi/.test(avantEnvoi) && !!dMail && dMail.classList.contains('replie')
+          && /✓ Envoyé à luc@club-hand\.fr — « Re: Match samedi »/.test(apres) && !/je serai présent/.test(apres)
+          && /Envoyé pour de vrai, vérifié chez Google\./.test(visible(dernier)) && !/18cabc/.test(visible(dernier)) && /18cabc/.test((dernier || {}).textContent || ''),
+         info: apres.slice(0, 90) + ' | ' + visible(dernier).slice(0, 80) }));
+    const Pd = await page({ routes: routesP }); pagesT.push(Pd);
+    await t('P9', "garde : démo publique inchangée : pas d'onglets actifs (ni « prive »), le point du jour reste dans la conversation, rien n'est replié", async () =>
+      ({ ok: !Pd.d.body.classList.contains('prive') && !!Pd.$('pointDuJour') && Pd.$('fil').contains(Pd.$('pointDuJour')), info: Pd.d.body.className + ' ; pdj ' + !!Pd.$('pointDuJour') }));
+    await t('P10', 'garde : aucune erreur de script', async () => ({ ok: pagesT.every(P => !P.err.length), info: pagesT.map(P => P.err[0]).filter(Boolean).join(' | ').slice(0, 160) }));
+  } else await t('P0', 'jsdom absent (npm install --no-save jsdom)', async () => ({ ok: false }));
+  for (const Pg of pagesT) Pg.w.close();
+
   /* ============================ H VERSION ============================ */
   const h = await appel('/health');
   await t('H1', '/health : passerelle v4.11', async () => ({ ok: h.passerelle === 'v4.11.0', info: h.passerelle }));
