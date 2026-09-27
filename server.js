@@ -328,6 +328,16 @@
  *   [S97] une des deux sources d'agenda non lue n'est plus ignoree en silence :
  *         « a gerer » la nomme, « Verifier dans mon agenda » ne dit plus « libre ».
  *   [S98] compteurs : « Rien… » ne compte pas, une erreur affiche « non lu ».
+ *
+ * v4.11 — vu en ligne le 28 sept (0 h 25 – 1 h 03) : « les points ne descendent
+ *   pas », « la page reste trop encombrante », un titre « hand » non tape.
+ *   [S99] titre d'un evenement : seulement dans tes mots (sinon « Quel titre ? ») ;
+ *         « meme chose » = titre de ta creation precedente, dit sur la carte.
+ *   [S100] redaction echouee : JARVIS dit quoi ecrire.
+ *   [S101] cle stable par point ; ta reponse retire les points qu'elle suit ;
+ *          « Fait » / « Plus tard » (liste de cles venue de la page) : masques ;
+ *          apres un envoi, une creation, une suppression : relecture.
+ *   [S102] (page) Aujourd'hui / Discuter / Reglages ; flux termines replies.
  * ========================================================================== */
 
 const http = require('http');
@@ -3014,11 +3024,11 @@ const serveur = http.createServer((req, res) => {
       detail = true;
     }
     if (!detail)
-      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.10.2',
+      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.11.0',
         acces: CLE_ACCES ? 'protege' : 'public', ...(CLE_ACCES ? { config: verdict } : {}),
         manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
         node: String(process.versions.node).split('.')[0] });
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.10.2', verite: V.VERSION,
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.11.0', verite: V.VERSION,
       agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : ECRITURE_MOTIF ? 'erreur-config' : 'inactif',   /* [S30] [S48] */
       ecritureMotif: ECRITURE_MOTIF,
       mail: MAIL_ENVOI ? 'actif' : MAIL_ENVOI_MOTIF ? 'erreur-config' : 'inactif', mailMotif: MAIL_ENVOI_MOTIF,   /* [S68] */
