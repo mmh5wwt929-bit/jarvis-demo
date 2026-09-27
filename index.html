@@ -387,6 +387,8 @@ button.lire-tout{background:none;border:none;color:var(--signal);font-size:12.5p
     <div class="marque">JARVIS</div>
     <button class="pastille" id="pastille" type="button" aria-expanded="false" aria-controls="enteteDetail"
       aria-label="Plancher de confiance : toucher pour le détail"><i class="point b3" id="pPoint"></i><span class="plancher-val n3" id="pVal">intention directe</span></button>
+    <button class="bouton-vert" id="repartirVert" type="button" hidden title="Nouvelle session : efface l'historique de cette conversation (ici et sur le serveur) ; garde tes souvenirs."
+      aria-label="Repartir au vert : nouvelle session. Efface l'historique de la conversation, garde tes souvenirs.">Repartir au vert</button>
   </div>
   <div class="entete-detail" id="enteteDetail" hidden>
     <p class="accroche">La couche de sécurité d'un assistant personnel : avant chaque action, elle vérifie d'où vient l'intention.</p>
@@ -803,6 +805,7 @@ function majEtat(d) {
     b.style.width = (p.n / 3 * 100) + '%';
     b.className = 'b' + p.n;
     if ($('pPoint')) $('pPoint').className = 'point b' + p.n;   /* [v4.7] */
+    if ($('repartirVert')) $('repartirVert').hidden = p.n !== 1;   /* [S92] pastille rouge : repartir au vert en un toucher */
     const inf = d.influences || [];
     $('pOrigine').textContent = inf.length
       ? p.aide + ' Origine : ' + inf.map(i => i.source).join(', ')
@@ -1535,7 +1538,10 @@ async function envoyer() {
       corps.action = $('action').value;
       corps.cible  = $('cible').value || 'CONVERSATION';
     }
-    const d = await api('/api/chat', corps);
+    /* [S91] « qu'est-ce que j'ai à gérer ? » tapé : la lecture prend quelques secondes, on le dit */
+    const lecture = document.body.classList.contains('perso') && !corps.action && demandeGerer(m) ? chargement() : null;
+    let d;
+    try { d = await api('/api/chat', corps); } finally { if (lecture) lecture.remove(); }
     if (d && d.etape === 'DEBIT' && limiteAtteinte(d)) { $('envoyer').disabled = false; return; }
     if (d && d.etape === 'MEMOIRE' && d.decide === 'AUTORISE' && d.souvenir) Memoire.ajouter(d.souvenir);
     majEtat(d); rendreDecision(d);
@@ -1594,13 +1600,13 @@ function afficherGerer(r) {
   return carteJarvis(h);
 }
 /* le formulaire de reponse : la personne TAPE ce qu'elle veut dire (une consigne) */
-const formReponse = (j, consigne) => '<div class="repondre" data-fil="' + esc(j) + '"><p class="mail-entete">Écris ce que tu veux répondre : Claude rédige, tu relis la carte, rien ne part sans ton adresse retapée et Face ID.</p>'
+const formReponse = (j, consigne, objet) => '<div class="repondre" data-fil="' + esc(j) + '" data-objet="' + esc(objet || '') + '"><p class="mail-entete">Écris ce que tu veux répondre : Claude rédige, tu relis la carte, rien ne part sans ton adresse retapée et Face ID.</p>'
   + '<textarea rows="2" maxlength="600" aria-label="Ce que tu veux répondre" placeholder="ex. : d\'accord pour samedi 11h">' + esc(consigne || '') + '</textarea>'
   + '<div class="rang"><button class="primaire" type="button" data-repondre="1">Préparer la réponse</button></div><p class="etat-carte"></p></div>';
 function ouvrirReponse(j, consigne, objet) {
-  const b = carteJarvis('<div class="decision attente">' + '<div class="plan">Répondre' + (objet ? ' — « ' + esc(objet) + ' »' : '') + '</div>' + formReponse(j, consigne) + '</div>');
+  const b = carteJarvis('<div class="decision attente">' + '<div class="plan">Répondre' + (objet ? ' — « ' + esc(objet) + ' »' : '') + '</div>' + formReponse(j, consigne, objet) + '</div>');
   const ta = b.querySelector('textarea'); if (ta) try { ta.focus(); } catch (e) {}
-  return b;
+  return b.querySelector('.repondre') || b;
 }
 function afficherConversation(r) {
   if (!r || !r.ok) return tour('JARVIS', (r && r.message) || 'Conversation non lue.', false);
@@ -1655,11 +1661,79 @@ function rendreOuDire(r, ou) {
   majEtat(r); rendreDecision(r);
   return true;
 }
-async function gererTout(bouton) {
+/* [S91] pendant la lecture (boîte + agenda, parfois plusieurs secondes) : on le dit */
+const TEXTE_LECTURE = 'Je lis ta boîte et ton agenda…';
+function chargement(texte) { const b = tour('JARVIS', texte || TEXTE_LECTURE, false); b.classList.add('chargement'); return b; }
+const RE_GERER_PAGE = /(^| )(qu est ce que j ai a gerer|j ai quoi a gerer|a gerer aujourd hui|quoi gerer|qu est ce que je dois faire aujourd hui|j ai quoi a faire aujourd hui|qu est ce qui m attend|mes priorites du jour|quoi de prevu aujourd hui)( |$)/;
+const demandeGerer = (m) => RE_GERER_PAGE.test(' ' + String(m || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' ');
+async function gererTout(bouton, frais = true) {
   if (bouton) bouton.disabled = true;
-  try { const r = await api('/api/gerer', { souvenirs: Memoire.liste(), frais: true }); if (!limiteAtteinte(r || {})) { majEtat(r || {}); afficherGerer(r); } }
-  catch (e) { tour('JARVIS', 'La passerelle est injoignable : ' + e.message, false); }
+  const b = chargement();
+  try { const r = await api('/api/gerer', { souvenirs: Memoire.liste(), frais }); b.remove(); if (!limiteAtteinte(r || {})) { majEtat(r || {}); afficherGerer(r); } }
+  catch (e) { b.remove(); tour('JARVIS', 'La passerelle est injoignable : ' + e.message, false); }
   if (bouton) bouton.disabled = false;
+}
+/* [S93] v4.10.1 une carte « à gérer » d'une session expirée (ou d'une conversation sortie de la
+ * session) : au lieu de « Cette conversation n'est plus dans la session », JARVIS relit
+ * « à gérer » tout seul, retrouve le MÊME point (son texte, sinon l'objet) et refait le geste.
+ * Une réponse n'est jamais envoyée ainsi : le formulaire se rouvre, avec ta consigne. */
+const PERIMES = new Set(['CONVERSATION_INCONNUE', 'CRENEAU_INCONNU', 'CRENEAU_NON_VERIFIE']);
+const perime = (r) => !!(r && r.ok === false && PERIMES.has(r.code));
+function cleDe(el) {
+  const it = el && el.closest('.gerer-item'), c = el && el.closest('.conversation, .repondre, .creneau');
+  return { texte: it ? it.dataset.cle || '' : '', objet: (it && it.dataset.objet) || (c && c.dataset.objet) || '' };
+}
+async function relire(source, act, extra = {}) {
+  const cle = cleDe(source);
+  const b = chargement('Carte d\'une session terminée : je relis ta boîte et ton agenda…');
+  let r = null; try { r = await api('/api/gerer', { souvenirs: Memoire.liste(), frais: true }); } catch (e) { r = null; }
+  b.remove();
+  if (!r || limiteAtteinte(r)) return r ? null : tour('JARVIS', 'Pas de réponse du serveur : redemande « Qu\'est-ce que j\'ai à gérer ? ».', false);
+  majEtat(r); afficherGerer(r);
+  const tous = (r.sections || []).reduce((l, s) => l.concat(s.items || []), []).filter(x => jetonFil(x.fil));
+  const it = tous.find(x => cle.texte && x.texte === cle.texte) || tous.find(x => cle.objet && x.objet === cle.objet && (act !== 'creneau' || x.type === 'creneau'));
+  if (!it) return tour('JARVIS', 'Relu : ce point n\'est plus dans ta boîte (traité, ou plus de 14 jours).', false);
+  return geste(act, jetonFil(it.fil), { ...extra, index: it.creneau, objet: it.objet || cle.objet, cle: it.texte, deja: true });
+}
+/* [S92] v4.10.1 REPARTIR AU VERT : la pastille est rouge (un contenu externe a été lu) ; en un
+ * toucher, la session est fermée côté serveur (historique, contenus lus, cartes) et une neuve
+ * s'ouvre. Les souvenirs vivent dans ce navigateur : ils restent. On le dit. */
+async function repartirAuVert(bouton) {
+  if (bouton) bouton.disabled = true;
+  const ancien = sid;
+  try { if (ancien) await versServeur(API + '/api/session/fermer', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId: ancien }) }); }
+  catch (e) { /* hors ligne : l'ancienne session expirera seule (30 min) */ }
+  sid = null;
+  await assurerSession();
+  perimerTout();
+  const acc = $('accueil');
+  $('fil').innerHTML = '';
+  if (acc) $('fil').appendChild(acc);
+  $('chaine').innerHTML = '<div class="vide">La chaîne se construira ici.</div>';
+  majEtat({ plancher: 'USER_DIRECT', influences: [], ledger: { consumed: 0, allocated: 100 } });
+  tour('JARVIS', "Reparti au vert : nouvelle session. Effacé : l'historique de cette conversation, ici et sur le serveur (et les contenus lus). Gardé : tes souvenirs (« Ce que JARVIS retient de toi »).", false);
+  if (bouton) bouton.disabled = false;
+}
+/* un geste sur une conversation (voir, rappel, créneau, répondre) ; rejoué une fois après relecture */
+async function geste(act, j, o = {}) {
+  const avec = (el) => { if (el && el.dataset) { if (o.objet) el.dataset.objet = o.objet; } return el; };
+  if (act === 'repondre') return avec(ouvrirReponse(j, o.consigne || '', o.objet || ''));
+  if (act === 'voir') {
+    const r = await api('/api/mail/fil', { jeton: j });
+    if (perime(r) && !o.deja) return relire(o.source, act, o);
+    if (!limiteAtteinte(r || {})) { majEtat(r || {}); afficherConversation(r); }
+    return;
+  }
+  if (act === 'rappel') {
+    const r = await api('/api/gerer/rappel', { jeton: j });
+    if (perime(r) && !o.deja) return relire(o.source, act, o);
+    return rendreOuDire(r);
+  }
+  if (act === 'creneau') {
+    const r = await api('/api/gerer/creneau', { jeton: j, index: Number(o.index) });
+    if (perime(r) && !o.deja) return relire(o.source, act, o);
+    if (!limiteAtteinte(r || {})) { majEtat(r || {}); avec(afficherCreneau(r)); }
+  }
 }
 /* [S84] sauvegarde : le partage d'iOS (« Enregistrer dans Fichiers »), sinon un telechargement */
 function direSouvenirs(t) { const p = $('souvMessage'); if (p) p.textContent = t; }
@@ -1746,29 +1820,30 @@ document.addEventListener('click', async (ev) => {
   if (t.id === 'aGerer') { await gererTout(t); return; }
   if (t.dataset.gerer) {
     const j = jetonFil(t.dataset.fil); if (!j) return;
-    const act = t.dataset.gerer;
-    if (act === 'repondre') { const c = t.closest('.conversation'); ouvrirReponse(j, '', c ? c.dataset.objet : ''); return; }
+    const act = t.dataset.gerer, k = cleDe(t);
+    if (act === 'repondre') { const c = t.closest('.conversation'); const f = ouvrirReponse(j, '', c ? c.dataset.objet : ''); if (f && k.objet) f.dataset.objet = k.objet; return; }
     t.disabled = true;
-    try {
-      if (act === 'voir') { const r = await api('/api/mail/fil', { jeton: j }); if (!limiteAtteinte(r || {})) { majEtat(r || {}); afficherConversation(r); } }
-      else if (act === 'rappel') rendreOuDire(await api('/api/gerer/rappel', { jeton: j }));
-      else if (act === 'creneau') { const r = await api('/api/gerer/creneau', { jeton: j, index: Number(t.dataset.index) }); if (!limiteAtteinte(r || {})) { majEtat(r || {}); afficherCreneau(r); } }
-    } catch (e) { tour('JARVIS', 'La passerelle est injoignable : ' + e.message, false); }
+    try { await geste(act, j, { index: t.dataset.index, source: t, objet: k.objet }); }   /* [S93] relu tout seul si la carte est périmée */
+    catch (e) { tour('JARVIS', 'La passerelle est injoignable : ' + e.message, false); }
     t.disabled = false;
     return;
   }
   if (t.dataset.creneauRepondre) {
     const c = t.closest('.creneau'); if (!c) return;
     const j = jetonFil(c.dataset.fil); if (!j) return;
-    ouvrirReponse(j, (c._consignes || {})[t.dataset.creneauRepondre] || '');
+    const f = ouvrirReponse(j, (c._consignes || {})[t.dataset.creneauRepondre] || '');
+    if (f && c.dataset.objet) f.dataset.objet = c.dataset.objet;
     return;
   }
   if (t.dataset.creneauAjouter) {
     const c = t.closest('.creneau'); if (!c) return;
     const j = jetonFil(c.dataset.fil); if (!j) return;
     t.disabled = true;
-    try { rendreOuDire(await api('/api/gerer/evenement', { jeton: j, index: Number(c.dataset.index), autre: t.dataset.creneauAjouter === '1' })); }
-    catch (e) { tour('JARVIS', 'La passerelle est injoignable : ' + e.message, false); }
+    try {
+      const r = await api('/api/gerer/evenement', { jeton: j, index: Number(c.dataset.index), autre: t.dataset.creneauAjouter === '1' });
+      /* [S93] la vérification du créneau est perdue avec la session : on la refait (le serveur garde ce qu'il propose) */
+      if (perime(r)) await relire(t, 'creneau'); else rendreOuDire(r);
+    } catch (e) { tour('JARVIS', 'La passerelle est injoignable : ' + e.message, false); }
     t.disabled = false;
     return;
   }
@@ -1780,10 +1855,16 @@ document.addEventListener('click', async (ev) => {
     t.disabled = true; if (etatR) etatR.textContent = 'Rédaction…';
     let r = null;
     try { r = await api('/api/mail/repondre', { jeton: j, consigne }); } catch (e) { r = null; }
+    /* [S93] conversation sortie de la session : relue, le formulaire se rouvre avec TA consigne (rien n'est rédigé sans ton toucher) */
+    if (perime(r)) { if (etatR) etatR.textContent = 'Conversation relue ci-dessous : touche à nouveau « Préparer la réponse ».'; t.disabled = false; return relire(t, 'repondre', { consigne }); }
     if (rendreOuDire(r, etatR)) { if (etatR) etatR.textContent = 'Préparée ci-dessous : relis-la.'; }
     t.disabled = false;
     return;
   }
+  /* [S94] « Voir » dans le point du jour : la carte « à gérer » (les mails lus à l'ouverture, s'ils ont moins d'une minute) */
+  if (t.dataset.voirGerer) { await gererTout(t, false); return; }
+  /* [S92] « Repartir au vert » : la session est fermée côté serveur, une neuve s'ouvre ; les souvenirs restent */
+  if (t.id === 'repartirVert') { await repartirAuVert(t); return; }
   if (t.id === 'toutOublier') { if (confirm('Effacer tout ce que JARVIS retient de toi ?')) Memoire.toutOublier(); return; }
   if (t.id === 'reset') {
     t.disabled = true;   /* le parcours guide attend que ce bouton se reactive */
@@ -2115,7 +2196,11 @@ function afficherPointDuJour(r) {
   let ferme = false; try { ferme = localStorage.getItem(POINT_FERME) === '1'; } catch (e) { ferme = false; }
   const d = document.createElement('details');
   d.className = 'point-du-jour'; d.id = 'pointDuJour';
-  let h = '<summary><span class="pdj-titre">Point du jour</span> <span class="pdj-resume">' + esc(r.ok ? r.resume : 'indisponible') + '</span></summary><div class="pdj-corps">';
+  /* [S94] v4.10.1 « à gérer » en une ligne (mails), écrite par le serveur, et « Voir » */
+  const mails = r.mails && typeof r.mails.ligne === 'string' ? r.mails : null;
+  const resume = [r.ok ? r.resume : 'indisponible', mails && mails.ok ? (mails.nb ? pluriel(mails.nb, 'mail à traiter', 'mails à traiter') : 'rien à traiter dans tes mails') : ''].filter(Boolean).join(' · ');
+  let h = '<summary><span class="pdj-titre">Point du jour</span> <span class="pdj-resume">' + esc(resume) + '</span></summary><div class="pdj-corps">';
+  if (mails) h += '<div class="pdj-jour pdj-mails"><b>' + esc(mails.ligne) + '</b>' + (mails.ok ? ' <button type="button" class="lien" data-voir-gerer="1">Voir</button>' : '') + '</div>';
   if (!r.ok) h += '<p class="pdj-vide">' + esc(r.message || 'Lecture impossible.') + '</p>';
   else for (const j of (r.jours || [])) {
     h += '<div class="pdj-jour"><b>' + esc(j.libelle) + '</b>' + ((j.evenements || []).length
@@ -2136,7 +2221,7 @@ function afficherPointDuJour(r) {
   if (acc && acc.parentNode === $('fil')) acc.insertAdjacentElement('afterend', t); else $('fil').appendChild(t);
 }
 (async () => {
-  try { afficherPointDuJour(await api('/api/point-du-jour')); } catch (x) { /* instance publique ou hors ligne : rien */ }
+  try { afficherPointDuJour(await api('/api/point-du-jour', { souvenirs: Memoire.liste() })); } catch (x) { /* instance publique ou hors ligne : rien */ }   /* [S94] avec tes souvenirs (délai de relance) */
 })();
 
 /* [S31] bloc Face ID : seulement sur une instance ou l'elevation existe */

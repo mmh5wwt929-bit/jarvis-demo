@@ -13,7 +13,7 @@
  *   ceux d'en dessous viennent de l'expediteur, falsifiables), et seulement
  *   s'il est signe « mx.google.com » ; [S85] References gardees (identifiants
  *   <…> valides) : avant, nettoyer() les rendait illisibles et la reponse ne
- *   portait que In-Reply-To.
+ *   portait que In-Reply-To ; [S91] lireFils lit 4 conversations a la fois.
  * ----------------------------------------------------------------------------
  * MOINDRE PRIVILEGE, PAR CONSTRUCTION
  *  - Deux jetons OAuth (refresh tokens) du compte d'essai, obtenus a part :
@@ -55,7 +55,8 @@ const VERSION = '1.3';
 const LIMITES_MAIL = Object.freeze({ delaiMs: 12000, maxOctets: 1024 * 1024, permisMs: 30 * 1000,
   objetMax: 150, texteMax: 3000, autorisesMax: 10, plafondDefaut: 5, plafondMax: 20,
   lusMax: 5, extraitMax: 1200, diagnosticMs: 20000, lectureTotaleMs: 20000,
-  filsMax: 15, messagesParFil: 10, texteFil: 2500, joursFils: 14 });   /* [S80] v4.10 les conversations */
+  filsMax: 15, messagesParFil: 10, texteFil: 2500, joursFils: 14,   /* [S80] v4.10 les conversations */
+  lecturesParallele: 4 });   /* [S91] v4.10.1 */
 const HOTES = new Set(['oauth2.googleapis.com', 'gmail.googleapis.com']);
 const PORTEE_ENVOI = 'https://www.googleapis.com/auth/gmail.send';
 const PORTEE_LECTURE = 'https://www.googleapis.com/auth/gmail.readonly';
@@ -516,13 +517,20 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
         ids = (Array.isArray(l.json.threads) ? l.json.threads : []).map(x => x && x.id).filter(x => typeof x === 'string' && RE_FIL.test(x)).slice(0, L.filsMax);
         tronque = typeof l.json.nextPageToken === 'string';
       } else ids = [String(permis.filtre).slice(4)];
-      const fils = [], debut = maintenant();
-      for (const id of ids) {
-        if (maintenant() - debut > L.lectureTotaleMs) { fils.push(Object.freeze({ id, illisible: true, code: 'DELAI_DEPASSE' })); continue; }
-        const f = await appeler('GET', API + '/threads/' + id + '?format=full', null, j.jeton);
-        if (!f.ok || f.status !== 200 || !f.json || !Array.isArray(f.json.messages)) { fils.push(Object.freeze({ id, illisible: true, code: f.ok ? erreurGmail(f.status, f.json) : f.code })); continue; }
-        fils.push(convertirFil(id, f.json, moi));
-      }
+      /* [S91] v4.10.1 4 conversations a la fois (avant : une par une, 15 aller-retours
+       * a la suite) ; l'ordre de la liste est garde ; le budget TOTAL reste 20 s */
+      const fils = new Array(ids.length), debut = maintenant();
+      let suivant = 0;
+      const lecteur = async () => {
+        for (let k = suivant++; k < ids.length; k = suivant++) {
+          const id = ids[k];
+          if (maintenant() - debut > L.lectureTotaleMs) { fils[k] = Object.freeze({ id, illisible: true, code: 'DELAI_DEPASSE' }); continue; }
+          const f = await appeler('GET', API + '/threads/' + id + '?format=full', null, j.jeton);
+          fils[k] = (!f.ok || f.status !== 200 || !f.json || !Array.isArray(f.json.messages))
+            ? Object.freeze({ id, illisible: true, code: f.ok ? erreurGmail(f.status, f.json) : f.code }) : convertirFil(id, f.json, moi);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.max(1, Math.min(Number(L.lecturesParallele) || 1, 8, ids.length)) }, lecteur));
       return { ok: true, filtre: permis.filtre, moi, fils: Object.freeze(fils), tronque };
     },
     verifierReponse: (c) => (envoiActif ? verifierReponse(c || {}) : { ok: false, code: motifEnvoi }),

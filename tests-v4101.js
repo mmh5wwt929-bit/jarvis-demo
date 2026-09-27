@@ -323,6 +323,45 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
   const h = await appel('/health');
   await t('H1', '/health : passerelle v4.10.1', async () => ({ ok: h.passerelle === 'v4.10.1', info: h.passerelle }));
 
+  /* ============================ L [S91] LIRE 4 PAR 4 ============================ */
+  const idsL = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(k => '18f00000000001' + String(k).padStart(2, '0'));
+  const vol = { n: 0, max: 0 };
+  const mmL = GM.creerMail ? GM.creerMail({ client: CLIENT, envoi: RT_E, lecture: RT_L, autorises: 'luc@club-hand.fr', transport: async (methode, url, entetes, corps) => {
+    if (/oauth2/.test(url)) return { ok: true, status: 200, texte: JSON.stringify({ access_token: 'a', expires_in: 3600, scope: /lecture/.test(corps || '') ? PORTEE_L : PORTEE_E }) };
+    if (/profile/.test(url)) return { ok: true, status: 200, texte: JSON.stringify({ emailAddress: MOI }) };
+    if (/\/threads\?/.test(url)) return { ok: true, status: 200, texte: JSON.stringify({ threads: idsL.map(id => ({ id })) }) };
+    const id = (/threads\/([0-9a-f]+)/.exec(url) || [])[1];
+    vol.n++; vol.max = Math.max(vol.max, vol.n); await dort(5 + (idsL.indexOf(id) % 3) * 20); vol.n--;
+    return { ok: true, status: 200, texte: JSON.stringify({ id, messages: [{ id: 'm' + id, internalDate: '1', labelIds: ['INBOX'], payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'x@club.fr' }, { name: 'Subject', value: 'S' + id }], body: { data: b64('t') } } }] }) };
+  } }) : null;
+  const luL = mmL ? await essai(async () => mmL.lireFils(mmL.permisLecture({ action: 'READ', resource: 'MAIL', target: 'fils', transactionId: 'tx_' + crypto.randomUUID() })), {}) : {};
+  await t('L1', "module Gmail : les conversations sont lues 4 À LA FOIS (avant : une par une), dans l'ordre de la liste, aucune perdue", async () =>
+    ({ ok: luL.ok === true && vol.max === 4 && luL.fils.map(f => f.id).join() === idsL.join() && luL.fils.every(f => !f.illisible), info: 'en même temps : ' + vol.max + ' ; ' + (luL.fils || []).length + ' lues' }));
+
+  /* ============================ V [S92] REPARTIR AU VERT (serveur) ============================ */
+  IP = '89.4.4.1';
+  const sV = await session(), sV2 = await session();
+  const fV = await appel('/api/session/fermer', { sessionId: sV }), fX = await appel('/api/session/fermer', { sessionId: 's-inconnue' });
+  const apresV = await dire(sV, 'bonjour'), autreV = await dire(sV2, 'bonjour');
+  await t('V1', "« Repartir au vert » : la session est FERMÉE côté serveur (historique, contenus lus) ; une autre session n'est pas touchée ; un identifiant inconnu ne ferme rien", async () =>
+    ({ ok: fV.ferme === true && fX.ferme === false && apresV.status === 401 && apresV.erreur === 'SESSION_INCONNUE' && autreV.status === 200, info: JSON.stringify([fV.ferme, fX.ferme, apresV.status, autreV.status]) }));
+
+  /* ============================ P [S94] « A GERER » DANS LE POINT DU JOUR ============================ */
+  IP = '89.5.5.1'; const sP = await session(); W.conv.length = 0; W.plans.length = 0;
+  W.gmail.fils = [FIL_A, FIL_B, FIL_PIEGE]; W.agenda = [];
+  const listes = () => W.gmail.appels.filter(x => /\/threads$/.test(x.path)).length;
+  const l0 = listes();
+  const p1 = await appel('/api/point-du-jour', { sessionId: sP, souvenirs: [] });
+  const l1 = listes();
+  const p2 = await appel('/api/point-du-jour', { sessionId: sP, souvenirs: [] });
+  const gV = await gerer(sP, [], false);
+  const l2 = listes();
+  await t('P1', "point du jour : « à gérer » en UNE ligne (« Mails : 1 réponse attendue · … · 1 suspect »), écrite par le serveur, sans IA, plancher inchangé", async () =>
+    ({ ok: p1.actif === true && p1.mails && p1.mails.ok === true && /^Mails : 1 réponse attendue · .*· 1 suspect$/.test(p1.mails.ligne) && p1.mails.nb >= 2 && W.conv.length === 0 && p1.plancher === 'USER_DIRECT'
+        && (p1.jours || []).length === 2, info: (p1.mails ? p1.mails.ligne : p1.code || p1.erreur || p1.status) + ' ; IA ×' + W.conv.length + ' ; plancher ' + p1.plancher }));
+  await t('P2', "mis en cache comme le point du jour (même session : pas de 2e lecture) ; « Voir » (à gérer, sans « frais ») réutilise la même lecture de la boîte", async () =>
+    ({ ok: l1 - l0 === 1 && l2 === l1 && JSON.stringify(p2.mails) === JSON.stringify(p1.mails) && items(gV, 'Mails').some(x => x.type === 'suspect'), info: 'listes lues : ' + (l1 - l0) + ' puis ' + (l2 - l1) }));
+
   /* ============================ PAGE (jsdom) ============================ */
   let JS = null; try { JS = require(process.env.JSDOM || 'jsdom'); } catch { JS = null; }
   const HTML = (() => { try { return fs.readFileSync(path.join(DIR, 'index.html'), 'utf8'); } catch { return ''; } })();
@@ -442,6 +481,76 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
       ({ ok: !Pp.d.body.classList.contains('allege') && fermes === 0 && memoT === '1' && /REFORMULATION_REQUISE/.test(visible(derniere(Pp, '.decision.refuse'))),
          info: 'allégé ' + Pp.d.body.classList.contains('allege') + ' ; repliés ' + fermes + ' ; mémo ' + memoT }));
     await t('I9', 'garde : aucune erreur de script (privée, démo)', async () => ({ ok: !Pp.err.length && !Pd.err.filter(x => !/Not implemented/.test(x)).length, info: Pp.err.concat(Pd.err).slice(0, 2).join(' | ') }));
+
+    /* ============================ L [S91] « JE LIS TA BOITE ET TON AGENDA… » ============================ */
+    let libere = null;
+    const Pl = await page({ prive: true, routes: (u) => u.includes('/api/gerer') ? new Promise(r => { libere = () => r(GER); }) : undefined }); pagesT.push(Pl);
+    if (Pl.$('aGerer')) Pl.clic(Pl.$('aGerer'));
+    await dort(60);
+    const pendant = [...Pl.d.querySelectorAll('#fil .tour')].some(x => /Je lis ta boîte et ton agenda…/.test(x.textContent));
+    if (libere) libere(); await dort(120);
+    const apres = [...Pl.d.querySelectorAll('#fil .tour')].some(x => /Je lis ta boîte et ton agenda…/.test(x.textContent));
+    await t('L2', "page : « Je lis ta boîte et ton agenda… » pendant la lecture, retiré quand la carte arrive", async () =>
+      ({ ok: pendant && !apres && !!Pl.d.querySelector('#fil .gerer'), info: 'pendant ' + pendant + ' ; après ' + apres }));
+
+    /* ============================ V [S92] REPARTIR AU VERT (page) ============================ */
+    const SOUV = JSON.stringify([{ texte: 'mon club est le HBC Nord', date: '2026-09-20' }]);
+    const Pv = await page({ prive: true, avant: (w) => w.localStorage.setItem('jarvis_souvenirs', SOUV) }); pagesT.push(Pv);
+    Pv.w.eval('tour')('Toi', 'lis mes mails', true);
+    Pv.w.eval('majEtat')({ plancher: 'CONTENT_DERIVED', influences: [{ source: 'mail:18f0000000000001' }] });
+    const bV = Pv.$('repartirVert'), visibleV = !!bV && bV.hidden === false;
+    const nSess = Pv.envois.filter(x => /\/api\/session$/.test(x.u)).length;
+    if (bV) await Pv.clic(bV);
+    await dort(100);
+    const ferme = Pv.envois.find(x => /\/api\/session\/fermer$/.test(x.u)) || {};
+    const msgV = [...Pv.d.querySelectorAll('#fil .tour')].map(x => x.textContent).join(' | ');
+    await t('V2', "page : pastille rouge → « Repartir au vert » ; un toucher ferme l'ancienne session, en ouvre une neuve, vide la conversation et DIT ce qui est effacé (l'historique) et gardé (les souvenirs)", async () =>
+      ({ ok: visibleV && ferme.sessionId === 's1' && Pv.envois.filter(x => /\/api\/session$/.test(x.u)).length === nSess + 1 && !/lis mes mails/.test(msgV)
+          && /Effacé : l'historique/.test(msgV) && /Gardé : tes souvenirs/.test(msgV) && Pv.$('pVal').textContent === 'intention directe' && bV.hidden === true
+          && Pv.w.localStorage.getItem('jarvis_souvenirs') === SOUV && !!Pv.$('accueil') && Pv.$('fil').contains(Pv.$('accueil')),
+         info: 'bouton ' + visibleV + ' ; fermée ' + ferme.sessionId + ' ; ' + msgV.slice(0, 90) }));
+
+    /* ============================ V [S93] CARTE PERIMEE : RELUE D'ELLE-MEME ============================ */
+    const GER2 = { ...GER, sections: GER.sections.map(s => ({ ...s, items: s.items.map(it => it.fil ? { ...it, fil: it.fil.replace(/.$/, '7') } : it) })) };
+    const CONV = { ok: true, fil: JF(7), objet: 'Match samedi', suspect: false, transparence: 'x', messages: [{ i: 0, de: 'Luc', moi: false, date: 'd', texte: 'Pouvez-vous confirmer ?', piecesJointes: [] }],
+      analyse: { alertes: [], contradictions: [], pjManquantes: [], engagements: [], echeances: [], creneaux: [], relance: null } };
+    const Pr = await page({ prive: true, routes: (u, b) => {
+      if (u.includes('/api/mail/fil')) return b.jeton === JF(7) ? CONV : { ok: false, code: 'CONVERSATION_INCONNUE', message: "Cette conversation n'est plus dans la session : redemande « qu'est-ce que j'ai à gérer ? »." };
+      if (u.includes('/api/mail/repondre')) return b.jeton === JF(7) ? undefined : { ok: false, code: 'CONVERSATION_INCONNUE', message: "Cette conversation n'est plus dans la session." };
+      if (u.includes('/api/gerer')) return GER2;
+      return undefined; } }); pagesT.push(Pr);
+    Pr.w.eval('afficherGerer')(GER);
+    const itR = [...Pr.d.querySelectorAll('#fil .gerer-item')].find(x => /Répondre à Luc/.test(x.textContent));
+    if (itR) await Pr.clic(itR.querySelector('[data-gerer="voir"]'));
+    await dort(150);
+    const convR = [...Pr.d.querySelectorAll('#fil .conversation')].pop();
+    const texteR = [...Pr.d.querySelectorAll('#fil .tour')].map(x => x.textContent).join(' | ');
+    await t('V3', "carte « à gérer » d'une session expirée : JARVIS relit « à gérer » tout seul et ouvre la MÊME conversation (nouveau jeton), sans « n'est plus dans la session »", async () =>
+      ({ ok: !!convR && convR.dataset.fil === JF(7) && !/n'est plus dans la session/.test(texteR) && Pr.envois.some(x => /\/api\/gerer$/.test(x.u) && x.frais === true),
+         info: convR ? 'conversation ' + convR.dataset.fil : texteR.slice(-100) }));
+    if (itR) await Pr.clic(itR.querySelector('[data-gerer="repondre"]'));
+    const formR = [...Pr.d.querySelectorAll('#fil .repondre')].pop();
+    if (formR) { formR.querySelector('textarea').value = 'je serai là à 11h'; await Pr.clic(formR.querySelector('[data-repondre]')); await dort(150); }
+    const formR2 = [...Pr.d.querySelectorAll('#fil .repondre')].pop();
+    const nRep = Pr.envois.filter(x => x.u.includes('/api/mail/repondre')).length;
+    await t('V4', "réponse sur une conversation sortie de la session : relue, le formulaire se ROUVRE avec ta consigne (nouveau jeton) ; rien n'est rédigé sans ton nouveau toucher", async () =>
+      ({ ok: !!formR2 && formR2 !== formR && formR2.dataset.fil === JF(7) && formR2.querySelector('textarea').value === 'je serai là à 11h' && nRep === 1,
+         info: formR2 ? formR2.dataset.fil + ' « ' + formR2.querySelector('textarea').value + ' » ; rédactions ' + nRep : 'pas de formulaire' }));
+
+    /* ============================ P [S94] LE POINT DU JOUR (page) ============================ */
+    const POINT = { actif: true, ok: true, resume: "aujourd'hui : rien · demain : 1 événement", jours: [{ jour: 'x', libelle: "Aujourd'hui, x", evenements: [] }, { jour: 'y', libelle: 'Demain, y', evenements: [{ heure: '18:00 → 19:00', titre: 'Hand', agenda: 'JARVIS' }] }],
+      mails: { ok: true, nb: 3, suspects: 1, ligne: 'Mails : 2 réponses attendues · 1 suspect' } };
+    const Pj = await page({ prive: true, avant: (w) => w.localStorage.setItem('jarvis_souvenirs', SOUV), routes: (u) => u.includes('/api/point-du-jour') ? POINT : u.includes('/api/gerer') ? GER : undefined }); pagesT.push(Pj);
+    const pdj = Pj.$('pointDuJour'), envP = Pj.envois.find(x => x.u.includes('/api/point-du-jour')) || {};
+    const bVoir = pdj ? pdj.querySelector('[data-voir-gerer]') : null;
+    if (bVoir) await Pj.clic(bVoir);
+    await dort(100);
+    const envG = Pj.envois.filter(x => /\/api\/gerer$/.test(x.u)).pop() || {};
+    await t('P3', "page : le point du jour montre « Mails : 2 réponses attendues · 1 suspect » + « Voir » (résumé : « 3 mails à traiter ») ; demandé avec tes souvenirs ; « Voir » → la carte « à gérer » (sans relire si c'est récent)", async () =>
+      ({ ok: !!pdj && /Mails : 2 réponses attendues · 1 suspect/.test(pdj.textContent) && /3 mails à traiter/.test(pdj.querySelector('summary').textContent) && !!bVoir
+          && envP.methode === 'POST' && Array.isArray(envP.souvenirs) && envP.souvenirs.length === 1 && envG.frais === false && !!Pj.d.querySelector('#fil .gerer'),
+         info: pdj ? pdj.querySelector('summary').textContent + ' ; ' + envP.methode + ' ; frais ' + envG.frais : 'pas de point du jour' }));
+    await t('P4', 'garde : aucune erreur de script', async () => ({ ok: [Pl, Pv, Pr, Pj].every(P => !P.err.length), info: [Pl, Pv, Pr, Pj].map(P => P.err[0]).filter(Boolean).join(' | ').slice(0, 120) || 'aucune' }));
   } else await t('P0', 'jsdom absent (npm install --no-save jsdom)', async () => ({ ok: false }));
   for (const P of pagesT) P.w.close();
 
