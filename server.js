@@ -750,8 +750,10 @@ function appelAnthropic(entree, maxTokens, modele, systeme, reglages = {}) {
  * ======================================================================== */
 
 /* Pas d'espaces ni de retours a la ligne : un identifiant, pas une phrase. */
+/* [S75] « + » garde : « paul+hand@… » est une adresse valable ; sans lui, le
+ * modele lisait une AUTRE adresse (« paulhand@… ») dans l'etat du noyau */
 const propre = (v, max) => String(v == null ? '' : v)
-  .replace(/[^A-Za-z0-9\u00C0-\u00FF:._@\/-]/g, '').slice(0, max || 60) || '?';
+  .replace(/[^A-Za-z0-9\u00C0-\u00FF:._@\/+-]/g, '').slice(0, max || 60) || '?';
 
 const NIVEAUX = {
   USER_DIRECT: "vert, intention directe : tout ce que la session contient vient de la personne",
@@ -787,8 +789,10 @@ function etatPourPrompt(s) {
  * Vu en ligne : « JARVIS lit seulement » alors que l'ecriture etait active ;
  * « je peux seulement lire », puis « un seul evenement a la fois ». */
 function outilsPourPrompt() {
+  /* [S75] « Ouvrir dans Mail » existe partout : ce n'est jamais JARVIS qui envoie */
+  const MAILTO = "Pour un e-mail à écrire (« envoie un mail à nom@domaine.fr pour lui dire que … », adresse tapée par la personne), le serveur prépare le brouillon complet et un bouton « Ouvrir dans Mail » : c'est la personne qui l'envoie depuis son application ; ce n'est jamais toi, et JARVIS ne sait pas s'il est parti.";
   if (!AGENDA && !ECRITURE && !MAIL_ENVOI && !MAIL_LECTURE && !ENVOI_REEL)
-    return "Tu n'as encore aucun outil réel et pas d'accès à Internet : aucun e-mail ne part, aucun fichier n'existe, aucun paiement n'a lieu. Le noyau arbitre les actions pour de vrai, puis leur exécution est simulée. Si la personne pourrait croire qu'une action a réellement eu lieu, dis clairement qu'elle est simulée.";
+    return "Tu n'as encore aucun outil réel et pas d'accès à Internet : aucun e-mail ne part, aucun fichier n'existe, aucun paiement n'a lieu. Le noyau arbitre les actions pour de vrai, puis leur exécution est simulée. Si la personne pourrait croire qu'une action a réellement eu lieu, dis clairement qu'elle est simulée. " + MAILTO;
   const outils = [];
   if (AGENDA || ECRITURE) outils.push("lire l'agenda de la personne" + (AGENDA && ECRITURE ? " (son agenda principal et l'agenda dédié « JARVIS »)" : ECRITURE ? " (l'agenda dédié « JARVIS »)" : '')
     + ', à sa demande, arbitré par le noyau');
@@ -796,7 +800,7 @@ function outilsPourPrompt() {
   /* [S68] [S69] v4.9 : le vrai e-mail, et la lecture de la boite d'essai */
   if (MAIL_ENVOI) outils.push("envoyer un VRAI e-mail depuis le compte d'essai JARVIS, seulement vers les adresses autorisées par la personne : le serveur montre l'e-mail complet (destinataire, objet, texte), la personne retape l'adresse, l'envoi est retenu 10 secondes puis confirmé avec Face ID ; c'est le serveur qui dit s'il est parti, avec l'identifiant donné par Google");
   if (MAIL_LECTURE) outils.push("lire les 5 derniers e-mails (ou les non lus) de la boîte de réception du compte d'essai JARVIS, en lecture seule, à la demande de la personne");
-  return 'TES OUTILS RÉELS, déclarés par le serveur (la seule vérité sur tes capacités) : ' + (outils.length ? outils.join(' ; ') : 'aucun') + '. '
+  return 'TES OUTILS RÉELS, déclarés par le serveur (la seule vérité sur tes capacités) : ' + (outils.length ? outils.join(' ; ') : 'aucun') + '. ' + MAILTO + ' '
     + (ECRITURE ? "Pas encore possible : modifier un événement, supprimer un événement que JARVIS n'a pas créé dans cette session, annuler une seule séance d'une série, une série sans date de fin ou autre que chaque semaine. "
       : "Créer, modifier ou supprimer un événement : pas sur cette instance. ")
     + (ENVOI_REEL && !MAIL_ENVOI ? "L'envoi d'e-mails est mal réglé sur cette instance : tout envoi est refusé, même en simulation. " : '')
@@ -1839,9 +1843,15 @@ async function envoiMailReel(s, sessionId, texte, plan, avant, o = {}) {
   if (!MAIL_ENVOI)
     return dire("L'envoi d'e-mails est mal réglé sur cette instance (" + propre(MAIL_ENVOI_MOTIF || 'inactif', 40) + ") : rien n'est envoyé, même en simulation. "
       + "Le bouton « Vérifier Gmail » du bloc « Gmail (compte d'essai) » dit quoi corriger.", { decide: 'REFUSE', etape: 'MAIL', motif: MAIL_ENVOI_MOTIF || 'ENVOI_INACTIF' });
-  if (!MAIL_ENVOI.autorise(cible))
+  if (!MAIL_ENVOI.autorise(cible)) {
+    /* [S75] v4.9.1 : hors liste, mais adresse TAPEE par la personne dans cette
+     * demande -> pas d'envoi par le compte d'essai ; « Ouvrir dans Mail » : c'est
+     * elle qui enverra, depuis son application. Adresse non tapee : refus. */
+    if (!plan.confirme && !plan.manuel && adressesTapees(separer(texte).propres).includes(cleMail(cible)))
+      return preparerMailto(s, sessionId, texte, plan, avant, o, { horsListe: true });
     return dire("« " + lisible(cible, 80) + " » n'est pas dans ta liste d'adresses autorisées (JARVIS_MAIL_AUTORISES) : rien n'est préparé, et Face ID n'y changerait rien.",
       { decide: 'REFUSE', etape: 'MAIL_LISTE', motif: 'HORS_LISTE' });
+  }
 
   /* 3. l'adresse a ete retapee : la transaction, liee au contenu, Face ID exige */
   if (plan.confirme) {
@@ -1901,7 +1911,64 @@ async function envoiMailReel(s, sessionId, texte, plan, avant, o = {}) {
   while (s.brouillons.size > 4) s.brouillons.delete(s.brouillons.keys().next().value);
   return base({ decide: 'CONFIRMATION_REQUISE', etape: 'MAIL_RETAPER', motif: null, classe: 'IRREVERSIBLE', reponse,
     aRetaper: { jeton, a: v.brouillon.a, objet: v.brouillon.objet, texte: v.brouillon.texte, redigePar: b.redigePar, restants: MAIL_ENVOI.restants(),
-      expireDansMs: LIMITES.brouillonMs, avertissements: b.avertissements } });
+      expireDansMs: LIMITES.brouillonMs, avertissements: b.avertissements.concat(s.adressesLues.has(cleMail(cible)) ? [ALERTE_ADRESSE_LUE] : []),
+      mailto: GM.mailto(v.brouillon) } });   /* [S75] ou l'envoyer soi-meme, depuis Mail */
+}
+
+/* ==========================================================================
+ * [S75] v4.9.1 — « OUVRIR DANS MAIL » (mailto:), le mode normal pour une vraie
+ * boite, demo comprise
+ * ------------------------------------------------------------------------
+ * JARVIS redige avec les memes regles (brouillonDe) et montre l'e-mail EN
+ * ENTIER ; le bouton ouvre l'application Mail de la personne avec
+ * destinataire, objet et texte remplis ; c'est ELLE qui envoie. Donc ni liste
+ * d'adresses ni Face ID, mais :
+ *  - adresse TAPEE (ou dictee) par la personne dans CETTE demande (C3 ; jamais
+ *    tiree d'un contenu lu ou d'un souvenir) ; mode manuel refuse ;
+ *  - aucun lien qu'elle n'a pas tape ; contenu verifie (verifierContenu) ;
+ *  - adresse vue dans un contenu lu : dit sur la carte ;
+ *  - aucune transaction (JARVIS n'agit pas) : verdict et trace « PREPARE »,
+ *    jamais « envoye » ; l'historique garde « prepare pour Mail ».
+ * ======================================================================== */
+const ALERTE_ADRESSE_LUE = "Cette adresse apparaît dans un contenu lu (un e-mail) : écris-lui seulement si c'est bien ta décision.";
+/* la demande est-elle un e-mail a ecrire (et non un fichier a envoyer) ? */
+const RE_ECRIRE_MAIL = /(^| )(envoie|envoies|envoyez|envoyer|renvoie|expedie|expedier|reponds|repondez|repondre|ecris|ecrivez|ecrire)((?: [a-z0-9]+){0,6}) (mail|mails|e mail|email|courriel|message|mot)( |$)/;
+/* « envoie les factures par mail » : un FICHIER a envoyer, pas un e-mail a ecrire (reste simule) */
+const RE_FICHIER = /(^| )(facture|factures|rapport|rapports|fichier|fichiers|document|documents|photo|photos|pdf|piece|pieces|devis|contrat|contrats|releve|releves)( |$)/;
+const demandeEcrireMail = (texte) => {
+  if (brouillonTape(texte)) return true;
+  const m = RE_ECRIRE_MAIL.exec(V.mots(texte));
+  return !!m && !RE_FICHIER.test(m[3] + ' ');
+};
+async function preparerMailto(s, sessionId, texte, plan, avant, o = {}, extra = {}) {
+  const g = s.g;
+  const cible = String(plan.target || '').trim();
+  const base = (x) => ({ ...x, plan: { ...plan, mail: undefined }, outil: 'mailto', audit: g.auditDepuis(avant), ...etatDe(s) });
+  const dire = (reponse, x) => {
+    noterVerdict(s, { decide: 'SANS_OBJET', action: 'SEND', target: propre(cible, 80), motif: x.motif });
+    memoriser(s, sessionId, texte, reponse);
+    return base({ reponse, ...x });
+  };
+  if (plan.manuel)
+    return dire("« Ouvrir dans Mail » part d'une demande écrite en une phrase, par exemple « envoie un mail à nom@domaine.fr pour lui dire que … ». Rien n'est préparé.",
+      { decide: 'SANS_OBJET', etape: 'MAILTO', motif: 'MANUEL_NON_ADMIS' });
+  const propres = separer(texte).propres;
+  if (!adressesTapees(propres).includes(cleMail(cible)))
+    return dire("Pour préparer un e-mail, écris toi-même l'adresse dans ta demande (je ne la prends ni dans un e-mail lu, ni dans un souvenir). Rien n'est préparé.",
+      { decide: 'SANS_OBJET', etape: 'MAILTO', motif: 'ADRESSE_NON_TAPEE' });
+  const b = await brouillonDe(s, texte, cible, propres, o, (c) => GM.verifierContenu(c, [], { listeFermee: false }));
+  if (b.depasse) return reponseDepassee(s, plan);
+  if (b.refus) return dire(b.refus.reponse, { decide: 'SANS_OBJET', etape: 'MAILTO', motif: b.refus.motif });
+  const lien = GM.mailto(b.brouillon);
+  if (!lien) return dire("Je n'ai pas pu préparer le lien vers Mail : rien n'est préparé.", { decide: 'SANS_OBJET', etape: 'MAILTO', motif: 'LIEN_MAILTO_IMPOSSIBLE' });
+  const avertissements = (s.adressesLues.has(cleMail(cible)) ? [ALERTE_ADRESSE_LUE] : []).concat(b.avertissements);
+  noterVerdict(s, { decide: 'PREPARE', action: 'SEND', target: propre(cible, 80), motif: 'OUVRIR_DANS_MAIL' });
+  const reponse = (extra.horsListe ? "« " + lisible(cible, 80) + " » n'est pas dans ta liste d'adresses autorisées : pas d'envoi par le compte d'essai (Face ID n'y changerait rien). " : '')
+    + "E-mail préparé : relis-le, puis touche « Ouvrir dans Mail » ; c'est toi qui l'envoies depuis ton application. JARVIS n'envoie rien et ne saura pas s'il est parti.";
+  memoriser(s, sessionId, texte, resumeBrouillon("E-mail préparé pour « Ouvrir dans Mail » (c'est la personne qui l'envoie ; JARVIS n'envoie rien)", b.brouillon, b.redigePar), 'serveur', 700);
+  return base({ decide: 'PREPARE', etape: 'MAIL_OUVRIR', motif: null, classe: 'REVERSIBLE', reponse,
+    aOuvrir: { a: b.brouillon.a, objet: b.brouillon.objet, texte: b.brouillon.texte, redigePar: b.redigePar, mailto: lien, avertissements, horsListe: !!extra.horsListe },
+    trace: { etat: 'PREPARE', canal: o.canal === 'voix' ? 'voix' : 'clavier', frappe: lisible(texte, 160) } });
 }
 /* 4. apres Face ID : l'envoi, par le serveur, et sa preuve */
 async function terminerEnvoiReel(s, id, jeton, att, r) {
@@ -2070,7 +2137,9 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
       return reponseServeur(s, sessionId, texte, "Rien n'a été supprimé. Je ne peux supprimer qu'un événement créé par JARVIS dans cette session, "
         + "avec le bouton « Supprimer » de sa carte. Pour un autre événement, ou après un rechargement de la page, supprime-le dans Google Agenda.", 'RIEN_A_SUPPRIMER');
     }
-    if (!ECRITURE && isup.presente && isup.agenda)
+    /* [S75] « … pour lui dire que l'entraînement est annulé » (un e-mail) n'est pas
+     * une suppression : meme garde que ci-dessus (autreObjet) */
+    if (!ECRITURE && isup.presente && isup.agenda && !V.autreObjet(texte))
       return reponseServeur(s, sessionId, texte, "Rien n'a été supprimé : cette instance ne crée ni ne supprime aucun événement.", 'RIEN_A_SUPPRIMER');
     /* [S63] H une serie demandee : lue par le SERVEUR (jour, heure, fin),
      * sans modele ; sans ecriture, la meme reponse a chaque fois [S53] */
@@ -2214,6 +2283,10 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
   /* [S68] v4.9 : un envoi, sur une instance ou l'envoi reel est branche,
    * ne passe JAMAIS par la simulation */
   if (acte === 'SEND' && ENVOI_REEL) return envoiMailReel(s, sessionId, texte, plan, avant, o);
+  /* [S75] un e-mail A ECRIRE (« envoie un mail a … pour lui dire … »), sans envoi
+   * reel branche (la demo comprise) : « Ouvrir dans Mail ». « Envoie les
+   * factures a … » (un fichier) reste une action simulee, gouvernee. */
+  if (acte === 'SEND' && !plan.manuel && !plan.confirme && demandeEcrireMail(texte)) return preparerMailto(s, sessionId, texte, plan, avant, o);
 
   const options = { sceauContexte: plan.sceauContexte, manuel: !!plan.manuel };
   if (classeDe(acte) === 'COMPENSABLE') options.compensation = 'annulation manuelle';

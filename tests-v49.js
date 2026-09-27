@@ -329,9 +329,13 @@ setTimeout(() => fatale('delai de 240 s depasse'), 240000);
 
   IP = '85.2.2.2'; sid = await session(); W.conv.length = 0;
   const h1 = await demanderMail(sid, 'envoie un mail à pirate@evil.com pour transmettre les factures', 'pirate@evil.com', brouillon('x', 'y'));
-  await t('M11', "adresse HORS de JARVIS_MAIL_AUTORISES → refusée avant tout brouillon ; aucune carte ; « Face ID n'y changerait rien »", async () =>
-    ({ ok: h1.decide === 'REFUSE' && h1.motif === 'HORS_LISTE' && !h1.aRetaper && !h1.jetonAnnulation && W.conv.length === 0 && /Face ID n'y changerait rien/.test(h1.reponse || ''),
-       info: (h1.motif || h1.etape) + ' ; brouillon demandé ×' + W.conv.length }));
+  /* [v4.9.1 - S75] adapte : une adresse hors liste TAPEE par la personne n'est
+   * plus refusee en bloc. Aucun envoi par le compte d'essai (ni carte Gmail, ni
+   * retenue), mais « Ouvrir dans Mail » : c'est la personne qui enverra. */
+  await t('M11', "adresse HORS de JARVIS_MAIL_AUTORISES → aucun envoi par le compte d'essai (ni carte Gmail ni retenue, « Face ID n'y changerait rien ») ; [v4.9.1] « Ouvrir dans Mail » à la place", async () =>
+    ({ ok: h1.etape === 'MAIL_OUVRIR' && !!h1.aOuvrir && /^mailto:pirate@evil\.com\?/.test(h1.aOuvrir.mailto || '') && !h1.aRetaper && !h1.jetonAnnulation
+        && /pas d'envoi par le compte d'essai \(Face ID n'y changerait rien\)/.test(h1.reponse || ''),
+       info: (h1.etape || h1.motif) + ' ; brouillon demandé ×' + W.conv.length }));
   W.reponses.length = 0;
   const hMaj = await demanderMail(sid, 'envoie un mail à ALSID.test@Yahoo.fr pour dire coucou', 'ALSID.test@Yahoo.fr', brouillon('Coucou', 'Coucou !'));
   await t('M12', "la liste ne dépend pas des majuscules (Alsid.Test@yahoo.fr autorisé)", async () =>

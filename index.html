@@ -176,6 +176,8 @@ button{background:var(--ardoise);color:var(--texte);border:1px solid var(--regle
 button:focus-visible{outline:2px solid var(--signal);outline-offset:1px}
 button:disabled{opacity:.45;cursor:not-allowed}
 button.primaire{background:var(--signal);border-color:var(--signal);color:#06101d;font-weight:600}
+a.bouton{display:inline-block;border-radius:6px;padding:8px 14px;font-size:13.5px;text-decoration:none;border:1px solid var(--regle);color:var(--texte)}   /* [S75] */
+a.bouton.primaire{background:var(--signal);border-color:var(--signal);color:#06101d;font-weight:600}
 @media(hover:hover){button.primaire:hover:not(:disabled){background:#79b8ff;border-color:#79b8ff;color:#06101d}}
 button.danger{border-color:#5c2321;color:#ff7b72}
 @media(hover:hover){button.danger:hover:not(:disabled){border-color:var(--refus);color:var(--refus)}}
@@ -756,12 +758,20 @@ function resumeTrace(t) {
 }
 /* [v4.7] la trace ne prend plus une bulle : repliee sous la derniere carte
  * de JARVIS (« + détail »), toujours construite depuis les etats. */
+/* [S75] « Ouvrir dans Mail » : aucune transaction (JARVIS n'agit pas) ; la trace
+ * dit « préparé », jamais « envoyé » */
+function resumePrepare(t) {
+  return 'Trace : ' + (t.canal === 'voix' ? 'ta voix « ' : 'ta frappe « ') + String(t.frappe || '') + ' » → adresse écrite par toi → brouillon vérifié (liens, caractères)'
+    + ' → préparé pour Mail. JARVIS n\'envoie rien : c\'est toi qui envoies, depuis ton application.';
+}
+/* un lien vers Mail : mailto: seulement, sans blanc ni guillemet (jamais javascript:) */
+const lienMail = (x) => typeof x === 'string' && /^mailto:[^\s"'<>`]+$/i.test(x) ? x : '';
 function ajouterTrace(t) {
   const tours = document.querySelectorAll('#fil .tour:not(.moi)');
   const sous = tours[tours.length - 1] || tour('JARVIS', '', false);
   const d = document.createElement('details');
   d.className = 'trace';
-  d.innerHTML = '<summary>détail</summary><div class="trace-texte">' + esc(resumeTrace(t)) + '</div>';
+  d.innerHTML = '<summary>détail</summary><div class="trace-texte">' + esc(t && t.etat === 'PREPARE' ? resumePrepare(t) : resumeTrace(t)) + '</div>';
   /* ouverte, la trace se montre (sinon elle restait cachee sous la saisie) */
   d.addEventListener('toggle', () => { if (d.open && typeof d.scrollIntoView === 'function') d.scrollIntoView({ block: 'nearest' }); });
   sous.appendChild(d);
@@ -814,9 +824,29 @@ function rendreDecision(d) {
   if (d.decide === 'SANS_OBJET') {
     const deJarvis = d.etape === 'MEMOIRE' || d.etape === 'DESTINATAIRE' || d.etape === 'DEPASSE'   /* [S36] [S43] */
       || d.etape === 'SERVEUR' || d.etape === 'OUTIL'   /* [S49]-[S55] ecrit par le serveur, sans modele */
-      || d.outil === 'mail' || d.outil === 'boite';   /* [S68] [S69] */
+      || d.outil === 'mail' || d.outil === 'boite' || d.outil === 'mailto';   /* [S68] [S69] [S75] */
     if (d.reponse) tour(deJarvis ? 'JARVIS' : 'Claude', d.reponse, false, !deJarvis);
     else tour('JARVIS', sansReponse(d), false);
+    return;
+  }
+  /* [S75] v4.9.1 « OUVRIR DANS MAIL » : l'e-mail en entier (texte echappe), et un
+   * lien mailto: construit par le serveur ; c'est la personne qui envoie depuis
+   * son application. La carte dit « Préparé », jamais « Envoyé ». */
+  if (d.etape === 'MAIL_OUVRIR' && d.aOuvrir) {
+    const m = d.aOuvrir, lien = lienMail(m.mailto);
+    if (d.reponse) tour('JARVIS', d.reponse, false);
+    const hO = '<div class="decision autorise mail-ouvrir"><div class="plan">E-mail préparé — relis-le, puis envoie-le toi-même</div>'
+      + '<div class="mail-carte"><p class="mail-entete"><b>À</b> <span class="mono">' + esc(m.a) + '</span></p>'
+      + '<p class="mail-entete"><b>Objet</b> ' + esc(m.objet) + '</p><div class="mail-texte">' + esc(m.texte) + '</div>'
+      + (m.avertissements || []).map(x => '<p class="mail-entete avert">⚠ ' + esc(x) + '</p>').join('')
+      + '<p class="mail-entete">' + (m.redigePar === 'modele' ? 'Rédigé par Claude à partir de ta seule demande : relis chaque mot.' : 'Objet et texte : tes mots, tels quels.')
+      + ' Aucun lien que tu n\'as pas tapé.</p></div>'
+      + '<div class="verdict"><b>Préparé</b><span class="code">JARVIS n\'envoie rien</span></div>'
+      + (lien ? '<div class="rang"><a class="bouton primaire" data-ouvrir-mail="1" href="' + esc(lien) + '">Ouvrir dans Mail</a></div>' : '<p>Lien vers Mail indisponible.</p>')
+      + '<p class="etat-carte"></p></div>';
+    tour('JARVIS', '', false).querySelector('.quoi').outerHTML = hO;
+    if (d.trace) ajouterTrace(d.trace);
+    $('fil').scrollTop = $('fil').scrollHeight;
     return;
   }
   /* [S68] v4.9 VRAI E-MAIL : la carte montre TOUT (destinataire, objet, texte),
@@ -834,7 +864,10 @@ function rendreDecision(d) {
       + '<p>S\'il te convient, retape l\'adresse du destinataire toi-même. Il sera ensuite retenu 10 s, puis envoyé seulement avec Face ID.</p>'
       + '<div class="rang"><input class="cible" value="" placeholder="adresse du destinataire" aria-label="Adresse retapée"'
       + ' autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="email">'
-      + '<button class="danger" data-mail-abandon="1">Ne pas envoyer</button><button class="primaire" data-mail-retaper="1">Préparer l\'envoi</button></div><p class="etat-carte"></p></div>';
+      + '<button class="danger" data-mail-abandon="1">Ne pas envoyer</button><button class="primaire" data-mail-retaper="1">Préparer l\'envoi</button></div>'
+      + (lienMail(m.mailto) ? '<p class="mail-entete">Ou envoie-le toi-même, depuis ton application : <a class="bouton" data-ouvrir-mail="1" href="' + esc(lienMail(m.mailto)) + '">Ouvrir dans Mail</a>'
+        + ' (la carte du compte d\'essai se ferme).</p>' : '')   /* [S75] */
+      + '<p class="etat-carte"></p></div>';
     tour('JARVIS', '', false).querySelector('.quoi').outerHTML = hM;
     $('fil').scrollTop = $('fil').scrollHeight;
     return;
@@ -967,7 +1000,7 @@ function rendreDecision(d) {
   }
   const bloc = tour('JARVIS', '', false);
   bloc.querySelector('.quoi').outerHTML = h;
-  const parJarvis = d.etape === 'MEMOIRE' || d.outil === 'mail' || d.outil === 'boite';   /* [S68] [S69] */
+  const parJarvis = d.etape === 'MEMOIRE' || d.outil === 'mail' || d.outil === 'boite' || d.outil === 'mailto';   /* [S68] [S69] [S75] */
   if (d.reponse) tour(parJarvis ? 'JARVIS' : 'Claude', d.reponse, false, !parJarvis);
   if (d.decide === 'EN_ATTENTE') compteARebours(d.executableApres, bloc.querySelector('.compte'));   /* [S35] sa propre boîte */
   $('fil').scrollTop = $('fil').scrollHeight;
@@ -1580,6 +1613,15 @@ document.addEventListener('click', async (ev) => {
   }
 });
 
+/* [S75] « Ouvrir dans Mail » : l'application Mail s'ouvre (lien mailto:) ; la
+ * page le dit, et ferme la carte du compte d'essai si le lien y était */
+document.addEventListener('click', (ev) => {
+  const a = ev.target.closest && ev.target.closest('a[data-ouvrir-mail]'); if (!a) return;
+  const carteG = a.closest('.mail-retaper');
+  if (carteG && !carteG.dataset.utilisee) { carteG.dataset.utilisee = '1'; for (const x of carteG.querySelectorAll('button, input')) x.disabled = true; }
+  const etat = a.closest('.decision') && a.closest('.decision').querySelector('.etat-carte');
+  if (etat) etat.textContent = "Ouvert dans Mail : c'est toi qui l'envoies. JARVIS ne sait pas s'il est parti.";
+});
 $('envoyer').addEventListener('click', envoyer);
 Voix.init();   /* [S32] micro visible seulement si le navigateur sait dicter */
 /* [S48] bloc Agenda JARVIS : seulement si des variables Google sont posées */

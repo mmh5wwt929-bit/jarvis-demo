@@ -3,7 +3,8 @@
  * JARVIS — gmail 1.1 : envoyer (vers une liste fermee) et lire, sur le compte
  * d'essai JARVIS, avec deux droits SEPARES                    [S68] [S69] v4.9
  * 1.1 (v4.9.1) : client OAuth en JSON OU en ID + SECRET, colle tolere depuis
- *   un iPhone, motifs precis [S77]
+ *   un iPhone, motifs precis [S77] ; mailto() et verification sans liste
+ *   fermee pour « Ouvrir dans Mail » [S75]
  * ----------------------------------------------------------------------------
  * MOINDRE PRIVILEGE, PAR CONSTRUCTION
  *  - Deux jetons OAuth (refresh tokens) du compte d'essai, obtenus a part :
@@ -132,9 +133,12 @@ function liensDe(texte) {
 }
 const empreinteContenu = (a, objet, texte) => crypto.createHash('sha256').update(JSON.stringify(['jarvis-mail-1', cleAdresse(a), objet, texte])).digest('hex');
 /* ce que la personne a tape donne les liens permis ; rien d'autre */
-function verifierContenu({ a, objet, texte, liensPermis }, autorises) {
+/* [S75] listeFermee: false pour « Ouvrir dans Mail » : la personne envoie
+ * elle-meme depuis son application, a l'adresse qu'elle a tapee ; tout le
+ * reste (liens tapes seulement, caracteres, longueurs) est verifie pareil. */
+function verifierContenu({ a, objet, texte, liensPermis }, autorises, { listeFermee = true } = {}) {
   if (!adresseValide(a)) return { ok: false, code: 'ADRESSE_INVALIDE' };
-  if (!autorises.includes(cleAdresse(a))) return { ok: false, code: 'HORS_LISTE' };
+  if (listeFermee && !(Array.isArray(autorises) && autorises.includes(cleAdresse(a)))) return { ok: false, code: 'HORS_LISTE' };
   if (typeof objet !== 'string' || typeof texte !== 'string') return { ok: false, code: 'CONTENU_ILLISIBLE' };
   const o = objet.trim(), x = texte.replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
   if (!o || o.length > LIMITES_MAIL.objetMax || /[\r\n\t]/.test(o) || INTERDITS.test(o)) return { ok: false, code: 'OBJET_INVALIDE' };
@@ -145,6 +149,16 @@ function verifierContenu({ a, objet, texte, liensPermis }, autorises) {
   const empreinte = empreinteContenu(a, o, x);
   return { ok: true, brouillon: Object.freeze({ a, objet: o, texte: x, liensPermis: Object.freeze([...permis]),
     empreinte, outil: 'GMAIL:' + empreinte.slice(0, 40) }) };
+}
+
+/* [S75] « OUVRIR DANS MAIL » : le lien mailto: d'un brouillon VERIFIE, construit
+ * ICI (RFC 6068). Tout est encode par encodeURIComponent (? & # % + et sauts de
+ * ligne compris, en %0D%0A) ; seul « @ » reste lisible dans l'adresse. Rien
+ * n'est envoye : la personne relit dans son application et envoie elle-meme. */
+function mailto(b) {
+  if (!b || typeof b !== 'object' || !adresseValide(b.a) || typeof b.objet !== 'string' || typeof b.texte !== 'string') return null;
+  return 'mailto:' + encodeURIComponent(b.a).replace(/%40/g, '@') + '?subject=' + encodeURIComponent(b.objet)
+    + '&body=' + encodeURIComponent(b.texte.replace(/\r?\n/g, '\r\n'));
 }
 
 /* ---- le message brut (RFC 5322), construit ICI, jamais par le modele ---- */
@@ -401,5 +415,5 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
   });
 }
 
-module.exports = Object.freeze({ VERSION, creerMail, adresseValide, liensDe, verifierContenu, messageBrut, motEncode, lireClient, lireAutorises, valeurPropre,
+module.exports = Object.freeze({ VERSION, creerMail, adresseValide, liensDe, verifierContenu, messageBrut, motEncode, lireClient, lireAutorises, valeurPropre, mailto,
   PORTEE_ENVOI, PORTEE_LECTURE, LIMITES_MAIL });
