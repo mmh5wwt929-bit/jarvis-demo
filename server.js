@@ -1418,8 +1418,10 @@ async function lireMails(s, sessionId, texte, plan, avant) {
  * ======================================================================== */
 const plurielEvt = (n) => n === 0 ? 'rien' : n === 1 ? '1 événement' : n + ' événements';
 /* [S94] v4.10.1 « à gérer » en UNE ligne dans le point du jour : les memes regles,
- * la meme lecture gouvernee (READ MAIL « fils »), sans modele ; rien n'entre
- * dans l'historique ni dans le contexte du modele (le plancher ne bouge pas).
+ * la meme lecture gouvernee (READ MAIL « fils »), sans modele ; aucun objet,
+ * nom ni adresse lu n'entre dans l'historique ou le contexte du modele (seul
+ * le verdict « READ MAIL autorise » est note, comme pour « à gérer ») : le
+ * plancher ne bouge pas.
  * « Mails : 2 réponses attendues · 1 suspect ». Rien sur la demo publique. */
 const COMPTES_MAILS = [['reponse', 'réponse attendue', 'réponses attendues'], ['engagement', 'promesse à tenir', 'promesses à tenir'], ['echeance', 'échéance', 'échéances'],
   ['relance', 'relance', 'relances'], ['creneau', 'rendez-vous proposé', 'rendez-vous proposés'], ['contradiction', 'point à vérifier', 'points à vérifier'],

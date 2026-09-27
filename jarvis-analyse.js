@@ -33,10 +33,11 @@
  *  [S86] une vraie alerte Google (no-reply@accounts.google.com) classee
  *    « suspect » (« mot de passe », « code »). Seul le PREMIER en-tete
  *    Authentication-Results compte (celui de Gmail, lu par jarvis-gmail.js) :
- *    dmarc=pass pour le domaine de l'expediteur, domaine d'un grand SERVICE
- *    (jamais une messagerie ouverte a tous : gmail.com, yahoo.fr… n'en sont
- *    pas), sans urgence ni autre alerte forte -> « sensible » passe a
- *    « moyen ». Tout le reste est inchange.
+ *    dmarc=pass pour le domaine de l'expediteur, domaine d'ALERTES DE COMPTE
+ *    d'un grand service (jamais une messagerie ouverte a tous, ni un domaine
+ *    qui relaie le texte d'un tiers : Google Docs/Agenda, PayPal, Amazon), sans
+ *    urgence ni autre alerte forte -> « sensible » passe a « moyen ». Tout le
+ *    reste est inchange.
  * ========================================================================== */
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const V = require('./jarvis-verite.js');
@@ -79,13 +80,14 @@ const FOURNISSEURS = ['gmail.com', 'googlemail.com', 'yahoo.fr', 'yahoo.com', 'o
   'paypal.com', 'paypal.fr', 'amazon.fr', 'amazon.com', 'apple.com', 'microsoft.com', 'google.com', 'impots.gouv.fr', 'ameli.fr', 'caf.fr',
   'laposte.fr', 'chronopost.fr', 'colissimo.fr', 'dhl.com', 'ups.com', 'fedex.com', 'tnt.com', 'netflix.com', 'bouyguestelecom.fr',
   'credit-agricole.fr', 'labanquepostale.fr', 'bnpparibas.net', 'societegenerale.fr', 'lcl.fr', 'boursorama.com', 'ffhandball.fr'];
-/* [S86] grands SERVICES dont personne d'autre ne peut avoir une adresse (un
- * sous-domaine compte : accounts.google.com). JAMAIS une messagerie ouverte a
- * tous (gmail.com, yahoo.fr, outlook.fr, orange.fr, free.fr, icloud.com…) :
- * un escroc y a une adresse authentifiee comme tout le monde. */
-const GRANDS_SERVICES = ['google.com', 'apple.com', 'microsoft.com', 'amazon.fr', 'amazon.com', 'paypal.fr', 'paypal.com',
-  'impots.gouv.fr', 'ameli.fr', 'caf.fr', 'laposte.fr', 'chronopost.fr', 'colissimo.fr', 'dhl.com', 'ups.com', 'fedex.com', 'netflix.com',
-  'credit-agricole.fr', 'labanquepostale.fr', 'societegenerale.fr', 'lcl.fr', 'boursorama.com'];
+/* [S86] les domaines d'ALERTES DE COMPTE de grands services : personne d'autre
+ * n'y a une adresse, et le texte n'y est pas ecrit par un tiers (un sous-domaine
+ * compte). JAMAIS une messagerie ouverte a tous (gmail.com, yahoo.fr, orange.fr…),
+ * ni un domaine qui relaie le texte d'un tiers, authentifie : google.com entier
+ * (Docs, Agenda, Forms), paypal (fausses factures envoyees par PayPal lui-meme),
+ * amazon (messages de vendeurs). */
+const GRANDS_SERVICES = ['accounts.google.com', 'id.apple.com', 'appleid.apple.com', 'email.apple.com', 'accountprotection.microsoft.com',
+  'impots.gouv.fr', 'ameli.fr', 'caf.fr', 'netflix.com', 'credit-agricole.fr', 'labanquepostale.fr', 'societegenerale.fr', 'lcl.fr', 'boursorama.com'];
 const grandService = (dom) => !!dom && GRANDS_SERVICES.some(g => dom === g || dom.endsWith('.' + g));
 /* dmarc=pass lu par GMAIL (premier en-tete) pour le domaine EXACT de l'expediteur */
 const authentifie = (m, dom) => !!(m && m.auth && m.auth.dmarc === 'pass' && dom && m.auth.domaine === dom);

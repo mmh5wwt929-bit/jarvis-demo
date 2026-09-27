@@ -373,7 +373,9 @@ details.suspects[open]>summary,details.alertes[open]>summary{white-space:normal}
 .mail-texte.coupe{max-height:6.4em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 70%,transparent);mask-image:linear-gradient(#000 70%,transparent)}
 button.lire-tout{background:none;border:none;color:var(--signal);font-size:12.5px;padding:0 0 4px;text-decoration:underline;text-underline-offset:3px}
 .chargement .quoi{color:var(--sourd);font-style:italic}
-.bouton-vert{border-radius:999px;padding:5px 11px;font-size:12px;border-color:var(--sur);color:var(--sur);white-space:nowrap}
+.bouton-vert{border-radius:999px;padding:5px 11px;font-size:12px;border-color:var(--sur);color:var(--sur);white-space:nowrap;margin-left:auto}
+/* [S92] la pastille garde son mot entier : faute de place, le bouton passe a la ligne */
+.bandeau:has(#repartirVert:not([hidden])){flex-wrap:wrap;row-gap:6px}
 @media(max-width:900px){
   .corps,.titre-defense,.entete-detail .mesures,.marque-detail{padding-left:16px;padding-right:16px}
   details.bloc>summary::after{padding:0 16px}
