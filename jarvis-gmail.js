@@ -5,6 +5,9 @@
  * 1.1 (v4.9.1) : client OAuth en JSON OU en ID + SECRET, colle tolere depuis
  *   un iPhone, motifs precis [S77] ; mailto() et verification sans liste
  *   fermee pour « Ouvrir dans Mail » [S75]
+ * 1.2 (v4.10) : les CONVERSATIONS (lireFils) [S80] ; la REPONSE dans une
+ *   conversation, hors liste fermee mais verifiee contre le fil avant l'envoi,
+ *   puis dans les Envoyes apres (permisReponse, envoyerReponse) [S81]
  * ----------------------------------------------------------------------------
  * MOINDRE PRIVILEGE, PAR CONSTRUCTION
  *  - Deux jetons OAuth (refresh tokens) du compte d'essai, obtenus a part :
@@ -42,10 +45,11 @@ const https = require('https');
 const crypto = require('crypto');
 const { URL } = require('url');
 
-const VERSION = '1.1';
+const VERSION = '1.2';
 const LIMITES_MAIL = Object.freeze({ delaiMs: 12000, maxOctets: 1024 * 1024, permisMs: 30 * 1000,
   objetMax: 150, texteMax: 3000, autorisesMax: 10, plafondDefaut: 5, plafondMax: 20,
-  lusMax: 5, extraitMax: 1200, diagnosticMs: 20000, lectureTotaleMs: 20000 });
+  lusMax: 5, extraitMax: 1200, diagnosticMs: 20000, lectureTotaleMs: 20000,
+  filsMax: 15, messagesParFil: 10, texteFil: 2500, joursFils: 14 });   /* [S80] v4.10 les conversations */
 const HOTES = new Set(['oauth2.googleapis.com', 'gmail.googleapis.com']);
 const PORTEE_ENVOI = 'https://www.googleapis.com/auth/gmail.send';
 const PORTEE_LECTURE = 'https://www.googleapis.com/auth/gmail.readonly';
@@ -173,8 +177,69 @@ function motEncode(objet) {
 }
 function messageBrut(b, transactionId) {
   const corps = Buffer.from(b.texte.replace(/\n/g, '\r\n'), 'utf8').toString('base64').replace(/.{1,76}/g, '$&\r\n');
-  return ['To: ' + b.a, 'Subject: ' + motEncode(b.objet), 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8',
+  /* [S81] une REPONSE porte In-Reply-To et References (verifies : <…> sans blanc) : Gmail la range dans la conversation */
+  const fil = b.inReplyTo && RE_MESSAGE_ID.test(b.inReplyTo) ? ['In-Reply-To: ' + b.inReplyTo,
+    'References: ' + String(b.references || b.inReplyTo).split(/\s+/).filter(x => RE_MESSAGE_ID.test(x)).slice(-10).join(' ')] : [];
+  return ['To: ' + b.a, 'Subject: ' + motEncode(b.objet), ...fil, 'MIME-Version: 1.0', 'Content-Type: text/plain; charset=UTF-8',
     'Content-Transfer-Encoding: base64', 'X-JARVIS-Transaction: ' + transactionId, '', corps].join('\r\n');
+}
+const RE_MESSAGE_ID = /^<[^<>\s"]{3,300}>$/;
+const RE_FIL = /^[0-9a-fA-F]{6,40}$/;
+/* [S81] une REPONSE : le contenu verifie comme un e-mail (sans liste fermee : la
+ * personne repond a l'expediteur d'une conversation, verifie par le module au
+ * moment d'envoyer), plus la conversation et le message auxquels elle repond,
+ * dans l'empreinte : le permis ne vaut que pour CETTE reponse, dans CE fil. */
+function verifierReponse({ a, objet, texte, liensPermis, filId, inReplyTo, references }) {
+  if (!RE_FIL.test(String(filId || '')) || !RE_MESSAGE_ID.test(String(inReplyTo || ''))) return { ok: false, code: 'FIL_INVALIDE' };
+  const v = verifierContenu({ a, objet, texte, liensPermis }, [], { listeFermee: false });
+  if (!v.ok) return v;
+  const refs = String(references || '').split(/\s+/).filter(x => RE_MESSAGE_ID.test(x)).slice(-9);
+  if (!refs.includes(inReplyTo)) refs.push(inReplyTo);
+  const empreinte = crypto.createHash('sha256').update(JSON.stringify(['jarvis-reponse-1', cleAdresse(a), v.brouillon.objet, v.brouillon.texte, filId, inReplyTo])).digest('hex');
+  return { ok: true, brouillon: Object.freeze({ ...v.brouillon, filId, inReplyTo, references: refs.join(' '), empreinte, outil: 'GMAIL-REP:' + empreinte.slice(0, 40) }) };
+}
+
+/* ---- [S80] v4.10 LES CONVERSATIONS : en-tetes, pieces jointes, partie nouvelle ---- */
+/* « =?UTF-8?B?…?= » et « =?UTF-8?Q?…?= » (RFC 2047), au cas ou Google les laisse */
+function decoderEntete(v) {
+  return String(v == null ? '' : v).replace(/=\?([\w-]+)\?([BbQq])\?([^?]*)\?=/g, (m, cs, enc, x) => {
+    try {
+      const octets = /b/i.test(enc) ? Buffer.from(x, 'base64') : Buffer.from(x.replace(/_/g, ' ').replace(/=([0-9A-Fa-f]{2})/g, (z, h) => String.fromCharCode(parseInt(h, 16))), 'latin1');
+      return /utf-?8/i.test(cs) ? octets.toString('utf8') : octets.toString('latin1');
+    } catch { return m; }
+  });
+}
+/* « Luc Martin <luc@club.fr>, "X, Y" <x@y.fr>, z@w.fr » -> [{ nom, adresse }] (adresses valables seulement) */
+function adressesDe(v) {
+  const t = decoderEntete(v), out = [];
+  const re = /(?:"([^"]*)"|([^,<>"]*?))\s*<([^<>\s]+@[^<>\s]+)>|([^\s,;<>"]+@[^\s,;<>"]+)/g;
+  let m;
+  while ((m = re.exec(t)) && out.length < 20) {
+    const adresse = cleAdresse(m[3] || m[4] || ''), nom = String(m[1] || m[2] || '').replace(/\s+/g, ' ').trim().slice(0, 100);
+    if (adresseValide(adresse)) out.push({ nom, adresse });
+  }
+  return out;
+}
+function piecesDe(payload) {
+  const out = [];
+  const visiter = (p, prof) => {
+    if (!p || typeof p !== 'object' || prof > 8 || out.length >= 10) return;
+    if (p.filename) { out.push({ nom: nettoyer(p.filename, 80), type: nettoyer(p.mimeType || '', 60), taille: Number(p.body && p.body.size) || 0 }); return; }
+    if (Array.isArray(p.parts)) for (const x of p.parts.slice(0, 30)) visiter(x, prof + 1);
+  };
+  visiter(payload, 0);
+  return out;
+}
+/* la partie NOUVELLE d'un message : sans l'historique cite (« Le … a ecrit : », lignes « > », message d'origine) */
+function partieNouvelle(texte) {
+  const lignes = String(texte || '').replace(/\r\n?/g, '\n').split('\n'), garde = [];
+  for (const l of lignes) {
+    if (/^\s*(le|on)\s.{3,160}(a écrit|a ecrit|wrote)\s*:?\s*$/i.test(l) || /^\s*-{2,}\s*(original message|message d'origine|forwarded message|message transféré|message transfere)/i.test(l)
+        || /^\s*_{5,}\s*$/.test(l)) break;
+    if (/^\s*>/.test(l)) continue;
+    garde.push(l);
+  }
+  return garde.join('\n');
 }
 const b64u = (s) => Buffer.from(s, 'utf8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
@@ -310,6 +375,15 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
     return { ok: true, jeton: acces[quel].jeton };
   }
   const restants = () => Math.max(0, plafondJour - (envois.get(jourLocal()) || 0));
+  /* [S80] l'adresse du compte (« moi »), lue une fois chez Google (profil, gmail.readonly) */
+  let moiCache = null;
+  async function adresseMoi(jetonLecture) {
+    if (moiCache) return moiCache;
+    const p = await appeler('GET', API + '/profile', null, jetonLecture);
+    const a = p.ok && p.status === 200 && p.json && typeof p.json.emailAddress === 'string' ? cleAdresse(p.json.emailAddress) : null;
+    if (a && adresseValide(a)) moiCache = a;
+    return moiCache;
+  }
 
   /* ---- diagnostic : jetons, portees, compte lu ; RIEN n'est envoye ---- */
   let dernierDiag = null;
@@ -382,7 +456,8 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
     permisLecture(action) {
       if (!lectureActive) throw new Error('LECTURE_INACTIVE');
       if (!action || action.action !== 'READ' || action.resource !== 'MAIL') throw new Error('PERMIS_REFUSE');
-      if (!Object.prototype.hasOwnProperty.call(FILTRES, action.target)) throw new Error('FILTRE_INVALIDE');
+      const fils = action.target === 'fils' || /^fil:[0-9a-fA-F]{6,40}$/.test(String(action.target));   /* [S80] */
+      if (!fils && !Object.prototype.hasOwnProperty.call(FILTRES, action.target)) throw new Error('FILTRE_INVALIDE');
       const p = Object.freeze({ filtre: action.target, transactionId: String(action.transactionId || '') });
       permisEmis.set(p, { expire: maintenant() + L.permisMs, utilise: false });
       return p;
@@ -411,9 +486,112 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
           nonLu: Array.isArray(m.json.labelIds) && m.json.labelIds.includes('UNREAD') }));
       }
       return { ok: true, filtre: permis.filtre, mails: Object.freeze(mails), tronque: typeof l.json.nextPageToken === 'string' };
+    },
+    /* [S80] v4.10 LES CONVERSATIONS (gmail.readonly) : « fils » = les conversations
+     * des 14 derniers jours (15 au plus, sans promotions ni reseaux sociaux),
+     * « fil:<id> » = une seule. Chaque message : expediteur, destinataires,
+     * adresse de reponse, date, partie nouvelle du texte, pieces jointes
+     * (nom, type, taille : jamais lues), et « moi » (libelle SENT, ou expediteur
+     * = l'adresse du compte). Un CONTENU EXTERNE, nettoye et borne. */
+    async lireFils(permis) {
+      const e = (permis && typeof permis === 'object') ? permisEmis.get(permis) : undefined;
+      if (!e || !(permis.filtre === 'fils' || /^fil:[0-9a-fA-F]{6,40}$/.test(String(permis.filtre)))) return { ok: false, code: 'PERMIS_INCONNU' };
+      if (e.utilise) return { ok: false, code: 'PERMIS_DEJA_UTILISE' };
+      e.utilise = true;
+      if (maintenant() > e.expire) return { ok: false, code: 'PERMIS_EXPIRE' };
+      const j = await jeton('lecture'); if (!j.ok) return { ok: false, code: j.code };
+      const moi = await adresseMoi(j.jeton);
+      let ids = [], tronque = false;
+      if (permis.filtre === 'fils') {
+        const q = 'newer_than:' + L.joursFils + 'd -category:promotions -category:social -category:forums -in:chats';
+        const l = await appeler('GET', API + '/threads?maxResults=' + L.filsMax + '&q=' + encodeURIComponent(q), null, j.jeton);
+        if (!l.ok) return { ok: false, code: l.code };
+        if (l.status !== 200 || !l.json) return { ok: false, code: erreurGmail(l.status, l.json) };
+        ids = (Array.isArray(l.json.threads) ? l.json.threads : []).map(x => x && x.id).filter(x => typeof x === 'string' && RE_FIL.test(x)).slice(0, L.filsMax);
+        tronque = typeof l.json.nextPageToken === 'string';
+      } else ids = [String(permis.filtre).slice(4)];
+      const fils = [], debut = maintenant();
+      for (const id of ids) {
+        if (maintenant() - debut > L.lectureTotaleMs) { fils.push(Object.freeze({ id, illisible: true, code: 'DELAI_DEPASSE' })); continue; }
+        const f = await appeler('GET', API + '/threads/' + id + '?format=full', null, j.jeton);
+        if (!f.ok || f.status !== 200 || !f.json || !Array.isArray(f.json.messages)) { fils.push(Object.freeze({ id, illisible: true, code: f.ok ? erreurGmail(f.status, f.json) : f.code })); continue; }
+        fils.push(convertirFil(id, f.json, moi));
+      }
+      return { ok: true, filtre: permis.filtre, moi, fils: Object.freeze(fils), tronque };
+    },
+    verifierReponse: (c) => (envoiActif ? verifierReponse(c || {}) : { ok: false, code: motifEnvoi }),
+    /* [S81] Appele DANS l'effet d'une transaction autorisee (T6) : une REPONSE,
+     * hors liste fermee, mais verifiee contre la conversation elle-meme */
+    permisReponse(action) {
+      if (!envoiActif) throw new Error('ENVOI_INACTIF');
+      if (!lectureActive) throw new Error('LECTURE_REQUISE_POUR_VERIFIER');
+      if (!action || action.action !== 'SEND' || action.resource !== 'EMAIL') throw new Error('PERMIS_REFUSE');
+      if (!adresseValide(action.target)) throw new Error('ADRESSE_INVALIDE');
+      if (typeof action.tool !== 'string' || !/^GMAIL-REP:[0-9a-f]{40}$/.test(action.tool)) throw new Error('CONTENU_NON_LIE');
+      const tx = String(action.transactionId || '');
+      if (!/^tx_[0-9a-f-]{36}$/.test(tx)) throw new Error('TRANSACTION_INVALIDE');
+      const p = Object.freeze({ a: action.target, outil: action.tool, transactionId: tx, reponse: true });
+      permisEmis.set(p, { expire: maintenant() + L.permisMs, utilise: false });
+      return p;
+    },
+    /* [S81] envoyer la reponse, puis VERIFIER : (1) avant, la conversation existe
+     * et le message auquel on repond vient bien de CETTE adresse (pas de moi) ;
+     * (2) apres, le message envoye est dans les Envoyes, dans la meme
+     * conversation, au bon destinataire. Jamais de nouvel essai automatique. */
+    async envoyerReponse(permis, brouillon) {
+      const e = (permis && typeof permis === 'object' && permis.reponse) ? permisEmis.get(permis) : undefined;
+      if (!e) return { ok: false, code: 'PERMIS_INCONNU' };
+      if (e.utilise) return { ok: false, code: 'PERMIS_DEJA_UTILISE' };
+      e.utilise = true;
+      if (maintenant() > e.expire) return { ok: false, code: 'PERMIS_EXPIRE' };
+      const v = verifierReponse(brouillon || {});
+      if (!v.ok) return { ok: false, code: v.code };
+      if (v.brouillon.outil !== permis.outil || cleAdresse(v.brouillon.a) !== cleAdresse(permis.a)) return { ok: false, code: 'CONTENU_DIFFERENT' };
+      const jour = jourLocal();
+      if ((envois.get(jour) || 0) >= plafondJour) return { ok: false, code: 'PLAFOND_JOURNALIER' };
+      const jl = await jeton('lecture'); if (!jl.ok) return { ok: false, code: jl.code };
+      const moi = await adresseMoi(jl.jeton);
+      const f = await appeler('GET', API + '/threads/' + v.brouillon.filId + '?format=metadata&metadataHeaders=From&metadataHeaders=Message-ID', null, jl.jeton);
+      if (!f.ok || f.status !== 200 || !f.json || !Array.isArray(f.json.messages)) return { ok: false, code: f.ok ? (f.status === 404 ? 'FIL_INTROUVABLE' : erreurGmail(f.status, f.json)) : f.code };
+      const vise = f.json.messages.find(m => entete(m, 'message-id').trim() === v.brouillon.inReplyTo);
+      const deVise = vise ? (adressesDe(entete(vise, 'from'))[0] || {}).adresse : null;
+      if (!vise || !deVise || deVise !== cleAdresse(v.brouillon.a) || (moi && deVise === cleAdresse(moi))) return { ok: false, code: 'FIL_NE_CORRESPOND_PAS' };
+      const je = await jeton('envoi'); if (!je.ok) return { ok: false, code: je.code };
+      envois.set(jour, (envois.get(jour) || 0) + 1);   /* compte a la TENTATIVE */
+      for (const k of envois.keys()) if (k !== jour) envois.delete(k);
+      const r = await appeler('POST', API + '/messages/send', { raw: b64u(messageBrut(v.brouillon, permis.transactionId)), threadId: v.brouillon.filId }, je.jeton);
+      if (!r.ok) return { ok: false, code: ['DELAI_DEPASSE', 'CONNEXION_COUPEE', 'REPONSE_INCOMPLETE'].includes(r.code) ? 'RESULTAT_INCERTAIN' : r.code, detail: r.code };
+      if (!(r.status === 200 && r.json && typeof r.json.id === 'string' && /^[0-9a-fA-F]{6,40}$/.test(r.json.id)))
+        return r.status === 200 ? { ok: false, code: 'RESULTAT_INCERTAIN', detail: 'REPONSE_SANS_IDENTIFIANT' } : { ok: false, code: erreurGmail(r.status, r.json) };
+      const id = r.json.id;
+      /* la verification, par le jeton de LECTURE : ce que Google a vraiment range */
+      const c = await appeler('GET', API + '/messages/' + id + '?format=metadata&metadataHeaders=To', null, jl.jeton);
+      const labels = c.ok && c.json && Array.isArray(c.json.labelIds) ? c.json.labelIds : [];
+      const verification = Object.freeze({ envoyes: labels.includes('SENT'), memeFil: !!(c.ok && c.json && c.json.threadId === v.brouillon.filId),
+        destinataire: !!(c.ok && c.json && (adressesDe(entete(c.json, 'to'))[0] || {}).adresse === cleAdresse(v.brouillon.a)) });
+      return { ok: true, code: 'ENVOYE', preuve: id, fil: v.brouillon.filId, verifie: verification.envoyes && verification.memeFil && verification.destinataire, verification };
     }
   });
 }
 
+/* [S80] une conversation Gmail -> { id, objet, messages[] } (donnees, bornees) */
+function convertirFil(id, json, moi) {
+  const m0 = cleAdresse(moi);
+  const messages = json.messages.slice().sort((a, b) => (Number(a.internalDate) || 0) - (Number(b.internalDate) || 0)).slice(-LIMITES_MAIL.messagesParFil).map((m) => {
+    const de = adressesDe(entete(m, 'from'))[0] || { nom: '', adresse: '' };
+    const t = texteDe(m.payload);
+    const brut = nettoyer(partieNouvelle(t.texte), LIMITES_MAIL.texteFil + 1);
+    const mid = entete(m, 'message-id').trim(), labels = Array.isArray(m.labelIds) ? m.labelIds : [];
+    return Object.freeze({ id: String(m.id || '').slice(0, 40), de: Object.freeze({ nom: nettoyer(de.nom, 80), adresse: de.adresse }),
+      a: adressesDe(entete(m, 'to')).map(x => x.adresse), cc: adressesDe(entete(m, 'cc')).map(x => x.adresse),
+      repondreA: (adressesDe(entete(m, 'reply-to'))[0] || {}).adresse || null, date: Number(m.internalDate) || 0,
+      objet: nettoyer(decoderEntete(entete(m, 'subject')), 200), texte: brut.slice(0, LIMITES_MAIL.texteFil), coupe: brut.length > LIMITES_MAIL.texteFil,
+      piecesJointes: Object.freeze(piecesDe(m.payload)), messageId: RE_MESSAGE_ID.test(mid) ? mid : null,
+      references: nettoyer(entete(m, 'references'), 2000), moi: labels.includes('SENT') || (!!m0 && de.adresse === m0), nonLu: labels.includes('UNREAD') });
+  });
+  return Object.freeze({ id, objet: messages.length ? messages[0].objet : '', messages: Object.freeze(messages) });
+}
+
 module.exports = Object.freeze({ VERSION, creerMail, adresseValide, liensDe, verifierContenu, messageBrut, motEncode, lireClient, lireAutorises, valeurPropre, mailto,
+  verifierReponse, adressesDe, decoderEntete, partieNouvelle, convertirFil,   /* [S80] [S81] v4.10 */
   PORTEE_ENVOI, PORTEE_LECTURE, LIMITES_MAIL });

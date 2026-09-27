@@ -84,7 +84,7 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
 
   await t('V1', '/health : agenda actif, passerelle v4.5.x à v4.9.x, couche 5.29.12 ou 5.30.x', async () => {
     const h = await appel('/health');
-    return { ok: h.agenda === 'actif' && /^v4\.[5-9](\.\d+)?$/.test(h.passerelle) && /^5\.(29\.12|30\.\d+)$/.test(h.couche) && h.acces === 'protege', info: JSON.stringify({ agenda: h.agenda, passerelle: h.passerelle, couche: h.couche }) };
+    return { ok: h.agenda === 'actif' && /^v4\.(?:[5-9](\.\d+)?|1\d(?:\.\d+)?)$/.test(h.passerelle) && /^5\.(29\.12|30\.\d+)$/.test(h.couche) && h.acces === 'protege', info: JSON.stringify({ agenda: h.agenda, passerelle: h.passerelle, couche: h.couche }) };
   });
   await t('V2', "sans la cle d'acces, rien : ni session, ni agenda", async () => {
     const s = await appel('/api/session', {}, null);
@@ -212,7 +212,8 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
     /* v4.6.7 [S50] : AGENDA peut etre absent (agenda JARVIS seul) : « if (AGENDA) » devant */
     /* v4.8 [S64] : deux lectures (question tapee, point du jour), chacune avec SON permis ne dans l'effet */
     const effets = (src.match(/g\.executer\(demande, \(action\) => \{ (if \(AGENDA\) )?permis = AGENDA\.permis\(action\)/g) || []).length, dansEffet = effets === permis;
-    return { ok: lire === 2 && permis === 2 && dansEffet, info: 'lire x' + lire + ', permis x' + permis + (dansEffet ? ', dans l\'effet' : ', HORS effet') };
+    /* v4.10 [S82] [S83] : une troisieme (lireAgendaJours : « a gerer », creneau), meme regle */
+    return { ok: lire === 3 && permis === 3 && dansEffet, info: 'lire x' + lire + ', permis x' + permis + (dansEffet ? ', dans l\'effet' : ', HORS effet') };
   });
 
   /* ---- [S20] cible retapee = action confirmee (vu en ligne le 23 sept) ---- */

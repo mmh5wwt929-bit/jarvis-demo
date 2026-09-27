@@ -25,13 +25,13 @@ code{font-size:.9em}
 
 <h2>Données Google (instance privée uniquement)</h2>
 <ul>
-<li><b>Gmail d'un compte d'essai</b> : le droit <code>gmail.send</code> sert à envoyer un e-mail, seulement vers une liste fermée d'adresses, après relecture complète, adresse retapée et Face ID ; le droit <code>gmail.readonly</code> sert à lire, à la demande, au plus 5 e-mails récents. Les deux droits sont portés par deux jetons séparés.</li>
+<li><b>Gmail d'un compte d'essai</b> : le droit <code>gmail.send</code> sert à envoyer un e-mail vers une liste fermée d'adresses, ou une réponse à l'expéditeur d'une conversation reçue, toujours après relecture complète, adresse retapée et Face ID ; le droit <code>gmail.readonly</code> sert à lire, à la demande, quelques e-mails récents et les conversations des 14 derniers jours (au plus 15, hors promotions et réseaux sociaux), pour dire ce qui demande une réponse. Les deux droits sont portés par deux jetons séparés.</li>
 <li><b>Google Agenda</b> : lecture de l'agenda, et création ou suppression d'événements dans un agenda dédié « JARVIS », toujours après un geste de confirmation.</li>
 <li>La démo publique n'accède à aucune donnée Google.</li>
 </ul>
 
 <h2>Usage</h2>
-<p>Ces données servent uniquement à répondre à la demande de la personne qui utilise JARVIS. Le contenu nécessaire à la réponse (message tapé, e-mails ou événements lus) est transmis à l'API d'Anthropic (modèle Claude) pour rédiger la réponse. Rien n'est vendu, rien ne sert à de la publicité, rien n'est partagé avec d'autres tiers, et JARVIS ne s'en sert pas pour entraîner un modèle.</p>
+<p>Ces données servent uniquement à répondre à la demande de la personne qui utilise JARVIS. Le contenu nécessaire à la réponse (message tapé, e-mails ou événements lus) est transmis à l'API d'Anthropic (modèle Claude) pour rédiger la réponse. L'analyse des conversations (« ce que j'ai à gérer ») est faite par le serveur, avec des règles, sans IA ; une conversation n'est transmise à Claude que si la personne demande d'y rédiger une réponse (ses 3 derniers messages). Rien n'est vendu, rien ne sert à de la publicité, rien n'est partagé avec d'autres tiers, et JARVIS ne s'en sert pas pour entraîner un modèle.</p>
 <p>L'utilisation et le transfert à toute autre application des informations reçues des API Google respectent les <a href="https://developers.google.com/terms/api-services-user-data-policy">règles relatives aux données utilisateur des services d'API Google</a>, y compris les exigences d'utilisation limitée (Limited Use).</p>
 
 <h2>Conservation</h2>

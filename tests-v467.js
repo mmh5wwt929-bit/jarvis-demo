@@ -218,7 +218,7 @@ const plansJ = () => journal().filter(x => x.type === 'plan');
     'DTSTART:' + iso(D3).replace(/-/g, '') + 'T080000Z', 'DTEND:' + iso(D3).replace(/-/g, '') + 'T090000Z', 'SUMMARY:Réunion', 'END:VEVENT', 'END:VCALENDAR', ''].join('\r\n');
   const srv = await lancer({ JARVIS_CLE_ACCES: CLE, JARVIS_GOOGLE_COMPTE: COMPTE, JARVIS_AGENDA_JARVIS: AGENDA_ID, JARVIS_AGENDA_ICAL: 'https://agenda.test/basic.ics' });
   await t('S0', 'passerelle v4.6.7, agenda et écriture actifs', async () =>
-    ({ ok: srv.sante && /^v4\.(6\.7|[7-9]\.\d+)$/.test(srv.sante.passerelle) && srv.sante.agenda === 'actif' && srv.sante.ecriture === 'actif', info: srv.sante && srv.sante.passerelle }));
+    ({ ok: srv.sante && /^v4\.(?:(6\.7|[7-9]\.\d+)|1\d(?:\.\d+)?)$/.test(srv.sante.passerelle) && srv.sante.agenda === 'actif' && srv.sante.ecriture === 'actif', info: srv.sante && srv.sante.passerelle }));
 
   /* F */
   viderJournal();
