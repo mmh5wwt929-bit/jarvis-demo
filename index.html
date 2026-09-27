@@ -92,6 +92,7 @@ main{flex:1;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
 .tour .quoi{background:var(--ardoise);border:1px solid var(--regle);border-radius:7px;
   padding:10px 13px;white-space:pre-wrap;text-align:left;overflow-wrap:anywhere}
 .tour.moi .quoi{background:#1c2430;border-color:#2b3644}
+.tour.non-fait .quoi{border-left:3px solid var(--retenu)}   /* [S74] */
 
 /* La décision : l'élément central du produit */
 .decision{border-left:3px solid var(--regle);padding:11px 0 11px 14px;margin-top:4px;overflow-wrap:anywhere}
@@ -149,6 +150,7 @@ button.lien{background:none;border:none;color:var(--sourd);font-size:12px;
 /* [S68] v4.9 : le vrai e-mail, montre EN ENTIER (texte, jamais du HTML) */
 .mail-carte{border:1px solid var(--retenu);border-radius:10px;padding:10px;margin-top:6px}
 .mail-entete{font-size:13px;margin:2px 0}.mail-entete b{display:inline-block;min-width:52px}
+.mail-entete.avert{color:var(--retenu)}
 .mail-texte{white-space:pre-wrap;word-break:break-word;font-size:13px;border-left:3px solid var(--retenu);padding:6px 9px;margin:8px 0;max-height:none}
 #blocGmail p{font-size:13px}
 #blocGmail .rang{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
@@ -826,6 +828,7 @@ function rendreDecision(d) {
     const hM = '<div class="decision attente mail-retaper" data-jeton="' + esc(m.jeton) + '"><div class="plan">Vrai e-mail — à relire en entier</div>'
       + '<div class="mail-carte"><p class="mail-entete"><b>De</b> compte d\'essai JARVIS</p><p class="mail-entete"><b>À</b> <span class="mono">' + esc(m.a) + '</span></p>'
       + '<p class="mail-entete"><b>Objet</b> ' + esc(m.objet) + '</p><div class="mail-texte">' + esc(m.texte) + '</div>'
+      + (m.avertissements || []).map(x => '<p class="mail-entete avert">⚠ ' + esc(x) + '</p>').join('')   /* [S72] */
       + '<p class="mail-entete">' + (m.redigePar === 'modele' ? 'Rédigé par Claude à partir de ta seule demande : relis chaque mot.' : 'Objet et texte : tes mots, tels quels.')
       + ' Aucun lien que tu n\'as pas tapé, aucune pièce jointe.' + (Number.isFinite(m.restants) ? ' Envois restants aujourd\'hui : ' + esc(String(m.restants)) + '.' : '') + '</p></div>'
       + '<p>S\'il te convient, retape l\'adresse du destinataire toi-même. Il sera ensuite retenu 10 s, puis envoyé seulement avec Face ID.</p>'
@@ -1264,6 +1267,8 @@ async function envoyer() {
     if (d && d.etape === 'DEBIT' && limiteAtteinte(d)) { $('envoyer').disabled = false; return; }
     if (d && d.etape === 'MEMOIRE' && d.decide === 'AUTORISE' && d.souvenir) Memoire.ajouter(d.souvenir);
     majEtat(d); rendreDecision(d);
+    /* [S74] v4.9.1 une action par message : ce qui n'est PAS fait est dit par JARVIS */
+    if (d && d.nonFait && d.nonFait.texte) tour('JARVIS', d.nonFait.texte, false).classList.add('non-fait');
   } catch (e) { tour('JARVIS', 'La passerelle est injoignable : ' + e.message, false); }
   $('envoyer').disabled = false;
 }
