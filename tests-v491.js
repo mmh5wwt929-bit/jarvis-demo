@@ -205,7 +205,7 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
   await t('G4', "les deux pages sont dans le manifeste (un dépôt incomplet est vu par la CI)", async () =>
     ({ ok: Array.isArray(MF.FICHIERS) && MF.FICHIERS.includes('confidentialite.html') && MF.FICHIERS.includes('conditions.html'), info: String((MF.FICHIERS || []).slice(-2)) }));
   const hV = await appel('/health', null, { sansCle: true });
-  await t('G6', "/health annonce la passerelle v4.9.1 (à vérifier en ligne après le déploiement)", async () => ({ ok: hV.passerelle === 'v4.9.1', info: hV.passerelle }));
+  await t('G6', "/health annonce la passerelle v4.9.1 (à vérifier en ligne après le déploiement)", async () => ({ ok: /^v4\.(9\.1|1\d(\.\d+)?)$/.test(hV.passerelle),   /* [v4.10] v4.9.1 ou plus */ info: hV.passerelle }));
   const sansCle = await appel('/api/mail', null, { sansCle: true });
   await t('G5', "garde : l'API reste derrière la clé", async () => ({ ok: sansCle.status === 401, info: String(sansCle.status) }));
 

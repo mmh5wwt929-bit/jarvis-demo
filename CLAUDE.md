@@ -1,9 +1,10 @@
 # JARVIS — consignes pour Claude (dépôt public : aucun secret, aucune adresse privée)
 
-## État (branche `Racine`, après fusion de la PR v4.9.1)
-- Passerelle **v4.9.1** (avant : v4.9.0, empreinte `458afd8d005f`) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
-- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.1, `jarvis-verite.js` 1.4.
+## État (branche `Racine`, après fusion de la PR v4.10)
+- Passerelle **v4.10** (avant : v4.9.1) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
+- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.2, `jarvis-verite.js` 1.4, `jarvis-analyse.js` 1.0.
 - v4.9.1 : « Ouvrir dans Mail » (mailto:), demande double dite, historique 12 échanges, pages `/confidentialite` et `/conditions`.
+- v4.10 : « qu'est-ce que j'ai à gérer ? » (agenda + conversations + notes, sans IA), conversations entières, réponse dans la conversation, créneau vérifié contre l'agenda, rappels, sauvegarde des souvenirs (fichier).
 - Render déploie `Racine` seulement « After CI Checks Pass ».
 - Deux services, même code :
   - démo publique (sans `JARVIS_CLE_ACCES`) : **jamais** de variable Gmail, agenda ou élévation ;
@@ -21,7 +22,8 @@
 | `jarvis-memoire.js` | « retiens que » : souvenirs gouvernés, jamais source d'action ni de cible. |
 | `jarvis-agenda.js` / `jarvis-ecriture.js` | Lecture iCal / écriture dans l'agenda dédié JARVIS (compte de service). |
 | `jarvis-elevation.js` | Face ID (WebAuthn) et code de secours, liés à UNE transaction. |
-| `jarvis-gmail.js` | Gmail du compte d'essai : envoi (liste fermée) et lecture, deux jetons séparés. |
+| `jarvis-gmail.js` | Gmail du compte d'essai : envoi (liste fermée), réponse dans une conversation (fil revérifié), lecture des e-mails et des conversations ; deux jetons séparés. |
+| `jarvis-analyse.js` | Analyse des conversations par règles, sans IA : réponse attendue, échéances, engagements, relances, PJ manquante, versions différentes, créneaux, mail suspect ; chaque résultat avec sa preuve et sa certitude. |
 | `jarvis-appli.js` | Manifeste web et icônes (écran d'accueil). |
 | `confidentialite.html`, `conditions.html` | Pages publiques exigées par Google (appli OAuth en Production). |
 | `jarvis-manifeste.js` + `MANIFESTE.json` | Empreintes SHA-256 des fichiers qui tournent ; CI refuse un dépôt non conforme. |
@@ -33,11 +35,14 @@
 - Droits minimaux : un jeton `gmail.send` seul pour envoyer, un autre `gmail.readonly` seul pour lire ; portée vérifiée à chaque jeton d'accès ; même jeton pour les deux = refus.
 - Tout contenu lu (e-mail, agenda) est **externe** (`CONTENT_DERIVED`), déclaré à la couche avant que le modèle le voie ; il ne fournit jamais une action, une cible, un lien, ni une offre d'exécuter ce qu'il demande.
 - Destinataire d'un envoi : adresse tapée par la personne dans la demande (C3), jamais tirée d'un contenu lu ou d'un souvenir. Vrai pour « Ouvrir dans Mail » aussi (pas de liste, pas de Face ID : c'est la personne qui envoie ; trace « préparé », jamais « envoyé »).
+- Seule exception (v4.10) : la **réponse dans une conversation** va à l'expéditeur lu par le serveur dans l'en-tête « De » du dernier message d'un autre (jamais « Répondre à », jamais choisi par le modèle), hors liste fermée, mais retapé + 10 s + Face ID ; le module revérifie le fil chez Google avant d'envoyer, puis vérifie Envoyés / même fil / destinataire. Conversation **suspecte** : JARVIS n'envoie rien (« Ouvrir dans Mail » seul).
+- « À gérer », conversations, créneaux : écrits par le serveur (règles), sans IA ; une conversation n'entre dans le contexte du modèle que pour rédiger une réponse demandée (déclarée `CONTENT_DERIVED` avant). La page ne renvoie que des jetons serveur (`fl_…`) et un index, jamais une adresse, une date ou un identifiant Gmail.
+- Un souvenir (y compris restauré d'un fichier) peut ajuster une proposition (délai de relance, notes), jamais donner une permission ni une cible.
 - Une action par message : ce qui n'est pas fait est dit par le serveur ; le modèle ne propose jamais d'agir à la place de la personne.
 - Fermé par défaut : une variable mal réglée désactive l'outil et `/health` le dit ; jamais de repli silencieux vers la simulation.
 - Aucun secret (clé, jeton, client OAuth, code) dans un commit, un journal, une capture, un message ou une réponse d'API.
 
-## Méthode (essai v4.9.1)
+## Méthode (depuis v4.9.1)
 - Travail sur `claude/<version>` ; **jamais de push sur `Racine`** (protégée : PR + CI obligatoires, pas de push forcé).
 - Un commit par étape validée ; une seule PR à la fin, CI verte ; **Alsid fusionne**.
 - Chaque nouveau test doit **échouer sur la version précédente** (`JARVIS_DIR=../vPREC node tests-vNEW.js`), sauf les « garde » ; les suites existantes restent vertes.

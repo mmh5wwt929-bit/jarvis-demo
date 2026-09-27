@@ -99,7 +99,7 @@ const B = 'http://localhost:' + BASE;
   const envoi = { action: 'SEND', resource: 'EMAIL', target: 'pierre@exemple.fr' };
   const mal = await lancer({ JARVIS_CLE_ACCES: CLE, JARVIS_CODE_SECOURS: 'abcdefghijkl' }, [envoi]);
   await t('C2', "code avec des lettres : /health « erreur-config » (plus « inactif »), le journal le crie", async () =>
-    ({ ok: mal.sante && /^v4\.(6\.[2-9]|[7-9]\.\d+)$/.test(mal.sante.passerelle) && mal.sante.elevation === 'erreur-config' && /MAL CONFIGUREE/.test(mal.sortie()) && /12 a 64 chiffres/.test(mal.sortie()),
+    ({ ok: mal.sante && /^v4\.(?:(6\.[2-9]|[7-9]\.\d+)|1\d(?:\.\d+)?)$/.test(mal.sante.passerelle) && mal.sante.elevation === 'erreur-config' && /MAL CONFIGUREE/.test(mal.sortie()) && /12 a 64 chiffres/.test(mal.sortie()),
        info: mal.sante && (mal.sante.passerelle + ' ' + mal.sante.elevation) }));
 
   await t('C3', "code illisible : l'envoi irréversible reste BLOQUÉ (avant v4.6.2 il partait sans code ni Face ID)", async () => {
