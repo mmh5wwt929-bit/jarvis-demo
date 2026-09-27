@@ -61,11 +61,16 @@
  *  - retirerOffres() : « dis-moi a quelle adresse et je preparerai le mail »
  *    (apres un e-mail piege) : une proposition d'agir a la place de la
  *    personne est retiree ; une action ne part que de SA demande complete.
+ *
+ * 1.5 (v4.10.1, 27 sept) — VU EN LIGNE sur la v4.10
+ *  - retirerOffres() couvre l'agenda : « Tu veux que je crée un événement
+ *    dans ton agenda JARVIS pour samedi à 11h ? » (puis « Oui » : rien) ;
+ *    rendu : { texte, retirees, agenda } (agenda = offres d'agenda retirees).
  * ========================================================================== */
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const AG = require('./jarvis-agenda.js');
 
-const VERSION = '1.4';
+const VERSION = '1.5';
 const JOUR_MS = 86400000;
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const JOURS_COURTS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
@@ -464,7 +469,7 @@ const RE_AUTRE_OBJET = /(^| )(fichier|fichiers|dossier|dossiers|mail|mails|e mai
 const autreObjet = (texte) => RE_AUTRE_OBJET.test(mots(texte));
 
 /* ------------------------------ phrases que seul le serveur ecrit : [1.1] -- */
-const RE_SERVEUR_SEUL = /(touche « ?(supprimer( la s[ée]rie)?|cr[ée]er( les \d+ s[ée]ances)?|ne pas cr[ée]er|confirmer) ?»|rien n'est (supprim[ée]|[ée]crit) avant ton toucher|disparition v[ée]rifi[ée]e|confirm[ée] par google|jour et heure lus dans tes mots|cr[ée][ée] par jarvis dans cette session|ne sont pas encore possibles : c'est la prochaine [ée]tape)/i;
+const RE_SERVEUR_SEUL = /(touche « ?(supprimer( la s[ée]rie)?|cr[ée]er( les \d+ s[ée]ances)?|ne pas cr[ée]er|confirmer) ?»|rien n'est (supprim[ée]|[ée]crit) avant ton toucher|disparition v[ée]rifi[ée]e|confirm[ée] par google|jour et heure lus dans tes mots|cr[ée][ée] par jarvis dans cette session|ne sont pas encore possibles : c'est la prochaine [ée]tape|\(jarvis a (retir[ée]|corrig[ée]))/i;   /* [1.5] ses notes aussi */
 function imiteServeur(texte) {
   const s = String(texte == null ? '' : texte);
   const retirees = [];
@@ -679,20 +684,49 @@ const RE_OFFRES = Object.freeze([
   /(^| )(dis|donne|indique|precise|communique|envoie|ecris) moi (juste |simplement |seulement |d abord |alors |donc )?(a quelle adresse|quelle adresse|l adresse|son adresse|a qui|le destinataire|l iban|le montant)( |$)/,
   /(^| )(veux|voulez|souhaites|souhaitez|desires|desirez)( tu| vous)? (que je|qu on) (le |la |les |lui |leur |te |vous )*(prepare|envoie|transfere|transmette|expedie|paie|paye|regle|vire|rembourse|reponde|fasse)( |$)/
 ]);
+/* [1.5] v4.10.1 vu en ligne : « Tu veux que je crée un événement dans ton agenda
+ * JARVIS pour samedi à 11h ? » est passe (le verbe « creer » n'etait pas dans la
+ * liste) ; « Oui » ne declenchait rien. Couvert aussi : creer, ajouter, noter,
+ * mettre, programmer, planifier, inscrire, enregistrer, rappeler (caler,
+ * bloquer) apres pouvoir / vouloir, au futur, en question au present (« je
+ * l'ajoute ? ») et dans « tu veux / veux-tu / souhaites-tu / voudrais-tu que je
+ * … ». Etroit : il faut un OBJET d'agenda ou un moment (agenda, evenement,
+ * rendez-vous, rappel, creneau, 11h, samedi, demain…) ; « je peux creer un plan
+ * d'entrainement » (du texte) reste. « Je peux te rappeler que … » aussi. */
+const PRONOMS_A = '(te |vous |le |la |les |lui |leur |l |me |m |ca |cela |tout de suite |aussi |alors |ensuite |donc |bien |meme |volontiers |directement )*';
+const INF_AGENDA = '(creer|ajouter|rajouter|noter|mettre|programmer|planifier|inscrire|enregistrer|rappeler|caler|bloquer|reserver)';
+const SUBJ_AGENDA = '(cree|creee|ajoute|rajoute|note|mette|programme|planifie|inscrive|enregistre|rappelle|cale|bloque|reserve)';
+const PRES_AGENDA = '(cree|ajoute|rajoute|note|mets|programme|planifie|inscris|enregistre|cale|bloque|reserve)';
+const FUT_AGENDA = '(creerai|ajouterai|rajouterai|noterai|mettrai|programmerai|planifierai|inscrirai|enregistrerai|rappellerai|calerai|bloquerai|reserverai)';
+const RE_OFFRES_AGENDA = Object.freeze([
+  new RegExp('(^| )(je|j) ' + PRONOMS_A + '(peux|pourrai|pourrais|vais|veux bien|propose de|me charge de|m occupe de|peux aussi) ' + PRONOMS_A + INF_AGENDA + '( |$)'),
+  new RegExp('(^| )(je|j) ' + PRONOMS_A + FUT_AGENDA + '( |$)'),
+  new RegExp('(^| )(veux|voulez|veut|souhaites|souhaitez|desires|desirez|voudrais|voudriez|aimerais|aimeriez|preferes|preferez)( tu| vous)? (que je|qu on|que j) ' + PRONOMS_A + SUBJ_AGENDA + '( |$)'),
+  new RegExp('(^| )(dois je|est ce que je|faut il que je) ' + PRONOMS_A + '(' + INF_AGENDA.slice(1, -1) + '|' + SUBJ_AGENDA.slice(1, -1) + ')( |$)')
+]);
+const RE_PRES_QUESTION = new RegExp('^ ?(je|j) ' + PRONOMS_A + PRES_AGENDA + '( |$)');
+const RE_OBJET_AGENDA = /(^| )(agenda|calendrier|evenement|evenements|rendez vous|rdv|rappel|rappels|creneau|creneaux|alarme)( |$)|(^| )\d{1,2} ?h(\d{2})?( |$)|(^| )\d{1,2} \d{2}( |$)|(^| )(demain|aujourd hui|apres demain|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|ce soir|ce matin|cet apres midi)( |$)/;
+function offreAgenda(m) {
+  const p = plat(m);
+  if (!RE_OBJET_AGENDA.test(p) || /(^| )rappeler (que|qu)( |$)/.test(p)) return false;
+  return RE_OFFRES_AGENDA.some(re => re.test(p)) || (/\?\s*$/.test(String(m)) && RE_PRES_QUESTION.test(p));
+}
 function retirerOffres(texte, { rouge = false, adressesLues = [] } = {}) {
   const s = String(texte == null ? '' : texte);
   const lues = new Set([...(adressesLues || [])].map(a => String(a).toLowerCase()));
   const retirees = [];
+  let agenda = 0;
   const lignes = s.split('\n').map((ligne) => phrases(ligne).filter((m) => {
     const p = plat(m);
     let offre = RE_OFFRES.some(re => re.test(p));
+    if (!offre && offreAgenda(m)) { offre = true; agenda++; }   /* [1.5] */
     if (!offre && rouge && lues.size && /(^| )(tape|tapez|ecris|ecrivez|demande moi|dis moi)( |$)/.test(p)
         && /(^| )(envoi|envoy|transfer|transmet|expedi|pai|pay|vir|regl|rembours|repond)/.test(p))
       offre = (m.match(RE_ADRESSE) || []).some(a => lues.has(a.replace(/[.:!?]+$/, '').toLowerCase()));
     if (offre) { retirees.push(m.trim()); return false; }
     return true;
   }).join('').replace(/\s+$/, ''));
-  return { texte: retirees.length ? lignes.join('\n').replace(/\n{3,}/g, '\n\n').trim() : s, retirees };
+  return { texte: retirees.length ? lignes.join('\n').replace(/\n{3,}/g, '\n\n').trim() : s, retirees, agenda };
 }
 
 module.exports = Object.freeze({ VERSION, resoudreDates, dateUnique, tableDates, avertissementNuit, questionContradiction, questionDate,

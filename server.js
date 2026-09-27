@@ -307,6 +307,17 @@
  *   [S82] « qu'est-ce que j'ai a gerer ? » : agenda + mails + notes, sans IA.
  *   [S83] creneau verifie contre l'agenda (libre / conflit / autre), rappel :
  *         des cartes « Creer ». [S84] (page) sauvegarde des souvenirs.
+ *
+ * v4.10.1 — vu en ligne le 27 sept sur la v4.10 :
+ *   [S85] une conversation coupee en deux fils par Gmail (« Re : Re: … » de
+ *         Yahoo) : objet normalise, fils de meme objet ET meme correspondant
+ *         regroupes (4 au plus) ; une lecture gouvernee PAR fil ; la reponse
+ *         part dans le fil du dernier message d'un autre ; References gardees.
+ *   [S86] vraie alerte Google classee « suspect » : DMARC lu dans le premier
+ *         en-tete Authentication-Results (Gmail), grands services seulement.
+ *   [S87] offre d'agir retiree aussi pour l'agenda (« tu veux que je cree un
+ *         evenement… ? ») ; [S88] astuce « a gerer » quand une creation manque
+ *         d'un jour ou d'une heure ; [S89] mail suspect : pas de « Me le rappeler ».
  * ========================================================================== */
 
 const http = require('http');
@@ -1406,11 +1417,34 @@ async function lireMails(s, sessionId, texte, plan, avant) {
  *  - une fois par session (5 min) : le rechargement de la page en ouvre une.
  * ======================================================================== */
 const plurielEvt = (n) => n === 0 ? 'rien' : n === 1 ? '1 événement' : n + ' événements';
+/* [S94] v4.10.1 « à gérer » en UNE ligne dans le point du jour : les memes regles,
+ * la meme lecture gouvernee (READ MAIL « fils »), sans modele ; aucun objet,
+ * nom ni adresse lu n'entre dans l'historique ou le contexte du modele (seul
+ * le verdict « READ MAIL autorise » est note, comme pour « à gérer ») : le
+ * plancher ne bouge pas.
+ * « Mails : 2 réponses attendues · 1 suspect ». Rien sur la demo publique. */
+const COMPTES_MAILS = [['reponse', 'réponse attendue', 'réponses attendues'], ['engagement', 'promesse à tenir', 'promesses à tenir'], ['echeance', 'échéance', 'échéances'],
+  ['relance', 'relance', 'relances'], ['creneau', 'rendez-vous proposé', 'rendez-vous proposés'], ['contradiction', 'point à vérifier', 'points à vérifier'],
+  ['pj', 'pièce jointe absente', 'pièces jointes absentes'], ['suspect', 'suspect', 'suspects']];
+function ligneMails(ml) {
+  if (!ml) return null;
+  if (!ml.ok) return { ok: false, nb: 0, ligne: 'Mails : boîte non lue (' + erreurLecture(ml.code) + ')' };
+  const parties = [];
+  let nb = 0;
+  for (const [type, un, plusieurs] of COMPTES_MAILS) {
+    const n = ml.items.filter(x => x.type === type).length;
+    if (n) { parties.push(n + ' ' + (n > 1 ? plusieurs : un)); nb += n; }
+  }
+  return { ok: true, nb, suspects: ml.items.filter(x => x.type === 'suspect').length, ligne: 'Mails : ' + (parties.length ? parties.join(' · ') : 'rien à traiter') };
+}
 async function pointDuJour(s) {
-  if (!AGENDA && !ECRITURE) return { actif: false };
+  if (!AGENDA && !ECRITURE && !MAIL_LECTURE) return { actif: false };
   if (s.pointDuJour && Date.now() - s.pointDuJour.ts < 5 * 60 * 1000) return s.pointDuJour.r;
   const g = s.g, now = Date.now(), auj = V.local(now, FUSEAU).jour;
-  const garder = (r) => { s.pointDuJour = { ts: Date.now(), r }; return r; };
+  /* la boite part EN MEME TEMPS que l'agenda ([S91]) ; son resultat accompagne toute reponse */
+  const mailsP = MAIL_LECTURE ? mailsAGerer(s, reglagesSouvenirs(s.souvenirs)).then(ligneMails, () => ({ ok: false, nb: 0, ligne: 'Mails : boîte non lue' })) : Promise.resolve(null);
+  const garder = async (r) => { const mails = await mailsP; const x = mails ? { ...r, mails } : r; s.pointDuJour = { ts: Date.now(), r: x }; return x; };
+  if (!AGENDA && !ECRITURE) return garder({ actif: true, ok: true, jours: [], nonLus: [], resume: '' });
   const periode = AG.periodeDe(V.iso(auj) + '..' + V.iso(auj + 1), now, FUSEAU);
   if (!periode) return garder({ actif: true, ok: false, code: 'PERIODE_INVALIDE', message: 'Point du jour indisponible.' });
   const demande = g.demander({ action: 'READ', resource: 'AGENDA', target: periode.cle });
@@ -1577,6 +1611,13 @@ function quandSerie(texte, precedent) {
   return { jour: premier, derniere: premier + (nb - 1) * 7, nb, debut: h.debut, duree: h.duree == null ? 60 : h.duree, dureeParDefaut: h.duree == null, avertissements };
 }
 
+/* [S88] v4.10.1 vu en ligne : « Ajoute les deux à mon agenda » (deux rendez-vous
+ * lus dans un mail) -> Quel jour ? un seul jour, quelle heure… : 5 echanges. La
+ * regle reste (jamais une date non tapee, une action par message) ; quand la
+ * boite est branchee, la PREMIERE question dit le chemin court, sans modele. */
+const ASTUCE_MAIL = " Pour un rendez-vous lu dans un mail : « Qu'est-ce que j'ai à gérer ? » → « Vérifier dans mon agenda » → « Ajouter ».";
+const astuceMail = (serie, precedent, motif) => MAIL_LECTURE && !serie && !precedent
+  && ['JOUR_ABSENT', 'DATES_MULTIPLES', 'HEURE_ABSENTE', 'TITRE_ABSENT'].includes(motif) ? ASTUCE_MAIL : '';
 async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour) {
   const g = s.g;
   const base = (o) => ({ ...o, plan, outil: 'agenda-jarvis', audit: g.auditDepuis(avant), ...etatDe(s) });
@@ -1596,12 +1637,13 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
        * seulement si le modele avait donne un titre -> « 18h » repartait de zero) */
       if (q.motif !== 'DATE_CONTRADICTOIRE' && !q.abandon) retenir(false);
       noterVerdict(s, { decide: 'SANS_OBJET', action: 'CREATE', target: propre(titre || '?', 60), motif: q.motif });
-      return dire(q.question, { decide: 'SANS_OBJET', etape: 'SERVEUR', motif: q.motif });
+      return dire(q.question + astuceMail(serie, precedent, q.motif), { decide: 'SANS_OBJET', etape: 'SERVEUR', motif: q.motif });
     }
     if (!titre) {
       retenir(true);
       noterVerdict(s, { decide: 'SANS_OBJET', action: 'CREATE', target: '?', motif: 'TITRE_ABSENT' });
-      return dire('Quel titre pour ' + (serie ? 'cette série' : 'cet événement') + ' ? Réponds par exemple « entraînement U18 ».', { decide: 'SANS_OBJET', etape: 'SERVEUR', motif: 'TITRE_ABSENT' });
+      return dire('Quel titre pour ' + (serie ? 'cette série' : 'cet événement') + ' ? Réponds par exemple « entraînement U18 ».' + astuceMail(serie, precedent, 'TITRE_ABSENT'),
+        { decide: 'SANS_OBJET', etape: 'SERVEUR', motif: 'TITRE_ABSENT' });
     }
     v = titre ? ECRITURE.validerCible(V.iso(q.jour) + 'T' + hhmm(q.debut.h, q.debut.mi) + '|' + q.duree + '|' + titre + (serie ? '|HEBDO:' + V.iso(q.derniere) : '')) : null;
     if (v) {
@@ -1692,7 +1734,9 @@ function reponseVerifiee(texte, sansAction, passif = true, strict = true, s = nu
   if (im.retirees.length) notes.push('(JARVIS a retiré une phrase qui imitait un message du serveur : les cartes et les boutons viennent de JARVIS seul.)');
   if (r.retirees.length) notes.push("(JARVIS a retiré une phrase qui annonçait une action : rien n'a été créé, supprimé ni envoyé pendant ce message.)");
   if (of.retirees.length) notes.push("(JARVIS a retiré une proposition d'agir à ta place : une action ne part que d'une demande que tu tapes toi-même en entier."
-    + (rouge ? " Ce qu'un contenu lu demande n'est jamais une raison d'agir." : '') + ')');
+    + (rouge ? " Ce qu'un contenu lu demande n'est jamais une raison d'agir." : '')
+    /* [S87] une offre d'agenda retiree : le chemin qui marche, dit par le serveur */
+    + (of.agenda && ECRITURE ? " Pour un événement : tape-le en une phrase (« ajoute match samedi à 11h »)" + (MAIL_LECTURE ? ", ou, s'il vient d'un mail, « Qu'est-ce que j'ai à gérer ? » → « Vérifier dans mon agenda » → « Ajouter »." : '.') : '') + ')');
   if (c.corrections.length) notes.push('(JARVIS a corrigé le jour de la semaine : ' + c.corrections.map(x => 'le ' + x.libelle.split(' ').slice(1).join(' ') + ' est un ' + x.vrai).join(' ; ') + '.)');
   const corps = String(mem.texte || '').trim();
   return { texte: (corps ? corps + (notes.length ? '\n\n' : '') : '') + notes.join('\n'), retirees: r.retirees.concat(im.retirees, of.retirees), imitations: im.retirees.length,
@@ -2108,18 +2152,31 @@ const LIMITES_GERER = Object.freeze({ cacheMs: 60 * 1000, filsParSession: 40, co
 const TEXTE_SANS_BOITE = CLE_ACCES
   ? "La lecture de la boîte n'est pas branchée sur cette instance (JARVIS_GMAIL_LECTURE) : je ne peux regarder ni tes mails ni tes conversations."
   : "C'est la démo publique : elle ne lit aucune boîte mail.";
-/* un fil affiche a la personne : un jeton serveur, jamais l'identifiant brut */
-function retenirFil(s, fil, analyse) {
+/* une conversation affichee a la personne : un jeton serveur, jamais l'identifiant brut.
+ * [S85] v4.10.1 une conversation = un GROUPE de fils (meme objet normalise, meme
+ * correspondant, 4 au plus) ; le jeton porte leurs identifiants, cote serveur. */
+function retenirFil(s, groupe, analyse) {
   if (!s.fils) s.fils = new Map();
-  /* le meme fil garde le meme jeton (une carte deja affichee reste valable) ; ses creneaux verifies sont oublies */
+  const ids = Array.isArray(groupe.ids) && groupe.ids.length ? groupe.ids.slice(0, 4) : [groupe.id];
+  const cle = groupe.cle || 'fil|' + ids[0];
+  /* la meme conversation garde le meme jeton (une carte deja affichee reste valable) ; ses creneaux verifies sont oublies */
   let jeton = null;
-  for (const [k, v] of s.fils) if (v.filId === fil.id) { jeton = k; s.fils.delete(k); break; }
+  for (const [k, v] of s.fils) if (v.cle === cle || v.filIds.some(x => ids.includes(x))) { jeton = k; s.fils.delete(k); break; }
   jeton = jeton || 'fl_' + crypto.randomUUID();
-  s.fils.set(jeton, { filId: fil.id, objet: fil.objet, suspect: !!(analyse && analyse.suspect), creneaux: (analyse && analyse.creneaux) || [], ts: Date.now() });
+  s.fils.set(jeton, { cle, filIds: ids, filId: ids[0], objet: groupe.objet, suspect: !!(analyse && analyse.suspect), creneaux: (analyse && analyse.creneaux) || [], ts: Date.now() });
   while (s.fils.size > LIMITES_GERER.filsParSession) s.fils.delete(s.fils.keys().next().value);
   return jeton;
 }
 const filDe = (s, jeton) => (typeof jeton === 'string' && s.fils && s.fils.get(jeton)) || null;
+/* [S85] relire une conversation : UNE lecture gouvernee (READ MAIL « fil:<id> »)
+ * PAR fil du groupe, puis la conversation reconstituee. complet = tous relus. */
+async function lireGroupe(s, f0) {
+  const lus = await Promise.all(f0.filIds.map(id => lireConversations(s, 'fil:' + id)));
+  const ok = lus.filter(x => x.ok && x.fils.length);
+  if (!ok.length) return { ok: false, code: (lus.find(x => !x.ok) || {}).code || 'FIL_INTROUVABLE' };
+  const g = AN.fusionnerFils(ok.map(x => x.fils[0]), f0.cle);
+  return { ok: true, moi: ok[0].moi, groupe: g, complet: ok.length === f0.filIds.length, transactions: ok.map(x => x.transactionId) };
+}
 /* les souvenirs (dictes par la personne) qui AJUSTENT une proposition : delai de relance, taches notees */
 function reglagesSouvenirs(souvenirs) {
   let relanceJours = null; const taches = [];
@@ -2179,53 +2236,59 @@ function chevauchent(evts, debut, fin) {
  * actions PREPARABLES. Rien n'est envoye ni ecrit. */
 const RE_GERER = /(^| )(qu est ce que j ai a gerer|j ai quoi a gerer|a gerer aujourd hui|quoi gerer|qu est ce que je dois faire aujourd hui|j ai quoi a faire aujourd hui|qu est ce qui m attend|mes priorites du jour|quoi de prevu aujourd hui)( |$)/;
 const demandeGerer = (texte) => RE_GERER.test(V.mots(texte));
+/* [S91] [S94] v4.10.1 les deux lectures (agenda, boite) partent ENSEMBLE ; les
+ * mails a gerer sont gardes 60 s par session (le point du jour et « à gérer »
+ * les partagent : une seule lecture de la boite a l'ouverture) */
+async function agendaAGerer(s, auj) {
+  const ag = await lireAgendaJours(s, auj, auj + 1);
+  const items = [];
+  if (!ag.ok) { items.push({ type: 'erreur', texte: "Agenda non lu (" + propre(ag.code, 40) + ').', certitude: 'fait' }); return { ok: false, items }; }
+  for (const j of [auj, auj + 1]) {
+    const [a, b] = bornesJour(j);
+    const du = ag.evenements.filter(e => e.journee ? (Date.parse(e.debut + 'T00:00:00Z') / 86400000 <= j && j <= Date.parse(e.fin + 'T00:00:00Z') / 86400000) : (Date.parse(e.debut) < b && Date.parse(e.fin) > a));
+    for (const e of du) items.push({ type: 'agenda', texte: (j === auj ? "Aujourd'hui" : 'Demain') + ' ' + (e.journee ? '(journée)' : horaire(Date.parse(e.debut)) + '–' + horaire(Date.parse(e.fin))) + ' : ' + lisible(e.titre, 100),
+      certitude: 'fait', preuve: 'agenda ' + e.sources.join(' + ') });
+    const h = du.filter(e => !e.journee).sort((x, y) => Date.parse(x.debut) - Date.parse(y.debut));
+    for (let i = 1; i < h.length; i++) if (Date.parse(h[i].debut) < Date.parse(h[i - 1].fin))
+      items.unshift({ type: 'conflit', priorite: 1, texte: 'Conflit ' + (j === auj ? "aujourd'hui" : 'demain') + ' : « ' + lisible(h[i - 1].titre, 60) + ' » et « ' + lisible(h[i].titre, 60) + ' » se chevauchent (' + horaire(Date.parse(h[i].debut)) + ').', certitude: 'fait' });
+  }
+  if (!items.length) items.push({ type: 'agenda', texte: "Rien dans l'agenda aujourd'hui ni demain.", certitude: 'fait' });
+  return { ok: true, items };
+}
+async function mailsAGerer(s, rg) {
+  const cle = String(rg.relanceJours || '');
+  if (s.mailsGerer && Date.now() - s.mailsGerer.ts < LIMITES_GERER.cacheMs && s.mailsGerer.cle === cle) return s.mailsGerer.r;
+  const now = Date.now(), lu = await lireConversations(s, 'fils');
+  const items = [];
+  if (!lu.ok) items.push({ type: 'erreur', texte: 'Boîte non lue : ' + erreurLecture(lu.code) + '.', certitude: 'fait' });
+  else {
+    const connus = AN.contactsConnus(lu.fils, lu.moi);
+    /* [S85] les fils d'une meme conversation (objet normalise + correspondant) : analyses ENSEMBLE */
+    for (const f of AN.grouperFils(lu.fils, lu.moi)) {
+      const an = AN.analyser(f, { moi: lu.moi, maintenant: now, zone: FUSEAU, contactsConnus: connus, relanceJours: rg.relanceJours || undefined });
+      if (!an.aGerer.length) continue;
+      const jeton = retenirFil(s, f, an);
+      /* conversation suspecte : seulement l'alerte (ni echeance ni montant tires d'un mail piege) ; [S89] ni repondre ni rappel */
+      for (const x of an.aGerer.filter(x => !an.suspect || x.type === 'suspect')) items.push({ type: x.type, priorite: x.priorite, texte: x.titre, preuve: x.extrait, certitude: x.certitude,
+        fil: jeton, objet: an.objet, suspect: an.suspect, actions: x.actions.filter(a => !an.suspect || (a !== 'repondre' && a !== 'rappel')),
+        creneau: x.type === 'creneau' ? an.creneaux.findIndex(c => x.titre.includes(c.libelle)) : undefined });
+    }
+    items.sort((a, b) => (b.type === 'suspect') - (a.type === 'suspect') || (a.priorite ?? 9) - (b.priorite ?? 9));
+    if (!items.length) items.push({ type: 'mail', texte: 'Rien dans tes conversations des 14 derniers jours ne demande ton attention.', certitude: 'deduction' });
+    if (lu.illisibles) items.push({ type: 'erreur', texte: lu.illisibles + ' conversation(s) non lue(s) (délai ou erreur).', certitude: 'fait' });
+  }
+  const r = { ok: !!lu.ok, code: lu.ok ? null : lu.code, items: items.slice(0, 25) };
+  s.mailsGerer = { ts: Date.now(), cle, r };
+  return r;
+}
 async function aGerer(s, souvenirs) {
   if (s.gerer && Date.now() - s.gerer.ts < LIMITES_GERER.cacheMs) return s.gerer.r;
   const now = Date.now(), auj = V.local(now, FUSEAU).jour, sections = [], sources = [];
   const rg = reglagesSouvenirs(souvenirs);
-  /* 1. l'agenda : aujourd'hui et demain, et ce qui se chevauche */
-  if (AGENDA || ECRITURE) {
-    const ag = await lireAgendaJours(s, auj, auj + 1);
-    const items = [];
-    if (!ag.ok) items.push({ type: 'erreur', texte: "Agenda non lu (" + propre(ag.code, 40) + ').', certitude: 'fait' });
-    else {
-      sources.push('agenda');
-      for (const j of [auj, auj + 1]) {
-        const [a, b] = bornesJour(j);
-        const du = ag.evenements.filter(e => e.journee ? (Date.parse(e.debut + 'T00:00:00Z') / 86400000 <= j && j <= Date.parse(e.fin + 'T00:00:00Z') / 86400000) : (Date.parse(e.debut) < b && Date.parse(e.fin) > a));
-        for (const e of du) items.push({ type: 'agenda', texte: (j === auj ? "Aujourd'hui" : 'Demain') + ' ' + (e.journee ? '(journée)' : horaire(Date.parse(e.debut)) + '–' + horaire(Date.parse(e.fin))) + ' : ' + lisible(e.titre, 100),
-          certitude: 'fait', preuve: 'agenda ' + e.sources.join(' + ') });
-        const h = du.filter(e => !e.journee).sort((x, y) => Date.parse(x.debut) - Date.parse(y.debut));
-        for (let i = 1; i < h.length; i++) if (Date.parse(h[i].debut) < Date.parse(h[i - 1].fin))
-          items.unshift({ type: 'conflit', priorite: 1, texte: 'Conflit ' + (j === auj ? "aujourd'hui" : 'demain') + ' : « ' + lisible(h[i - 1].titre, 60) + ' » et « ' + lisible(h[i].titre, 60) + ' » se chevauchent (' + horaire(Date.parse(h[i].debut)) + ').', certitude: 'fait' });
-      }
-      if (!items.length) items.push({ type: 'agenda', texte: "Rien dans l'agenda aujourd'hui ni demain.", certitude: 'fait' });
-    }
-    sections.push({ titre: 'Agenda', items });
-  }
-  /* 2. les conversations des 14 derniers jours */
-  if (MAIL_LECTURE) {
-    const lu = await lireConversations(s, 'fils');
-    const items = [];
-    if (!lu.ok) items.push({ type: 'erreur', texte: 'Boîte non lue : ' + erreurLecture(lu.code) + '.', certitude: 'fait' });
-    else {
-      sources.push('mails');
-      const connus = AN.contactsConnus(lu.fils, lu.moi);
-      for (const f of lu.fils) {
-        const an = AN.analyser(f, { moi: lu.moi, maintenant: now, zone: FUSEAU, contactsConnus: connus, relanceJours: rg.relanceJours || undefined });
-        if (!an.aGerer.length) continue;
-        const jeton = retenirFil(s, f, an);
-        /* conversation suspecte : seulement l'alerte (ni echeance ni montant tires d'un mail piege) */
-        for (const x of an.aGerer.filter(x => !an.suspect || x.type === 'suspect')) items.push({ type: x.type, priorite: x.priorite, texte: x.titre, preuve: x.extrait, certitude: x.certitude,
-          fil: jeton, suspect: an.suspect, actions: x.actions.filter(a => a !== 'repondre' || !an.suspect),
-          creneau: x.type === 'creneau' ? an.creneaux.findIndex(c => x.titre.includes(c.libelle)) : undefined });
-      }
-      items.sort((a, b) => (b.type === 'suspect') - (a.type === 'suspect') || (a.priorite ?? 9) - (b.priorite ?? 9));
-      if (!items.length) items.push({ type: 'mail', texte: 'Rien dans tes conversations des 14 derniers jours ne demande ton attention.', certitude: 'deduction' });
-      if (lu.illisibles) items.push({ type: 'erreur', texte: lu.illisibles + ' conversation(s) non lue(s) (délai ou erreur).', certitude: 'fait' });
-    }
-    sections.push({ titre: 'Mails', items: items.slice(0, 25) });
-  }
+  /* 1. l'agenda (aujourd'hui, demain, chevauchements) et 2. les conversations des 14 derniers jours : ENSEMBLE */
+  const [ag, ml] = await Promise.all([AGENDA || ECRITURE ? agendaAGerer(s, auj) : null, MAIL_LECTURE ? mailsAGerer(s, rg) : null]);
+  if (ag) { if (ag.ok) sources.push('agenda'); sections.push({ titre: 'Agenda', items: ag.items }); }
+  if (ml) { if (ml.ok) sources.push('mails'); sections.push({ titre: 'Mails', items: ml.items }); }
   /* 3. tes notes (souvenirs) : tes propres mots, jamais une permission */
   if (rg.taches.length) sections.push({ titre: 'Tes notes', items: rg.taches.map(t => ({ type: 'note', texte: t, certitude: 'fait', preuve: 'dans « Ce que JARVIS retient de toi »' })) });
   const nb = sections.reduce((n, x) => n + x.items.filter(i => !['agenda', 'erreur', 'note', 'mail'].includes(i.type) || i.type === 'conflit').length, 0);
@@ -2240,18 +2303,22 @@ async function aGerer(s, souvenirs) {
 async function afficherFil(s, jeton) {
   const f0 = filDe(s, jeton);
   if (!f0) return { ok: false, code: 'CONVERSATION_INCONNUE', message: "Cette conversation n'est plus dans la session : redemande « qu'est-ce que j'ai à gérer ? »." };
-  const lu = await lireConversations(s, 'fil:' + f0.filId);
-  if (!lu.ok || !lu.fils.length) return { ok: false, code: lu.code || 'FIL_INTROUVABLE', message: 'Conversation non lue : ' + erreurLecture(lu.code || 'FIL_INTROUVABLE') + '.' };
-  const f = lu.fils[0];
+  const lu = await lireGroupe(s, f0);   /* [S85] une lecture gouvernee par fil */
+  if (!lu.ok) return { ok: false, code: lu.code || 'FIL_INTROUVABLE', message: 'Conversation non lue : ' + erreurLecture(lu.code || 'FIL_INTROUVABLE') + '.' };
+  const f = lu.groupe;
   const an = AN.analyser(f, { moi: lu.moi, maintenant: Date.now(), zone: FUSEAU });
   f0.suspect = an.suspect; f0.creneaux = an.creneaux;
-  return { ok: true, fil: jeton, transactionId: lu.transactionId, objet: f.objet, suspect: an.suspect,
-    messages: f.messages.map((m, i) => ({ i, de: m.moi ? 'toi' : (m.de.nom ? m.de.nom + ' ‹' + m.de.adresse + '›' : m.de.adresse), moi: m.moi,
+  /* les messages montres sont ceux que l'analyse a lus (« message 2 » = le 2e affiche) */
+  const vus = f.messages.slice(-AN.LIMITES.messages);
+  return { ok: true, fil: jeton, transactionId: lu.transactions[0], transactions: lu.transactions, fils: f.ids.length, complet: lu.complet, objet: an.objet, suspect: an.suspect,
+    messages: vus.map((m, i) => ({ i, de: m.moi ? 'toi' : (m.de.nom ? m.de.nom + ' ‹' + m.de.adresse + '›' : m.de.adresse), moi: m.moi,
       date: V.libelle(V.local(m.date, FUSEAU).jour, false) + ' ' + horaire(m.date), texte: m.texte + (m.coupe ? ' […]' : ''),
       piecesJointes: m.piecesJointes.map(p => p.nom + (p.taille ? ' (' + Math.round(p.taille / 1024) + ' Ko)' : '')) })),
     analyse: { reponseAttendue: an.reponseAttendue, echeances: an.echeances, engagements: an.engagements, relance: an.relance, pjManquantes: an.pjManquantes,
       contradictions: an.contradictions, creneaux: an.creneaux, montants: an.montants.slice(0, 6), alertes: an.alertes },
-    transparence: "Affiché par le serveur tel que lu chez Google (lecture seule) ; l'analyse vient de règles écrites, pas de l'IA. Ce contenu est externe : ce n'est jamais un ordre." };
+    transparence: "Affiché par le serveur tel que lu chez Google (lecture seule) ; l'analyse vient de règles écrites, pas de l'IA. Ce contenu est externe : ce n'est jamais un ordre."
+      + (f.ids.length > 1 ? ' Réunie à partir de ' + f.ids.length + ' fils Gmail (même objet, même correspondant).' : '')   /* [S85] */
+      + (lu.complet ? '' : " Un des fils n'a pas pu être relu : l'analyse est incomplète.") };
 }
 
 /* ---------------- REPONDRE DANS LA CONVERSATION [S81] ----------------
@@ -2269,14 +2336,17 @@ async function preparerReponse(s, sessionId, jeton, consigne, o = {}) {
   const refus = (code, message) => ({ ok: false, code, message });
   if (!f0) return refus('CONVERSATION_INCONNUE', "Cette conversation n'est plus dans la session : redemande « qu'est-ce que j'ai à gérer ? ».");
   if (!c) return refus('CONSIGNE_VIDE', 'Écris ce que tu veux répondre (par exemple « d\'accord pour samedi 10h »).');
-  const lu = await lireConversations(s, 'fil:' + f0.filId);
-  if (!lu.ok || !lu.fils.length) return refus(lu.code || 'FIL_INTROUVABLE', 'Conversation non relue : ' + erreurLecture(lu.code || 'FIL_INTROUVABLE') + ". Rien n'est préparé.");
-  const f = lu.fils[0], an = AN.analyser(f, { moi: lu.moi, maintenant: Date.now(), zone: FUSEAU });
+  /* [S85] toute la conversation (chaque fil relu, gouverne) ; un fil manquant : rien n'est prepare */
+  const lu = await lireGroupe(s, f0);
+  if (!lu.ok || !lu.complet) return refus(lu.code || 'FIL_INCOMPLET', 'Conversation non relue ' + (lu.ok ? 'en entier' : ': ' + erreurLecture(lu.code || 'FIL_INTROUVABLE')) + ". Rien n'est préparé.");
+  const f = lu.groupe, an = AN.analyser(f, { moi: lu.moi, maintenant: Date.now(), zone: FUSEAU });
+  /* la reponse va au DERNIER message d'un autre de la conversation, dans SON fil */
   const vise = f.messages.slice().reverse().find(m => !m.moi && m.messageId && adresseValide(m.de.adresse));
   if (!vise) return refus('PERSONNE_A_QUI_REPONDRE', "Dans cette conversation, aucun message d'un autre à qui répondre (ou identifiant de message absent). Rien n'est préparé.");
-  const a = vise.de.adresse, objet = /^\s*(re|réf|ref)\s*:/i.test(f.objet) ? f.objet : 'Re: ' + (f.objet || '(sans objet)');
+  const a = vise.de.adresse, filVise = vise.filId || f.id, objetN = AN.objetNormalise(f.objet) || f.objet;
+  const objet = 'Re: ' + (objetN || '(sans objet)');   /* [S85] jamais « Re: Re : Re: … » */
   /* la conversation entre dans le contexte du MODELE : c'est un contenu externe (G1) */
-  s.g.ingerer({ origine: 'CONTENT_DERIVED', source: 'mail:fil-' + f.id.slice(0, 16), resume: ('Conversation « ' + f.objet + ' » avec ' + a).slice(0, 200) });
+  s.g.ingerer({ origine: 'CONTENT_DERIVED', source: 'mail:fil-' + filVise.slice(0, 16), resume: ('Conversation « ' + objetN + ' » avec ' + a).slice(0, 200) });
   const donnees = f.messages.slice(-3).map(m => (m.moi ? 'Toi' : 'De ' + m.de.adresse) + ' : ' + m.texte.slice(0, 800)).join('\n---\n');
   const alertes = an.alertes.filter(x => x.poids !== 'info').map(x => x.texte);
   if (vise.repondreA && vise.repondreA !== a) alertes.unshift('La réponse part à l\'expéditeur ' + a + ', pas à l\'adresse « Répondre à » (' + vise.repondreA + ').');
@@ -2302,7 +2372,7 @@ async function preparerReponse(s, sessionId, jeton, consigne, o = {}) {
       aOuvrir: { a, objet, texte: v.brouillon.texte, redigePar: 'modele', mailto: GM.mailto(v.brouillon), avertissements: (an.suspect ? ['Conversation suspecte : ne donne ni code, ni coordonnées bancaires, ne paie rien.'] : []).concat(avertissements), ...texteRep },
       trace: { etat: 'PREPARE', canal: 'clavier', frappe: lisible(c, 160) } };
   }
-  const v = MAIL_ENVOI.verifierReponse({ a, objet, texte, liensPermis, filId: f.id, inReplyTo: vise.messageId, references: vise.references });
+  const v = MAIL_ENVOI.verifierReponse({ a, objet, texte, liensPermis, filId: filVise, inReplyTo: vise.messageId, references: vise.references });   /* [S85] le fil du message vise */
   if (!v.ok) return refus(v.code, v.code === 'LIEN_NON_TAPE' ? "La réponse contient un lien que tu n'as pas écrit (« " + lisible(v.lien || '', 80) + " ») : rien n'est préparé." : 'Réponse refusée : ' + erreurMail(v.code) + ". Rien n'est préparé.");
   const jb = 'ml_' + crypto.randomUUID();
   noterVerdict(s, { decide: 'SANS_OBJET', action: 'SEND', target: propre(a, 80), motif: 'ADRESSE_A_RETAPER' });
@@ -2332,6 +2402,8 @@ function proposerEvenement(s, cle, avertissements) {
 function preparerRappel(s, jeton, quand) {
   const f0 = filDe(s, jeton);
   if (!f0) return { ok: false, code: 'CONVERSATION_INCONNUE', message: "Cette conversation n'est plus dans la session." };
+  /* [S89] v4.10.1 un mail suspect ne devient pas un rappel (vu en ligne : le bouton y etait) */
+  if (f0.suspect) return { ok: false, code: 'CONVERSATION_SUSPECTE', message: "Mail suspect : JARVIS n'en fait pas un rappel. Ne réponds pas, ne paie rien, ne clique pas." };
   const auj = V.local(Date.now(), FUSEAU).jour;
   const jour = Number.isInteger(quand) && quand >= auj && quand <= auj + 60 ? quand : auj + 1;
   const titre = ('Rappel : ' + f0.objet).replace(/[|\r\n]/g, ' ').slice(0, 90);
@@ -2339,6 +2411,7 @@ function preparerRappel(s, jeton, quand) {
 }
 async function verifierCreneau(s, jeton, index) {
   const f0 = filDe(s, jeton);
+  if (f0 && f0.suspect) return { ok: false, code: 'CONVERSATION_SUSPECTE', message: "Mail suspect : JARVIS ne reprend aucun rendez-vous qu'il propose." };   /* [S89] */
   const c = f0 && Number.isInteger(index) ? f0.creneaux[index] : null;
   if (!c) return { ok: false, code: 'CRENEAU_INCONNU', message: "Ce créneau n'est plus dans la session : redemande « qu'est-ce que j'ai à gérer ? »." };
   const debut = msCreneau(c.jour, c.debut), fin = debut + (c.duree || 60) * 60000;
@@ -2528,7 +2601,8 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
   if (ECRITURE && !confirme && !actionForcee && plan.action === 'AUCUNE' && !plan.erreur && V.creationDemandee(texte)
       && (V.resoudreHeures(texte).heures.length || V.parleAgenda(texte)))
     return reponseServeur(s, sessionId, texte, "Je n'ai pas préparé l'événement (je n'ai pas su lire son titre). "
-      + "Redemande en une phrase avec le titre, le jour et l'heure, par exemple « ajoute hand mercredi à 18h pendant 1h30 ».", 'CREATION_NON_PREPAREE');
+      + "Redemande en une phrase avec le titre, le jour et l'heure, par exemple « ajoute hand mercredi à 18h pendant 1h30 »."
+      + (MAIL_LECTURE ? ASTUCE_MAIL : ''), 'CREATION_NON_PREPAREE');   /* [S88] */
 
   /* Aucune action a gouverner : l'assistant repond, simplement. */
   if (plan.action === 'AUCUNE') {
@@ -2848,11 +2922,11 @@ const serveur = http.createServer((req, res) => {
       detail = true;
     }
     if (!detail)
-      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.10',
+      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.10.1',
         acces: CLE_ACCES ? 'protege' : 'public', ...(CLE_ACCES ? { config: verdict } : {}),
         manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
         node: String(process.versions.node).split('.')[0] });
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.10', verite: V.VERSION,
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.10.1', verite: V.VERSION,
       agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : ECRITURE_MOTIF ? 'erreur-config' : 'inactif',   /* [S30] [S48] */
       ecritureMotif: ECRITURE_MOTIF,
       mail: MAIL_ENVOI ? 'actif' : MAIL_ENVOI_MOTIF ? 'erreur-config' : 'inactif', mailMotif: MAIL_ENVOI_MOTIF,   /* [S68] */
@@ -2919,7 +2993,8 @@ const serveur = http.createServer((req, res) => {
     if (!c.ok) return json(429, { erreur: 'TROP_DE_SESSIONS', reessayerDans: c.reessayerDans });
     if (!placeLibre()) return json(503, { erreur: 'DEMO_SATUREE', reessayerDans: 300 });   /* [S17] */
     const { id, s } = creerSession();
-    return json(200, { sessionId: id, ...etatDe(s) });
+    /* [S90] v4.10.1 la page allege son affichage sur une instance PROTEGEE seulement (la demo garde tout deplie) */
+    return json(200, { sessionId: id, acces: CLE_ACCES ? 'protege' : 'public', ...etatDe(s) });
   }
 
   if (u.pathname === '/api/tests' && req.method === 'GET') {
@@ -3275,7 +3350,7 @@ const serveur = http.createServer((req, res) => {
       const s = sessionDe(b.sessionId);
       if (!s) return inconnue();
       s.souvenirs = M.nettoyerSouvenirs(b.souvenirs);
-      if (b.frais === true) s.gerer = null;
+      if (b.frais === true) { s.gerer = null; s.mailsGerer = null; }   /* [S94] relire vraiment */
       const r = await aGerer(s, s.souvenirs);
       return json(200, { ...r, ...etatDe(s) });
     });
@@ -3316,7 +3391,7 @@ const serveur = http.createServer((req, res) => {
     return lire(req, res, (b) => {
       const s = sessionDe(b.sessionId);
       if (!s) return inconnue();
-      const f0 = filDe(s, b.jeton), v = f0 && f0.verifs ? f0.verifs[Number(b.index)] : null;
+      const f0 = filDe(s, b.jeton), v = f0 && !f0.suspect && f0.verifs ? f0.verifs[Number(b.index)] : null;   /* [S89] */
       const cle = v ? (b.autre === true ? v.autreCle : v.cle) : null;
       if (!cle) return json(200, { ok: false, code: 'CRENEAU_NON_VERIFIE', message: "Vérifie d'abord ce créneau dans ton agenda.", ...etatDe(s) });
       return json(200, { ...proposerEvenement(s, cle, ['Créneau lu dans le mail par une règle : vérifie la date et l\'heure.']), ...etatDe(s) });
@@ -3329,6 +3404,24 @@ const serveur = http.createServer((req, res) => {
     return pointDuJour(s).then(r => json(200, { ...r, ...etatDe(s) }),
       () => json(500, { actif: true, ok: false, code: 'ERREUR_INTERNE', message: 'Point du jour indisponible.' }));
   }
+  /* [S94] v4.10.1 la meme chose en POST, avec les souvenirs (un delai de relance dicte change la ligne des mails) */
+  if (u.pathname === '/api/point-du-jour' && req.method === 'POST')
+    return lire(req, res, async (b) => {
+      const s = sessionDe(b.sessionId);
+      if (!s) return inconnue();
+      s.souvenirs = M.nettoyerSouvenirs(b.souvenirs);
+      try { return json(200, { ...(await pointDuJour(s)), ...etatDe(s) }); }
+      catch { return json(500, { actif: true, ok: false, code: 'ERREUR_INTERNE', message: 'Point du jour indisponible.' }); }
+    });
+  /* [S92] v4.10.1 « Repartir au vert » : la session est FERMEE cote serveur (historique,
+   * contenus lus, cartes) ; la page en ouvre une neuve. Les souvenirs vivent dans le
+   * navigateur : ils restent. Seule la session nommee (identifiant imprevisible). */
+  if (u.pathname === '/api/session/fermer' && req.method === 'POST')
+    return lire(req, res, (b) => {
+      const ok = typeof b.sessionId === 'string' && sessions.has(b.sessionId);
+      if (ok) sessions.delete(b.sessionId);
+      return json(200, { ferme: ok });
+    });
 
   /* [S29] TRACABILITE — une transaction de CETTE session, en lecture seule :
    * frappe -> intention -> provenance -> plan -> decision -> confirmation ->
