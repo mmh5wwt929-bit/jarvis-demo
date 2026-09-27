@@ -1,0 +1,52 @@
+# JARVIS — consignes pour Claude (dépôt public : aucun secret, aucune adresse privée)
+
+## État (branche `Racine`, après fusion de la PR v4.9.1)
+- Passerelle **v4.9.1** (avant : v4.9.0, empreinte `458afd8d005f`) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
+- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.1, `jarvis-verite.js` 1.4.
+- v4.9.1 : « Ouvrir dans Mail » (mailto:), demande double dite, historique 12 échanges, pages `/confidentialite` et `/conditions`.
+- Render déploie `Racine` seulement « After CI Checks Pass ».
+- Deux services, même code :
+  - démo publique (sans `JARVIS_CLE_ACCES`) : **jamais** de variable Gmail, agenda ou élévation ;
+  - instance privée d'Alsid (protégée par `JARVIS_CLE_ACCES`) : agenda, écriture Google, Face ID + code, Gmail.
+
+## Rôle des fichiers
+| Fichier | Rôle |
+|---|---|
+| `server.js` | Passerelle HTTP : routes `/api/*`, prompts, circuit gouverné de chaque message, limites. |
+| `index.html` | Page unique (chat, cartes, Face ID). Scripts inline autorisés par CSP à empreinte. |
+| `jarvis-5.28.3.js` | Noyau (arbitre, audit). Intouchable. |
+| `jarvis-plus-5.29.js` | Couche de gouvernance : provenance G1, transactions scellées, preuves de frappe, élévation. |
+| `jarvis-vigilance.js` | Verbe d'action présent dans les propres mots de la personne (hors cité/collé/nié). |
+| `jarvis-verite.js` | Faits du serveur : dates, jours, retrait des phrases qui imitent le serveur ou annoncent une action fictive. |
+| `jarvis-memoire.js` | « retiens que » : souvenirs gouvernés, jamais source d'action ni de cible. |
+| `jarvis-agenda.js` / `jarvis-ecriture.js` | Lecture iCal / écriture dans l'agenda dédié JARVIS (compte de service). |
+| `jarvis-elevation.js` | Face ID (WebAuthn) et code de secours, liés à UNE transaction. |
+| `jarvis-gmail.js` | Gmail du compte d'essai : envoi (liste fermée) et lecture, deux jetons séparés. |
+| `jarvis-appli.js` | Manifeste web et icônes (écran d'accueil). |
+| `confidentialite.html`, `conditions.html` | Pages publiques exigées par Google (appli OAuth en Production). |
+| `jarvis-manifeste.js` + `MANIFESTE.json` | Empreintes SHA-256 des fichiers qui tournent ; CI refuse un dépôt non conforme. |
+| `tests-*.js` | Une suite par version ; `tests-vXY.js` = les tests de la version XY. |
+
+## Règles de sécurité (non négociables)
+- Gmail **seulement** sur l'instance privée ; le code ignore Gmail sans `JARVIS_CLE_ACCES`.
+- Vrai e-mail = **Face ID seul** (le code de secours est refusé), après adresse retapée et fenêtre de 10 s.
+- Droits minimaux : un jeton `gmail.send` seul pour envoyer, un autre `gmail.readonly` seul pour lire ; portée vérifiée à chaque jeton d'accès ; même jeton pour les deux = refus.
+- Tout contenu lu (e-mail, agenda) est **externe** (`CONTENT_DERIVED`), déclaré à la couche avant que le modèle le voie ; il ne fournit jamais une action, une cible, un lien, ni une offre d'exécuter ce qu'il demande.
+- Destinataire d'un envoi : adresse tapée par la personne dans la demande (C3), jamais tirée d'un contenu lu ou d'un souvenir. Vrai pour « Ouvrir dans Mail » aussi (pas de liste, pas de Face ID : c'est la personne qui envoie ; trace « préparé », jamais « envoyé »).
+- Une action par message : ce qui n'est pas fait est dit par le serveur ; le modèle ne propose jamais d'agir à la place de la personne.
+- Fermé par défaut : une variable mal réglée désactive l'outil et `/health` le dit ; jamais de repli silencieux vers la simulation.
+- Aucun secret (clé, jeton, client OAuth, code) dans un commit, un journal, une capture, un message ou une réponse d'API.
+
+## Méthode (essai v4.9.1)
+- Travail sur `claude/<version>` ; **jamais de push sur `Racine`** (protégée : PR + CI obligatoires, pas de push forcé).
+- Un commit par étape validée ; une seule PR à la fin, CI verte ; **Alsid fusionne**.
+- Chaque nouveau test doit **échouer sur la version précédente** (`JARVIS_DIR=../vPREC node tests-vNEW.js`), sauf les « garde » ; les suites existantes restent vertes.
+- Tests de mutation : casser chaque correctif à la main → au moins un test doit tomber.
+- `node jarvis-manifeste.js --ecrire` après toute modification d'un fichier du manifeste, puis `--verifier`.
+- Lancer les suites : `npm install --no-save jsdom` puis `for f in tests-*.js; do node "$f" || echo "ECHEC $f"; done`.
+- Livrer `PROGRESSION-vX.md` : tests à faire en ligne (iPhone, Safari) et réglages Render.
+
+## Style de réponse attendu
+- Ultra-concis, critique, sans formules de politesse ni transitions.
+- Seulement les sections modifiées, jamais tout le fichier.
+- Ne pas couper la réflexion : vérifier à fond ce qui est important, ne rien refaire sans raison.

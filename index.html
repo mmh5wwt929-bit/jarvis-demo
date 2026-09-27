@@ -65,7 +65,7 @@ header{border-bottom:1px solid var(--regle);background:var(--ardoise);flex-shrin
 
 .accroche{padding:0 20px 12px;font-size:14px;color:var(--texte);max-width:72ch}
 .contact{margin-left:auto}
-.contact a{color:var(--signal)}
+.contact a,.pages-legales a{color:var(--signal)}
 .plancher{padding:0 20px 16px}
 .plancher-tete{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px}
 .plancher-tete h1{font-size:12.5px;font-weight:500;color:var(--sourd)}
@@ -92,6 +92,7 @@ main{flex:1;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,.95fr);
 .tour .quoi{background:var(--ardoise);border:1px solid var(--regle);border-radius:7px;
   padding:10px 13px;white-space:pre-wrap;text-align:left;overflow-wrap:anywhere}
 .tour.moi .quoi{background:#1c2430;border-color:#2b3644}
+.tour.non-fait .quoi{border-left:3px solid var(--retenu)}   /* [S74] */
 
 /* La décision : l'élément central du produit */
 .decision{border-left:3px solid var(--regle);padding:11px 0 11px 14px;margin-top:4px;overflow-wrap:anywhere}
@@ -149,6 +150,7 @@ button.lien{background:none;border:none;color:var(--sourd);font-size:12px;
 /* [S68] v4.9 : le vrai e-mail, montre EN ENTIER (texte, jamais du HTML) */
 .mail-carte{border:1px solid var(--retenu);border-radius:10px;padding:10px;margin-top:6px}
 .mail-entete{font-size:13px;margin:2px 0}.mail-entete b{display:inline-block;min-width:52px}
+.mail-entete.avert{color:var(--retenu)}
 .mail-texte{white-space:pre-wrap;word-break:break-word;font-size:13px;border-left:3px solid var(--retenu);padding:6px 9px;margin:8px 0;max-height:none}
 #blocGmail p{font-size:13px}
 #blocGmail .rang{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
@@ -174,6 +176,8 @@ button{background:var(--ardoise);color:var(--texte);border:1px solid var(--regle
 button:focus-visible{outline:2px solid var(--signal);outline-offset:1px}
 button:disabled{opacity:.45;cursor:not-allowed}
 button.primaire{background:var(--signal);border-color:var(--signal);color:#06101d;font-weight:600}
+a.bouton{display:inline-block;border-radius:6px;padding:8px 14px;font-size:13.5px;text-decoration:none;border:1px solid var(--regle);color:var(--texte)}   /* [S75] */
+a.bouton.primaire{background:var(--signal);border-color:var(--signal);color:#06101d;font-weight:600}
 @media(hover:hover){button.primaire:hover:not(:disabled){background:#79b8ff;border-color:#79b8ff;color:#06101d}}
 button.danger{border-color:#5c2321;color:#ff7b72}
 @media(hover:hover){button.danger:hover:not(:disabled){border-color:var(--refus);color:var(--refus)}}
@@ -489,6 +493,7 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
   <span>G4 ancrage externe</span><span>G5 copilote</span>
   <span>Réponses : Claude (Anthropic) · rien n'est journalisé, la session s'oublie après 30 min</span>
   <span class="contact" id="contact" hidden></span>
+  <span class="pages-legales"><a href="/confidentialite">Confidentialité</a> · <a href="/conditions">Conditions</a></span>
   <button class="lien-sante" data-sante="1" type="button">état du serveur</button>
   <pre id="sante" hidden></pre>
 </footer>
@@ -619,17 +624,75 @@ function sessionRenouvelee() {
   tour('JARVIS', "La session avait expiré côté serveur : une nouvelle est ouverte, le plancher repart à zéro.", false);
 }
 
-async function api(chemin, corps, dejaRenouvele) {
+/* [S76] v4.9.1 REVEIL DE RENDER. L'instance gratuite s'endort apres 15 min sans
+ * visite ; la requete suivante la reveille (≈30 s, parfois 1 min). Au premier
+ * chargement, Render montre sa propre page d'attente. Page DEJA ouverte :
+ *  - une reponse qui tarde plus de 3 s : la page demande a /health (public,
+ *    sans IA) si le serveur est debout ; pas de reponse JSON en 2 s = il se
+ *    reveille, et JARVIS le dit (sinon, c'est l'IA qui reflechit : rien a dire) ;
+ *  - une page d'attente de Render (HTML) a la place de la reponse de l'API :
+ *    rien n'a ete traite par JARVIS ; la page attend le reveil, puis renvoie la
+ *    MEME requete, une seule fois. */
+const Reveil = (() => {
+  const reglages = { delaiMs: 3000, sondeMs: 2000, maxMs: 90000, pauseMs: 2000 };
+  let bulle = null, enCours = 0;
+  const attente = (ms) => new Promise(r => setTimeout(r, ms));
+  async function debout(ms) {
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const t = ctl ? setTimeout(() => ctl.abort(), ms) : null;
+    try {
+      const r = await Promise.race([fetch(API + '/health', { cache: 'no-store', ...(ctl ? { signal: ctl.signal } : {}) }), attente(ms).then(() => null)]);
+      if (!r) return false;
+      const type = (r.headers && typeof r.headers.get === 'function' && r.headers.get('content-type')) || '';
+      if (!/json/i.test(type)) return false;
+      const j = await r.json();
+      return !!(j && j.status === 'ok');
+    } catch (e) { return false; } finally { if (t) clearTimeout(t); }
+  }
+  function montrer() {
+    if (bulle && bulle.isConnected) return;
+    bulle = tour('JARVIS', "JARVIS se réveille (≈30 s, parfois plus) : le serveur gratuit s'était endormi. Ta demande sera traitée dès qu'il est prêt.", false);
+    bulle.classList.add('reveil');
+  }
+  function retirer() { if (bulle && bulle.isConnected) bulle.remove(); bulle = null; }
+  /* une requete en cours : au-dela de 3 s, on regarde si c'est le reveil */
+  async function suivre(promesse) {
+    enCours++;
+    const t = setTimeout(async () => { if (enCours && !(await debout(reglages.sondeMs)) && enCours) montrer(); }, reglages.delaiMs);
+    try { return await promesse; } finally { clearTimeout(t); if (--enCours === 0) retirer(); }
+  }
+  /* page d'attente de Render recue : attendre que le serveur reponde, 90 s au plus */
+  async function attendre() {
+    montrer();
+    const t0 = Date.now();
+    while (Date.now() - t0 < reglages.maxMs) { if (await debout(Math.max(reglages.sondeMs, 4000))) { retirer(); return true; } await attente(reglages.pauseMs); }
+    retirer();
+    return false;
+  }
+  /* une page HTML (200 ou 503) a la place de la reponse JSON d'une route /api/ :
+   * c'est la page d'attente de Render, la demande n'a pas ete traitee. Une
+   * erreur HTML 52x (Cloudflare : delai depasse APRES traitement) n'est jamais
+   * renvoyee : la demande a pu etre traitee, on ne la rejoue pas. */
+  const pageDAttente = (r) => { const type = (r && r.headers && typeof r.headers.get === 'function' && r.headers.get('content-type')) || '';
+    return /text\/html/i.test(type) && (r.status === 200 || r.status === 503); };
+  return { reglages, suivre, attendre, debout, pageDAttente };
+})();
+
+async function api(chemin, corps, dejaRenouvele, dejaReveille) {
   await assurerSession();
   const utilise = sid;
   const o = corps ? { method:'POST', headers:{'Content-Type':'application/json'},
                       body: JSON.stringify({ ...corps, sessionId: utilise }) } : {};
-  const r = await versServeur(API + chemin + (corps ? '' : (chemin.includes('?') ? '&' : '?')
-                        + 'sessionId=' + encodeURIComponent(utilise)), o);
+  const r = await Reveil.suivre(versServeur(API + chemin + (corps ? '' : (chemin.includes('?') ? '&' : '?')
+                        + 'sessionId=' + encodeURIComponent(utilise)), o));   /* [S76] */
+  if (Reveil.pageDAttente(r)) {   /* [S76] rien n'a ete traite : on attend le reveil, puis on renvoie UNE fois */
+    if (!dejaReveille && await Reveil.attendre()) return api(chemin, corps, dejaRenouvele, true);
+    throw new Error('le serveur ne se réveille pas, réessaie dans une minute');
+  }
   const d = await r.json();
   if (d && d.erreur === 'SESSION_INCONNUE' && !dejaRenouvele) {
     if (sid === utilise) { sid = null; await assurerSession(); sessionRenouvelee(); }
-    return api(chemin, corps, true);
+    return api(chemin, corps, true, dejaReveille);
   }
   return d;
 }
@@ -753,12 +816,20 @@ function resumeTrace(t) {
 }
 /* [v4.7] la trace ne prend plus une bulle : repliee sous la derniere carte
  * de JARVIS (« + détail »), toujours construite depuis les etats. */
+/* [S75] « Ouvrir dans Mail » : aucune transaction (JARVIS n'agit pas) ; la trace
+ * dit « préparé », jamais « envoyé » */
+function resumePrepare(t) {
+  return 'Trace : ' + (t.canal === 'voix' ? 'ta voix « ' : 'ta frappe « ') + String(t.frappe || '') + ' » → adresse écrite par toi → brouillon vérifié (liens, caractères)'
+    + ' → préparé pour Mail. JARVIS n\'envoie rien : c\'est toi qui envoies, depuis ton application.';
+}
+/* un lien vers Mail : mailto: seulement, sans blanc ni guillemet (jamais javascript:) */
+const lienMail = (x) => typeof x === 'string' && /^mailto:[^\s"'<>`]+$/i.test(x) ? x : '';
 function ajouterTrace(t) {
   const tours = document.querySelectorAll('#fil .tour:not(.moi)');
   const sous = tours[tours.length - 1] || tour('JARVIS', '', false);
   const d = document.createElement('details');
   d.className = 'trace';
-  d.innerHTML = '<summary>détail</summary><div class="trace-texte">' + esc(resumeTrace(t)) + '</div>';
+  d.innerHTML = '<summary>détail</summary><div class="trace-texte">' + esc(t && t.etat === 'PREPARE' ? resumePrepare(t) : resumeTrace(t)) + '</div>';
   /* ouverte, la trace se montre (sinon elle restait cachee sous la saisie) */
   d.addEventListener('toggle', () => { if (d.open && typeof d.scrollIntoView === 'function') d.scrollIntoView({ block: 'nearest' }); });
   sous.appendChild(d);
@@ -811,9 +882,29 @@ function rendreDecision(d) {
   if (d.decide === 'SANS_OBJET') {
     const deJarvis = d.etape === 'MEMOIRE' || d.etape === 'DESTINATAIRE' || d.etape === 'DEPASSE'   /* [S36] [S43] */
       || d.etape === 'SERVEUR' || d.etape === 'OUTIL'   /* [S49]-[S55] ecrit par le serveur, sans modele */
-      || d.outil === 'mail' || d.outil === 'boite';   /* [S68] [S69] */
+      || d.outil === 'mail' || d.outil === 'boite' || d.outil === 'mailto';   /* [S68] [S69] [S75] */
     if (d.reponse) tour(deJarvis ? 'JARVIS' : 'Claude', d.reponse, false, !deJarvis);
     else tour('JARVIS', sansReponse(d), false);
+    return;
+  }
+  /* [S75] v4.9.1 « OUVRIR DANS MAIL » : l'e-mail en entier (texte echappe), et un
+   * lien mailto: construit par le serveur ; c'est la personne qui envoie depuis
+   * son application. La carte dit « Préparé », jamais « Envoyé ». */
+  if (d.etape === 'MAIL_OUVRIR' && d.aOuvrir) {
+    const m = d.aOuvrir, lien = lienMail(m.mailto);
+    if (d.reponse) tour('JARVIS', d.reponse, false);
+    const hO = '<div class="decision autorise mail-ouvrir"><div class="plan">E-mail préparé — relis-le, puis envoie-le toi-même</div>'
+      + '<div class="mail-carte"><p class="mail-entete"><b>À</b> <span class="mono">' + esc(m.a) + '</span></p>'
+      + '<p class="mail-entete"><b>Objet</b> ' + esc(m.objet) + '</p><div class="mail-texte">' + esc(m.texte) + '</div>'
+      + (m.avertissements || []).map(x => '<p class="mail-entete avert">⚠ ' + esc(x) + '</p>').join('')
+      + '<p class="mail-entete">' + (m.redigePar === 'modele' ? 'Rédigé par Claude à partir de ta seule demande : relis chaque mot.' : 'Objet et texte : tes mots, tels quels.')
+      + ' Aucun lien que tu n\'as pas tapé.</p></div>'
+      + '<div class="verdict"><b>Préparé</b><span class="code">JARVIS n\'envoie rien</span></div>'
+      + (lien ? '<div class="rang"><a class="bouton primaire" data-ouvrir-mail="1" href="' + esc(lien) + '">Ouvrir dans Mail</a></div>' : '<p>Lien vers Mail indisponible.</p>')
+      + '<p class="etat-carte"></p></div>';
+    tour('JARVIS', '', false).querySelector('.quoi').outerHTML = hO;
+    if (d.trace) ajouterTrace(d.trace);
+    $('fil').scrollTop = $('fil').scrollHeight;
     return;
   }
   /* [S68] v4.9 VRAI E-MAIL : la carte montre TOUT (destinataire, objet, texte),
@@ -825,12 +916,16 @@ function rendreDecision(d) {
     const hM = '<div class="decision attente mail-retaper" data-jeton="' + esc(m.jeton) + '"><div class="plan">Vrai e-mail — à relire en entier</div>'
       + '<div class="mail-carte"><p class="mail-entete"><b>De</b> compte d\'essai JARVIS</p><p class="mail-entete"><b>À</b> <span class="mono">' + esc(m.a) + '</span></p>'
       + '<p class="mail-entete"><b>Objet</b> ' + esc(m.objet) + '</p><div class="mail-texte">' + esc(m.texte) + '</div>'
+      + (m.avertissements || []).map(x => '<p class="mail-entete avert">⚠ ' + esc(x) + '</p>').join('')   /* [S72] */
       + '<p class="mail-entete">' + (m.redigePar === 'modele' ? 'Rédigé par Claude à partir de ta seule demande : relis chaque mot.' : 'Objet et texte : tes mots, tels quels.')
       + ' Aucun lien que tu n\'as pas tapé, aucune pièce jointe.' + (Number.isFinite(m.restants) ? ' Envois restants aujourd\'hui : ' + esc(String(m.restants)) + '.' : '') + '</p></div>'
       + '<p>S\'il te convient, retape l\'adresse du destinataire toi-même. Il sera ensuite retenu 10 s, puis envoyé seulement avec Face ID.</p>'
       + '<div class="rang"><input class="cible" value="" placeholder="adresse du destinataire" aria-label="Adresse retapée"'
       + ' autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="email">'
-      + '<button class="danger" data-mail-abandon="1">Ne pas envoyer</button><button class="primaire" data-mail-retaper="1">Préparer l\'envoi</button></div><p class="etat-carte"></p></div>';
+      + '<button class="danger" data-mail-abandon="1">Ne pas envoyer</button><button class="primaire" data-mail-retaper="1">Préparer l\'envoi</button></div>'
+      + (lienMail(m.mailto) ? '<p class="mail-entete">Ou envoie-le toi-même, depuis ton application : <a class="bouton" data-ouvrir-mail="1" href="' + esc(lienMail(m.mailto)) + '">Ouvrir dans Mail</a>'
+        + ' (la carte du compte d\'essai se ferme).</p>' : '')   /* [S75] */
+      + '<p class="etat-carte"></p></div>';
     tour('JARVIS', '', false).querySelector('.quoi').outerHTML = hM;
     $('fil').scrollTop = $('fil').scrollHeight;
     return;
@@ -958,16 +1053,23 @@ function rendreDecision(d) {
   if (d.decide === 'EN_ATTENTE') {
     h += '<div class="retenue"><p class="compte">' + esc(d.message) + '</p><div class="rang">'
       +  '<button class="danger" data-annuler="' + esc(d.jetonAnnulation) + '">Annuler</button>'
-      +  '<button data-finaliser="' + esc(d.jetonAnnulation) + '" data-apres="' + esc(String(Number(d.executableApres) || 0)) + '" disabled>Confirmer l\'envoi</button></div></div>';
+      +  '<button data-finaliser="' + esc(d.jetonAnnulation) + '" data-action="' + esc(p.action || '') + '" data-apres="' + esc(String(Number(d.executableApres) || 0)) + '" disabled>'
+      +  esc(CONFIRMER_ACTE[p.action] || 'Confirmer') + '</button></div></div>';   /* [S78] un paiement n'est pas « envoyé » */
   }
   const bloc = tour('JARVIS', '', false);
   bloc.querySelector('.quoi').outerHTML = h;
-  const parJarvis = d.etape === 'MEMOIRE' || d.outil === 'mail' || d.outil === 'boite';   /* [S68] [S69] */
+  const parJarvis = d.etape === 'MEMOIRE' || d.outil === 'mail' || d.outil === 'boite' || d.outil === 'mailto';   /* [S68] [S69] [S75] */
   if (d.reponse) tour(parJarvis ? 'JARVIS' : 'Claude', d.reponse, false, !parJarvis);
   if (d.decide === 'EN_ATTENTE') compteARebours(d.executableApres, bloc.querySelector('.compte'));   /* [S35] sa propre boîte */
   $('fil').scrollTop = $('fil').scrollHeight;
 }
 
+/* [S78] v4.9.1 : les mots de la confirmation suivent l'action (vu en ligne :
+ * un paiement simule finissait en « Envoyé. » sous « Confirmer l'envoi ») */
+const CONFIRMER_ACTE = { SEND: "Confirmer l'envoi" };
+const FAIT_SIMULE = { SEND: 'Envoyé.', PAY: 'Payé (simulation)' };
+const VERBE_CONFIRME = { SEND: 'envoyer', PAY: 'payer' };
+const acteDe = (jeton) => { const b = boutonsConfirmer(jeton)[0]; return (b && b.dataset.action) || ''; };
 /* [S23] « Confirmer l'envoi » reste grise tant que la fenetre court : le serveur
  * refuserait (TROP_TOT) et on voyait « Pas encore » en boucle. Le serveur reste
  * seul juge ; la page evite seulement le clic inutile. */
@@ -983,7 +1085,8 @@ function compteARebours(jusqua, p) {
     const boite = p.closest('.retenue');
     if (boite && boite.dataset.close) { clearInterval(t); activerConfirmations(); return; }
     const r = Math.ceil((jusqua - Date.now()) / 1000);
-    if (r <= 0) { p.textContent = "Fenêtre écoulée. Confirme pour envoyer, ou annule."; activerConfirmations(); clearInterval(t); }
+    const acte = boite ? ((boite.querySelector('[data-finaliser]') || {}).dataset || {}).action : '';
+    if (r <= 0) { p.textContent = 'Fenêtre écoulée. Confirme pour ' + (VERBE_CONFIRME[acte] || 'valider') + ', ou annule.'; activerConfirmations(); clearInterval(t); }
     else p.textContent = 'Action irréversible retenue — ' + r + ' s avant que la confirmation soit possible.';
   }, 500);
 }
@@ -1062,13 +1165,17 @@ function direDansRetenue(jeton, texte) {
   const boite = retenueDe(jeton), p = boite && boite.querySelector('.compte');
   if (p) p.textContent = texte; else tour('JARVIS', texte, false);
 }
-function clore(jeton, texte) {
+/* [S78] masquer : l'action est FAITE (envoyée, payée) ; « Annuler » et le
+ * bouton grisé n'ont plus de sens, ils disparaissent (vu en ligne sous
+ * « Envoyé pour de vrai »). Annulée ou périmée : ils restent, grisés. */
+function clore(jeton, texte, masquer) {
   confirmationsFaites.add(jeton);
   const carte = carteElevation(jeton); if (carte) fermerCarte(carte);
   const boite = retenueDe(jeton); if (!boite) return;
   boite.dataset.close = '1';
   const p = boite.querySelector('.compte'); if (p) p.textContent = texte;
-  for (const b of boite.querySelectorAll('button')) { b.disabled = true; if (b.dataset.finaliser) b.dataset.apres = '9e15'; }
+  for (const b of boite.querySelectorAll('button')) { b.disabled = true; if (b.dataset.finaliser) b.dataset.apres = '9e15'; if (masquer) b.hidden = true; }
+  if (masquer) { const rg = boite.querySelector('.rang'); if (rg) rg.hidden = true; }
 }
 async function finaliserJeton(jeton) {
   const ouverte = carteElevation(jeton);
@@ -1080,7 +1187,7 @@ async function finaliserJeton(jeton) {
   for (const b of boutons) b.disabled = true;          /* [S35] pas de double envoi pendant la requête */
   let r = null;
   try { r = await api('/api/finaliser', { jeton }); } catch (e) { r = null; } finally { confirmationsEnCours.delete(jeton); }
-  if (!r) { rendre(); return direDansRetenue(jeton, 'Pas de réponse du serveur : réessaie « Confirmer l\'envoi ».'); }
+  if (!r) { rendre(); return direDansRetenue(jeton, 'Pas de réponse du serveur : réessaie « ' + (CONFIRMER_ACTE[acteDe(jeton)] || 'Confirmer') + ' ».'); }
   if (limiteAtteinte(r)) return rendre();
   majEtat(r);
   if (r.etat === 'ELEVATION_REQUISE') { rendre(); return demanderElevation(jeton, r.moyens || {}, r.pour); }
@@ -1088,14 +1195,15 @@ async function finaliserJeton(jeton) {
   if (r.etat === 'INTROUVABLE') return clore(jeton, 'Déjà traitée (envoyée ou annulée) : plus rien à confirmer.');
   if (r.etat === 'PERIME') return clore(jeton, r.message || TEXTE_PERIMEE);   /* [S40] */
   if (r.etat === 'EXECUTE' && r.reel) {   /* [S68] vrai e-mail : le SERVEUR dit s'il est parti, preuve de Google */
-    clore(jeton, r.envoye ? 'Envoyé pour de vrai.' : r.code === 'RESULTAT_INCERTAIN' ? 'Résultat incertain : vérifie les envoyés.' : "Pas parti : rien n'a été envoyé.");
+    clore(jeton, r.envoye ? 'Envoyé pour de vrai.' : r.code === 'RESULTAT_INCERTAIN' ? 'Résultat incertain : vérifie les envoyés.' : "Pas parti : rien n'a été envoyé.", true);   /* [S78] */
     tour('JARVIS', r.reponse || (r.envoye ? 'Envoyé.' : 'Pas parti.'), false);
     if (r.trace) ajouterTrace(r.trace);
     return;
   }
   if (r.etat === 'EXECUTE') {
-    clore(jeton, 'Envoyé.');
-    tour('JARVIS', 'Envoyé.', false);
+    const fait = FAIT_SIMULE[acteDe(jeton)] || 'Fait (simulation)';   /* [S78] */
+    clore(jeton, fait, true);
+    tour('JARVIS', fait, false);
     if (r.trace) ajouterTrace(r.trace);   /* [S29] [v4.7] */
     if (r.reponse) tour('Claude', r.reponse, false);
     return;
@@ -1263,6 +1371,8 @@ async function envoyer() {
     if (d && d.etape === 'DEBIT' && limiteAtteinte(d)) { $('envoyer').disabled = false; return; }
     if (d && d.etape === 'MEMOIRE' && d.decide === 'AUTORISE' && d.souvenir) Memoire.ajouter(d.souvenir);
     majEtat(d); rendreDecision(d);
+    /* [S74] v4.9.1 une action par message : ce qui n'est PAS fait est dit par JARVIS */
+    if (d && d.nonFait && d.nonFait.texte) tour('JARVIS', d.nonFait.texte, false).classList.add('non-fait');
   } catch (e) { tour('JARVIS', 'La passerelle est injoignable : ' + e.message, false); }
   $('envoyer').disabled = false;
 }
@@ -1561,6 +1671,15 @@ document.addEventListener('click', async (ev) => {
   }
 });
 
+/* [S75] « Ouvrir dans Mail » : l'application Mail s'ouvre (lien mailto:) ; la
+ * page le dit, et ferme la carte du compte d'essai si le lien y était */
+document.addEventListener('click', (ev) => {
+  const a = ev.target.closest && ev.target.closest('a[data-ouvrir-mail]'); if (!a) return;
+  const carteG = a.closest('.mail-retaper');
+  if (carteG && !carteG.dataset.utilisee) { carteG.dataset.utilisee = '1'; for (const x of carteG.querySelectorAll('button, input')) x.disabled = true; }
+  const etat = a.closest('.decision') && a.closest('.decision').querySelector('.etat-carte');
+  if (etat) etat.textContent = "Ouvert dans Mail : c'est toi qui l'envoies. JARVIS ne sait pas s'il est parti.";
+});
 $('envoyer').addEventListener('click', envoyer);
 Voix.init();   /* [S32] micro visible seulement si le navigateur sait dicter */
 /* [S48] bloc Agenda JARVIS : seulement si des variables Google sont posées */
@@ -1578,7 +1697,8 @@ function afficherGmail(r) {
   const ok = r && r.ok;
   $('gmailMessage').textContent = !r ? 'Pas de réponse du serveur.' : r.message
     || (ok ? 'Prêt. Rien n\'a été envoyé.' : 'À régler : voir ci-dessous.') + (r.compte ? '' : '');
-  $('gmailEtapes').innerHTML = ((r && r.etapes) || []).map(e => '<div>' + (e.ok ? '✓ ' : '✗ ') + esc(ETAPES_GMAIL[e.etape] || e.etape) + (e.ok ? '' : ' : ' + esc(e.code)) + '</div>').join('')
+  $('gmailEtapes').innerHTML = ((r && r.etapes) || []).map(e => '<div>' + (e.ok ? '✓ ' : '✗ ') + esc(ETAPES_GMAIL[e.etape] || e.etape)
+      + (e.ok ? '' : ' : ' + (e.explication ? esc(e.explication) + ' <span class="mono">(' + esc(e.code) + ')</span>' : esc(e.code))) + '</div>').join('')   /* [S77] */
     + (r && r.compte ? '<div>Compte lu : <span class="mono">' + esc(r.compte) + '</span></div>' : '')
     + (r && Number.isFinite(r.autorises) ? '<div>Adresses autorisées : ' + esc(String(r.autorises)) + ' · envois restants aujourd\'hui : ' + esc(String(r.restants)) + ' / ' + esc(String(r.plafond)) + '</div>' : '');
   $('etatGmail').textContent = ok ? 'prêt' : 'à régler';

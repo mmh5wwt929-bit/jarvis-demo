@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JARVIS — règles de confidentialité</title>
+<style>
+body{margin:0;background:#0d1117;color:#c9d1d9;font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:70ch;margin:0 auto;padding:24px 18px 48px}
+h1{font-size:22px;color:#e6edf3;margin:0 0 4px}
+h2{font-size:17px;color:#e6edf3;margin:28px 0 6px}
+p,li{margin:6px 0}
+a{color:#58a6ff}
+.date{color:#7d8590;font-size:14px}
+code{font-size:.9em}
+</style>
+</head>
+<body>
+<main>
+<h1>Règles de confidentialité de JARVIS</h1>
+<p class="date">Dernière mise à jour : 27 septembre 2026</p>
+
+<h2>Qui</h2>
+<p>JARVIS est un projet personnel et expérimental, construit par une seule personne. Il existe en deux services : une démo publique, et une instance privée, protégée par une clé d'accès, réservée à son auteur. Contact : <a href="mailto:jarvissecuriteia@gmail.com">jarvissecuriteia@gmail.com</a>.</p>
+
+<h2>Données Google (instance privée uniquement)</h2>
+<ul>
+<li><b>Gmail d'un compte d'essai</b> : le droit <code>gmail.send</code> sert à envoyer un e-mail, seulement vers une liste fermée d'adresses, après relecture complète, adresse retapée et Face ID ; le droit <code>gmail.readonly</code> sert à lire, à la demande, au plus 5 e-mails récents. Les deux droits sont portés par deux jetons séparés.</li>
+<li><b>Google Agenda</b> : lecture de l'agenda, et création ou suppression d'événements dans un agenda dédié « JARVIS », toujours après un geste de confirmation.</li>
+<li>La démo publique n'accède à aucune donnée Google.</li>
+</ul>
+
+<h2>Usage</h2>
+<p>Ces données servent uniquement à répondre à la demande de la personne qui utilise JARVIS. Le contenu nécessaire à la réponse (message tapé, e-mails ou événements lus) est transmis à l'API d'Anthropic (modèle Claude) pour rédiger la réponse. Rien n'est vendu, rien ne sert à de la publicité, rien n'est partagé avec d'autres tiers, et JARVIS ne s'en sert pas pour entraîner un modèle.</p>
+<p>L'utilisation et le transfert à toute autre application des informations reçues des API Google respectent les <a href="https://developers.google.com/terms/api-services-user-data-policy">règles relatives aux données utilisateur des services d'API Google</a>, y compris les exigences d'utilisation limitée (Limited Use).</p>
+
+<h2>Conservation</h2>
+<ul>
+<li>JARVIS n'écrit rien sur disque. La conversation reste dans la mémoire du serveur au plus 30 minutes après la dernière activité, et disparaît à chaque redémarrage.</li>
+<li>Les « souvenirs » (« retiens que … ») restent dans le navigateur de la personne, qui peut les effacer.</li>
+<li>Les jetons Google sont des variables secrètes chez l'hébergeur (Render) ; ils ne sont jamais affichés ni renvoyés.</li>
+<li>L'adresse IP est gardée en mémoire au plus une heure, pour limiter les abus.</li>
+</ul>
+
+<h2>Retirer l'accès</h2>
+<p>L'accès de JARVIS à un compte Google se retire à tout moment sur <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>
+
+<p><a href="/">Retour à JARVIS</a> · <a href="/conditions">Conditions d'utilisation</a></p>
+</main>
+</body>
+</html>

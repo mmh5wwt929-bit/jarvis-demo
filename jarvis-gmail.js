@@ -1,7 +1,10 @@
 'use strict';
 /* ============================================================================
- * JARVIS — gmail 1.0 : envoyer (vers une liste fermee) et lire, sur le compte
+ * JARVIS — gmail 1.1 : envoyer (vers une liste fermee) et lire, sur le compte
  * d'essai JARVIS, avec deux droits SEPARES                    [S68] [S69] v4.9
+ * 1.1 (v4.9.1) : client OAuth en JSON OU en ID + SECRET, colle tolere depuis
+ *   un iPhone, motifs precis [S77] ; mailto() et verification sans liste
+ *   fermee pour « Ouvrir dans Mail » [S75]
  * ----------------------------------------------------------------------------
  * MOINDRE PRIVILEGE, PAR CONSTRUCTION
  *  - Deux jetons OAuth (refresh tokens) du compte d'essai, obtenus a part :
@@ -39,7 +42,7 @@ const https = require('https');
 const crypto = require('crypto');
 const { URL } = require('url');
 
-const VERSION = '1.0';
+const VERSION = '1.1';
 const LIMITES_MAIL = Object.freeze({ delaiMs: 12000, maxOctets: 1024 * 1024, permisMs: 30 * 1000,
   objetMax: 150, texteMax: 3000, autorisesMax: 10, plafondDefaut: 5, plafondMax: 20,
   lusMax: 5, extraitMax: 1200, diagnosticMs: 20000, lectureTotaleMs: 20000 });
@@ -61,22 +64,51 @@ function adresseValide(x) {
 const cleAdresse = (a) => String(a).toLowerCase();
 
 /* ---- configuration : dit POURQUOI elle est refusee, jamais son contenu ---- */
-function lireClient(texte) {
-  if (!texte || !String(texte).trim()) return { motif: 'CLIENT_ABSENT' };
-  let o = null;
-  for (const essai of [String(texte).trim(), (() => { try { return Buffer.from(String(texte).trim(), 'base64').toString('utf8'); } catch { return ''; } })()]) {
-    try { o = JSON.parse(essai); break; } catch { /* essai suivant */ }
+/* [S77] v4.9.1 — colle depuis un iPhone (editeur de variables de Render) :
+ * guillemets courbes “ ” ou « » (ponctuation « intelligente »), espaces,
+ * retours a la ligne ou « / » en trop. On retire ce qui ne peut PAS faire
+ * partie de la valeur (un ID ou un secret n'a ni blanc, ni guillemet, ni « / »
+ * au bord) ; le reste est verifie tel quel. Deux formes : le JSON du client
+ * (JARVIS_GMAIL_CLIENT), ou ID + SECRET a part (…_CLIENT_ID, …_CLIENT_SECRET).
+ * Le motif dit CE QUI cloche (JSON, ID ou SECRET), jamais la valeur. */
+const droitsGuillemets = (t) => String(t == null ? '' : t).replace(/«[\s\u00A0\u202F]*/g, '"').replace(/[\s\u00A0\u202F]*»/g, '"')
+  .replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"').replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'");
+const BLANCS = /[\s\u00A0\u202F\u200B-\u200D\u2060\uFEFF]+/g;
+const valeurPropre = (v) => droitsGuillemets(v).replace(BLANCS, '').replace(/^["'\/]+|["'\/]+$/g, '');
+const jetonPropre = (v) => v == null ? '' : droitsGuillemets(v).replace(BLANCS, '').replace(/^["']+|["']+$/g, '');   /* un jeton commence par « 1// » */
+const RE_CLIENT_ID = /^[A-Za-z0-9._-]{8,200}\.apps\.googleusercontent\.com$/, RE_CLIENT_SECRET = /^[A-Za-z0-9._~+\/=-]{8,200}$/;
+const present = (v) => v != null && String(v).trim() !== '';
+function paireClient(id, secret, prefixe) {
+  if (!id) return { motif: prefixe + '_ID_ABSENT' };
+  if (!secret) return { motif: prefixe + '_SECRET_ABSENT' };
+  if (!RE_CLIENT_ID.test(id)) return { motif: prefixe + '_ID_ILLISIBLE' };
+  if (!RE_CLIENT_SECRET.test(secret)) return { motif: prefixe + '_SECRET_ILLISIBLE' };
+  return { client: Object.freeze({ id, secret }) };
+}
+function lireClient(texte, id, secret, prefixe = 'CLIENT') {
+  const aJson = present(texte), aPaire = present(id) || present(secret);
+  if (!aJson && !aPaire) return { motif: prefixe + '_ABSENT' };
+  let parJson = null;
+  if (aJson) {
+    const brut = droitsGuillemets(texte).trim();
+    let o = null;
+    for (const essai of [brut, (() => { try { return Buffer.from(brut, 'base64').toString('utf8'); } catch { return ''; } })()]) {
+      try { o = JSON.parse(essai); break; } catch { /* essai suivant */ }
+    }
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return { motif: prefixe + '_JSON_ILLISIBLE' };
+    const c = o.web && typeof o.web === 'object' ? o.web : o.installed && typeof o.installed === 'object' ? o.installed : o;
+    parJson = paireClient(typeof c.client_id === 'string' ? valeurPropre(c.client_id) : '', typeof c.client_secret === 'string' ? valeurPropre(c.client_secret) : '', prefixe);
+    if (!aPaire) return parJson;
   }
-  if (!o || typeof o !== 'object') return { motif: 'CLIENT_ILLISIBLE' };
-  const c = o.web && typeof o.web === 'object' ? o.web : o.installed && typeof o.installed === 'object' ? o.installed : o;
-  if (typeof c.client_id !== 'string' || !/^[A-Za-z0-9._-]{8,200}\.apps\.googleusercontent\.com$/.test(c.client_id)
-      || typeof c.client_secret !== 'string' || !/^[A-Za-z0-9._~+\/=-]{8,200}$/.test(c.client_secret))
-    return { motif: 'CLIENT_ILLISIBLE' };
-  return { client: Object.freeze({ id: c.client_id, secret: c.client_secret }) };
+  const parPaire = paireClient(valeurPropre(id), valeurPropre(secret), prefixe);
+  if (!aJson) return parPaire;
+  /* les deux formes a la fois : acceptees seulement si elles disent la meme chose */
+  return parJson.client && parPaire.client && parJson.client.id === parPaire.client.id && parJson.client.secret === parPaire.client.secret
+    ? parPaire : { motif: prefixe + '_EN_DOUBLE' };
 }
 const JETON_OK = /^[A-Za-z0-9._~+\/=-]{20,2048}$/;
 function lireAutorises(texte) {
-  const brut = String(texte == null ? '' : texte).split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+  const brut = droitsGuillemets(texte).split(/[\s,;]+/).map(x => x.trim().replace(/^["']+|["']+$/g, '')).filter(Boolean);
   if (!brut.length) return { motif: 'LISTE_VIDE' };
   if (brut.length > LIMITES_MAIL.autorisesMax || !brut.every(adresseValide)) return { motif: 'LISTE_ILLISIBLE' };
   return { liste: Object.freeze([...new Set(brut.map(cleAdresse))]) };
@@ -101,9 +133,12 @@ function liensDe(texte) {
 }
 const empreinteContenu = (a, objet, texte) => crypto.createHash('sha256').update(JSON.stringify(['jarvis-mail-1', cleAdresse(a), objet, texte])).digest('hex');
 /* ce que la personne a tape donne les liens permis ; rien d'autre */
-function verifierContenu({ a, objet, texte, liensPermis }, autorises) {
+/* [S75] listeFermee: false pour « Ouvrir dans Mail » : la personne envoie
+ * elle-meme depuis son application, a l'adresse qu'elle a tapee ; tout le
+ * reste (liens tapes seulement, caracteres, longueurs) est verifie pareil. */
+function verifierContenu({ a, objet, texte, liensPermis }, autorises, { listeFermee = true } = {}) {
   if (!adresseValide(a)) return { ok: false, code: 'ADRESSE_INVALIDE' };
-  if (!autorises.includes(cleAdresse(a))) return { ok: false, code: 'HORS_LISTE' };
+  if (listeFermee && !(Array.isArray(autorises) && autorises.includes(cleAdresse(a)))) return { ok: false, code: 'HORS_LISTE' };
   if (typeof objet !== 'string' || typeof texte !== 'string') return { ok: false, code: 'CONTENU_ILLISIBLE' };
   const o = objet.trim(), x = texte.replace(/\r\n?/g, '\n').replace(/[ \t]+\n/g, '\n').trim();
   if (!o || o.length > LIMITES_MAIL.objetMax || /[\r\n\t]/.test(o) || INTERDITS.test(o)) return { ok: false, code: 'OBJET_INVALIDE' };
@@ -114,6 +149,16 @@ function verifierContenu({ a, objet, texte, liensPermis }, autorises) {
   const empreinte = empreinteContenu(a, o, x);
   return { ok: true, brouillon: Object.freeze({ a, objet: o, texte: x, liensPermis: Object.freeze([...permis]),
     empreinte, outil: 'GMAIL:' + empreinte.slice(0, 40) }) };
+}
+
+/* [S75] « OUVRIR DANS MAIL » : le lien mailto: d'un brouillon VERIFIE, construit
+ * ICI (RFC 6068). Tout est encode par encodeURIComponent (? & # % + et sauts de
+ * ligne compris, en %0D%0A) ; seul « @ » reste lisible dans l'adresse. Rien
+ * n'est envoye : la personne relit dans son application et envoie elle-meme. */
+function mailto(b) {
+  if (!b || typeof b !== 'object' || !adresseValide(b.a) || typeof b.objet !== 'string' || typeof b.texte !== 'string') return null;
+  return 'mailto:' + encodeURIComponent(b.a).replace(/%40/g, '@') + '?subject=' + encodeURIComponent(b.objet)
+    + '&body=' + encodeURIComponent(b.texte.replace(/\r?\n/g, '\r\n'));
 }
 
 /* ---- le message brut (RFC 5322), construit ICI, jamais par le modele ---- */
@@ -205,18 +250,19 @@ function erreurJeton(json) {
   return 'AUTH_GOOGLE_REFUSEE';
 }
 
-function creerMail({ client, clientLecture, envoi, lecture, autorises, plafond, zone = 'Europe/Paris', transport = transportHttps, maintenant = () => Date.now(), limites } = {}) {
+function creerMail({ client, clientId, clientSecret, clientLecture, clientLectureId, clientLectureSecret, envoi, lecture, autorises, plafond,
+  zone = 'Europe/Paris', transport = transportHttps, maintenant = () => Date.now(), limites } = {}) {
   const L = Object.freeze({ ...LIMITES_MAIL, ...(limites || {}) });
-  const cl = lireClient(client);
+  const cl = lireClient(client, clientId, clientSecret, 'CLIENT');   /* [S77] JSON, ou ID + SECRET */
   /* un 2e client OAuth pour lire, s'il est donne ; sinon le meme */
-  const clL = clientLecture != null && String(clientLecture).trim() ? lireClient(clientLecture) : cl;
-  const jE = envoi == null || !String(envoi).trim() ? null : String(envoi).trim();
-  const jL = lecture == null || !String(lecture).trim() ? null : String(lecture).trim();
+  const clL = [clientLecture, clientLectureId, clientLectureSecret].some(present) ? lireClient(clientLecture, clientLectureId, clientLectureSecret, 'CLIENT_LECTURE') : cl;
+  const jE = jetonPropre(envoi) || null;
+  const jL = jetonPropre(lecture) || null;
   /* ---- ce qui est actif, et sinon pourquoi (un motif fixe) ---- */
   let motifEnvoi = null, motifLecture = null;
   const listeR = lireAutorises(autorises), plafondR = lirePlafond(plafond);
   if (!cl.client) motifEnvoi = cl.motif;
-  if (!clL.client) motifLecture = clL !== cl ? 'CLIENT_LECTURE_ILLISIBLE' : clL.motif;
+  if (!clL.client) motifLecture = clL.motif;   /* [S77] precis : CLIENT_LECTURE_ID_ILLISIBLE… */
   if (jE && jL && jE === jL) motifEnvoi = motifLecture = 'MEME_JETON_POUR_LIRE_ET_ENVOYER';
   if (!motifEnvoi) motifEnvoi = !jE ? (autorises != null && String(autorises).trim() ? 'JETON_ENVOI_ABSENT' : 'ENVOI_NON_CONFIGURE')
     : !JETON_OK.test(jE) ? 'JETON_ENVOI_ILLISIBLE' : listeR.motif || plafondR.motif || null;
@@ -369,5 +415,5 @@ function creerMail({ client, clientLecture, envoi, lecture, autorises, plafond, 
   });
 }
 
-module.exports = Object.freeze({ VERSION, creerMail, adresseValide, liensDe, verifierContenu, messageBrut, motEncode, lireClient, lireAutorises,
+module.exports = Object.freeze({ VERSION, creerMail, adresseValide, liensDe, verifierContenu, messageBrut, motEncode, lireClient, lireAutorises, valeurPropre, mailto,
   PORTEE_ENVOI, PORTEE_LECTURE, LIMITES_MAIL });

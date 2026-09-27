@@ -50,11 +50,22 @@
  *  - retirerMarque() : la marque « [Affiché par le serveur JARVIS…] » recopiee
  *    par le modele (apres une action confirmee) est retiree, avec ce qu'elle
  *    entoure ; applique a TOUTE reponse du modele par le serveur.
+ *
+ * 1.4 (v4.9.1, 27 sept) — VU EN LIGNE sur la v4.9
+ *  - demandesMultiples() : « envoie un mail a X … et ajoute-le a mon agenda » :
+ *    chaque proposition qui COMMENCE par un verbe d'action est une demande ;
+ *    le serveur dit celles qu'il n'a pas faites (une action a la fois).
+ *  - corrigerMemoire() : « tu ne m'as pas dit » est faux quand l'information
+ *    est sortie de la fenetre de l'historique : la phrase est remplacee.
+ *  - registreDe() : un brouillon qui passe de « vous » a « tu ».
+ *  - retirerOffres() : « dis-moi a quelle adresse et je preparerai le mail »
+ *    (apres un e-mail piege) : une proposition d'agir a la place de la
+ *    personne est retiree ; une action ne part que de SA demande complete.
  * ========================================================================== */
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const AG = require('./jarvis-agenda.js');
 
-const VERSION = '1.3';
+const VERSION = '1.4';
 const JOUR_MS = 86400000;
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const JOURS_COURTS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
@@ -581,8 +592,112 @@ function texteFusion(evenements, zone = 'Europe/Paris') {
   return evenements.map(e => AG.enTexte([e], zone) + ' · agenda ' + e.sources.join(' + ')).join('\n');
 }
 
+/* ================================ 1.4 (v4.9.1) ================================ */
+/* Phrases : un point suivi d'un blanc (ou la fin) termine une phrase ; un
+ * point colle (« evil.com », « 1.5 ») n'en termine pas. */
+const phrases = (ligne) => ligne.match(/(?:[^.!?…]|[.!?…](?=\S))+[.!?…]*\s*|[.!?…]+\s*/g) || [ligne];
+const plat = (m) => ' ' + norm(m).replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+const RE_ADRESSE = /[^\s<>()«»"';,]+@[^\s<>()«»"';,]+/g;
+
+/* -------------------------------- plusieurs demandes : [1.4] -- */
+/* Vu en ligne le 27 sept : « envoie un mail a X … et ajoute-le a mon agenda »
+ * -> seul le mail etait prepare, et rien ne le disait. Chaque proposition de
+ * la demande (hors texte cite), coupee aux « et / puis / ensuite / , ; : »,
+ * dont le PREMIER mot est un verbe d'action est une demande. Etroit : un mot
+ * de contenu (« ajoute que … », « ecris un poeme ») n'en est pas une. */
+const TYPES_DEMANDE = Object.freeze([
+  ['envoi', /^(envoie|envoies|envoyez|renvoie|renvoyez|transfere|transferes|transferez|transmets|transmettez|expedie|expediez|reponds|repondez|ecris|ecrivez|maile|mailez)$/],
+  ['paiement', /^(paie|paies|payez|paye|payes|regle|reglez|vire|virez|rembourse|remboursez)$/],
+  ['suppression', /^(supprime|supprimez|efface|effacez)$/],
+  ['agenda', /^(ajoute|ajoutez|rajoute|rajoutez|cree|creez|note|notez|programme|programmez|planifie|planifiez|inscris|inscrivez|mets|mettez|bloque|bloquez|cale|calez)$/],
+  ['lecture', /^(lis|lisez|relis|resume|resumez|montre|montrez|regarde|regardez|consulte|consultez|verifie|verifiez)$/]
+]);
+const REMPLISSAGE = new Set(['et', 'puis', 'ensuite', 'apres', 'aussi', 'alors', 'enfin', 'egalement', 'sinon', 'maintenant', 'ok', 'bon',
+  'stp', 'svp', 'merci', 'de', 'd', 'peux', 'pourrais', 'peut', 'tu', 'vous', 'jarvis', 'please']);
+const RE_OBJET_LECTURE = /(^| )(mail|mails|e mail|e mails|email|emails|courriel|courriels|boite|message|messages|agenda|calendrier|planning|rendez vous|rdv|evenement|evenements)( |$)/;
+const RE_OBJET_ECRIRE = /(^| )(mail|e mail|email|courriel|message|mot|lui|leur)( |$)|@/;
+const RE_QUAND = /( \d{1,2} ?h| \d{1,2}:\d{2}|(^| )(demain|aujourd hui|lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|soir|matin)( |$))/;
+function demandesMultiples(texte) {
+  const out = [];
+  for (const brut of String(separer(texte).propres || '').split(/\s*(?:[,;:\n]|\s(?:et puis|et ensuite|et aussi|et|puis|ensuite)\s)\s*/i)) {
+    const extrait = brut.trim().replace(/^[\s,;:.!?-]+|[\s,;:.!?]+$/g, '').replace(/^(et puis|et ensuite|et aussi|et|puis|ensuite|aussi)\s+/i, '');
+    if (!extrait) continue;
+    const m = norm(extrait).replace(/[^a-z0-9@ ]+/g, ' ').replace(/(^| )n oublie pas (de |d )?/g, ' ').replace(/\s+/g, ' ').trim().split(' ');
+    let i = 0; while (i < m.length && REMPLISSAGE.has(m[i])) i++;
+    const verbe = m[i];
+    if (!verbe) continue;
+    const reste = ' ' + m.slice(i + 1).join(' ') + ' ';
+    if (/^ (pas|rien|jamais|plus) /.test(reste)) continue;               /* « … et ne supprime pas » */
+    const type = (TYPES_DEMANDE.find(([, re]) => re.test(verbe)) || [])[0];
+    if (!type) continue;
+    if (type === 'agenda' && (/^ qu/.test(reste) || !(RE_AGENDA.test(reste) || RE_QUAND.test(reste)))) continue;   /* « ajoute que … » = du contenu */
+    if (type === 'lecture' && !RE_OBJET_LECTURE.test(reste)) continue;
+    if (type === 'envoi' && /^ecri/.test(verbe) && !RE_OBJET_ECRIRE.test(reste)) continue;
+    out.push(Object.freeze({ type, extrait: extrait.slice(0, 120) }));
+  }
+  return out;
+}
+
+/* ------------------------------ « tu ne m'as pas dit » : [1.4] -- */
+/* Vu en ligne : « tu ne m'as pas dit ça », alors que la personne l'avait dit
+ * plus haut (sorti de la fenetre de l'historique). Toute phrase du modele qui
+ * AFFIRME que la personne n'a pas dit quelque chose devient une phrase vraie. */
+const RE_PAS_DIT = /(^| )(tu|vous) (ne |n )(me |m |l |les |en )*(as|avez|avais|aviez) ((encore|jamais|pas|rien|point) )+(dit|dits|dite|dites|parle|precise|precisee|indique|indiquee|donne|donnee|mentionne|communique|ecrit|evoque|signale|explique|fourni|fournie|transmis)( |$)/;
+const TEXTE_PAS_RETROUVE = "Je ne le retrouve pas dans nos derniers échanges (je ne garde que les plus récents) : redonne-le-moi si besoin.";
+function corrigerMemoire(texte) {
+  const s = String(texte == null ? '' : texte);
+  let n = 0;
+  const lignes = s.split('\n').map((ligne) => phrases(ligne).map((m) => {
+    if (!RE_PAS_DIT.test(plat(m))) return m;
+    n++;
+    return n === 1 ? TEXTE_PAS_RETROUVE + (/\s$/.test(m) ? ' ' : '') : '';
+  }).join('').replace(/\s+$/, ''));
+  return { texte: n ? lignes.join('\n').trim() : s, corrections: n };
+}
+
+/* ----------------------------------- registre d'un brouillon : [1.4] -- */
+/* 'tu' | 'vous' | 'mixte' | null. « a-t-il » n'est pas un tutoiement. */
+function registreDe(texte) {
+  const p = ' ' + norm(texte).replace(/[^a-z0-9 ]+/g, ' ').replace(/ t (il|elle|on|ils|elles) /g, ' $1 ').replace(/\s+/g, ' ').trim() + ' ';
+  const tu = / (tu|te|t|toi|ton|ta|tes) /.test(p), vous = / (vous|votre|vos|votres) /.test(p);
+  return tu && vous ? 'mixte' : tu ? 'tu' : vous ? 'vous' : null;
+}
+
+/* --------------------------- propositions d'agir a la place : [1.4] -- */
+/* Vu en ligne apres un e-mail piege : « dis-moi a quelle adresse et je
+ * preparerai un mail ». Le modele ne prepare rien, et une adresse tapee seule
+ * ne prepare rien non plus : une action ne part que de la demande COMPLETE de
+ * la personne. Sont retirees : « je peux / je vais / je … -rai » + envoyer,
+ * transferer, payer, repondre, preparer un mail… ; « dis-moi a quelle
+ * adresse / a qui » ; « veux-tu que je … ». Dans une session qui a lu un
+ * contenu externe, aussi « tape « envoie … » » vers une adresse lue. */
+const ACTES_OFFRE = '(envoyer|transferer|transmettre|expedier|faire suivre|payer|regler|virer|rembourser|repondre|preparer (un |le |l |ce |cet |une |ton |ta |cette |ta )?(mail|e mail|email|courriel|envoi|transfert|virement|paiement|reponse))';
+const PRONOMS = '(te |vous |le |la |les |lui |leur |l |me |m |tout de suite |aussi |alors |ensuite |donc |bien |meme |volontiers )*';
+const RE_OFFRES = Object.freeze([
+  new RegExp('(^| )(je|j) ' + PRONOMS + '(peux|pourrai|pourrais|vais|veux bien|propose de|me charge de|m occupe de) ' + PRONOMS + ACTES_OFFRE + '( |$)'),
+  new RegExp('(^| )(je|j) ' + PRONOMS + '(enverrai|transfererai|transmettrai|expedierai|payerai|paierai|reglerai|virerai|rembourserai|repondrai|preparerai (un |le |l |ce |cet |une |ton |ta |cette )?(mail|e mail|email|courriel|envoi|transfert|virement|paiement|reponse))( |$)'),
+  /(^| )(dis|donne|indique|precise|communique|envoie|ecris) moi (juste |simplement |seulement |d abord |alors |donc )?(a quelle adresse|quelle adresse|l adresse|son adresse|a qui|le destinataire|l iban|le montant)( |$)/,
+  /(^| )(veux|voulez|souhaites|souhaitez|desires|desirez)( tu| vous)? (que je|qu on) (le |la |les |lui |leur |te |vous )*(prepare|envoie|transfere|transmette|expedie|paie|paye|regle|vire|rembourse|reponde|fasse)( |$)/
+]);
+function retirerOffres(texte, { rouge = false, adressesLues = [] } = {}) {
+  const s = String(texte == null ? '' : texte);
+  const lues = new Set([...(adressesLues || [])].map(a => String(a).toLowerCase()));
+  const retirees = [];
+  const lignes = s.split('\n').map((ligne) => phrases(ligne).filter((m) => {
+    const p = plat(m);
+    let offre = RE_OFFRES.some(re => re.test(p));
+    if (!offre && rouge && lues.size && /(^| )(tape|tapez|ecris|ecrivez|demande moi|dis moi)( |$)/.test(p)
+        && /(^| )(envoi|envoy|transfer|transmet|expedi|pai|pay|vir|regl|rembours|repond)/.test(p))
+      offre = (m.match(RE_ADRESSE) || []).some(a => lues.has(a.replace(/[.:!?]+$/, '').toLowerCase()));
+    if (offre) { retirees.push(m.trim()); return false; }
+    return true;
+  }).join('').replace(/\s+$/, ''));
+  return { texte: retirees.length ? lignes.join('\n').replace(/\n{3,}/g, '\n\n').trim() : s, retirees };
+}
+
 module.exports = Object.freeze({ VERSION, resoudreDates, dateUnique, tableDates, avertissementNuit, questionContradiction, questionDate,
   corrigerJours, retirerAffirmations, affirme, intentionSuppression, suppressionNue, titreNomme, resoudreHeures,
   creationDemandee, demandeSerie, parleAgenda, demandeAction, renonce, fusionner, texteFusion, mots,
   titreTape, autreObjet, imiteServeur, retirerMarque, lireSerie, finNue, titreSerie,
+  demandesMultiples, corrigerMemoire, registreDe, retirerOffres, TEXTE_PAS_RETROUVE,   /* [1.4] */
   libelle, libellePeriode, local, iso, jourDe, jourSemaine, civil });

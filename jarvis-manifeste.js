@@ -35,7 +35,8 @@ const FICHIERS = Object.freeze([
   'jarvis-5.28.3.js', 'jarvis-plus-5.29.js', 'jarvis-vigilance.js', 'jarvis-memoire.js',
   'jarvis-agenda.js', 'jarvis-ecriture.js', 'jarvis-elevation.js', 'jarvis-manifeste.js', 'jarvis-verite.js',   /* [S49] v4.6.7 */
   'jarvis-appli.js',   /* [S61] v4.7 */
-  'jarvis-gmail.js'    /* [S68] [S69] v4.9 */
+  'jarvis-gmail.js',   /* [S68] [S69] v4.9 */
+  'confidentialite.html', 'conditions.html'   /* [S70] v4.9.1 pages exigees par Google */
 ]);
 
 const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');

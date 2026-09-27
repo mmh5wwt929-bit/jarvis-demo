@@ -1,10 +1,10 @@
 {
   "format": 1,
-  "passerelle": "v4.9.0",
-  "empreinte": "458afd8d005f",
+  "passerelle": "v4.9.1",
+  "empreinte": "4f7656f77dd2",
   "fichiers": {
-    "server.js": "4b9f00854c72f70c27f6b0bf28dc2de74bb24b94a42e7cfe726e5592f5fe2dd2",
-    "index.html": "8a60cc51cfda8d30b6467de14c46a594e6b9b94bb3ff3600de678e08f4e12501",
+    "server.js": "137bd092397d9e52ab7122c4455c0476e75ee1a5cea43de9486d1d12b757bfcd",
+    "index.html": "9924d17a367d299c1bc6b45607bfcd3845d028980af2974a220960dbfcc529c4",
     "package.json": "570aeab2c5dd22edfcaab8f1c8e97c273d60a3d813fd5cc9c2d8adc35964845d",
     "jarvis-5.28.3.js": "0eb75bec3cdfab34fbc44f7c0360f6c2357451489702fc14c347890b35c58350",
     "jarvis-plus-5.29.js": "5d5a15289b5c120f13ddf8f2c6c076f4a20d03058d584f399cfb34a53aedb331",
@@ -13,9 +13,11 @@
     "jarvis-agenda.js": "93e48c4efe19779e56fbdd2bff15068852985bd9c501966b3f1c48162d6d4d85",
     "jarvis-ecriture.js": "9cc1591623ba92c96e0d7c0a0c9e70a239bb852780c4d3b51781665cde296406",
     "jarvis-elevation.js": "75a3a05bee0071f7a6df73727acc98f3bd3b506eca1a8d598207ac2350637f94",
-    "jarvis-manifeste.js": "5bc671ba6d48e88a6a36ae2a03a9acdeab48c28a21c2210672f41d51b445a60e",
-    "jarvis-verite.js": "61e94a0964b96b048d46ad39bfd83286c5b41c19e3e2b39d3a69cf3614466368",
+    "jarvis-manifeste.js": "733c62ce7ec4e1a8e33e56690d08ed7b82ac8654ace81b4efa0230e53f6b45ea",
+    "jarvis-verite.js": "af77b7a87226acc71bbeb4c16122984ae1c7145619f4615bddee1e8492b8b730",
     "jarvis-appli.js": "18718984c02930bc6b328e2b8f2ea86b0b9f4166f6af373d8b67fb822679bd59",
-    "jarvis-gmail.js": "fc1d81a0a2ad1df44f343badc410f19f6987699106f615e3b6078abc17f1df72"
+    "jarvis-gmail.js": "ca1a5ada120e25f540eae5b77da095dfad365aebde1323b1b8d698d46065eb8c",
+    "confidentialite.html": "ad2e4e3fe02c3777d5efe78e4e428ec5ee3735ef11e53db12d69045b692d3242",
+    "conditions.html": "123615b2d2774c44f68cbb8a86a63cc4f77b72906b1990fda6e0ee0401a37afc"
   }
 }
