@@ -337,6 +337,9 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
   /* ============================ C [S83] CRENEAUX, RAPPELS ============================ */
   IP = '88.3.3.1'; sid = await session();
   W.agenda = [];
+  /* [v4.11] une réponse envoyée retire le créneau qu'elle suit (S101) : les créneaux
+   * se testent sur la conversation d'origine, sans les réponses envoyées plus haut */
+  FIL_MATCH.messages.splice(3);
   const gC = await gerer(sid);
   const itC = items(gC, 'Mails').find(x => x.type === 'creneau') || {};
   const c1 = itC.fil ? await appel('/api/gerer/creneau', { sessionId: sid, jeton: itC.fil, index: itC.creneau }) : {};

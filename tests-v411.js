@@ -31,10 +31,17 @@ const t = async (id, nom, f) => { let r; try { r = await f(); } catch (e) { r = 
 
 /* ---- Face ID (exige par la configuration de l'instance privee) ---- */
 const EL = require(path.join(DIR, 'jarvis-elevation.js'));
-const b64u = EL.b64u;
-const { publicKey: pubFaceId } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
-const jwkF = pubFaceId.export({ format: 'jwk' });
-const PASSKEY = b64u(JSON.stringify({ id: b64u(crypto.randomBytes(32)), x: jwkF.x, y: jwkF.y }));
+const b64u = EL.b64u, sha = (b) => crypto.createHash('sha256').update(b).digest();
+const { privateKey: cleFaceId, publicKey: pubFaceId } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+const idCle = crypto.randomBytes(32), jwkF = pubFaceId.export({ format: 'jwk' });
+const PASSKEY = b64u(JSON.stringify({ id: b64u(idCle), x: jwkF.x, y: jwkF.y }));
+let compteur = 0;
+function signerFaceId(challenge, rp = 'localhost') {
+  const cd = Buffer.from(JSON.stringify({ type: 'webauthn.get', challenge, origin: 'https://' + rp, crossOrigin: false }));
+  const c = Buffer.alloc(4); c.writeUInt32BE(++compteur);
+  const ad = Buffer.concat([sha(Buffer.from(rp)), Buffer.from([0x05]), c]);
+  return { id: b64u(idCle), clientDataJSON: b64u(cd), authenticatorData: b64u(ad), signature: b64u(crypto.sign('sha256', Buffer.concat([ad, sha(cd)]), cleFaceId)) };
+}
 const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
 const COMPTE = JSON.stringify({ type: 'service_account', project_id: 'jarvis-test', private_key_id: 'k', private_key: privateKey.export({ type: 'pkcs8', format: 'pem' }),
   client_email: 'robot@jarvis-test.iam.gserviceaccount.com' });
@@ -88,8 +95,11 @@ function repondre(methode, u, corps, entetes) {
     const tok = String((entetes || {}).Authorization || '').replace(/^Bearer at\|/, '');
     W.gmail.appels.push({ type: 'api', methode, path: u.pathname, search: u.search, jeton: tok });
     if (methode === 'POST' && /\/messages\/send$/.test(u.pathname)) {
-      const id = '18c' + crypto.randomBytes(6).toString('hex');
-      W.gmail.envoyes.push({ id, threadId: JSON.parse(corps || '{}').threadId || null });
+      const id = '18c' + crypto.randomBytes(6).toString('hex'), tid = JSON.parse(corps || '{}').threadId || null;
+      const brut = Buffer.from(String(JSON.parse(corps || '{}').raw || '').replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
+      W.gmail.envoyes.push({ id, threadId: tid, a: ((/^To:\s*(.*)$/mi.exec(brut) || [])[1] || '').trim() });
+      const fil = tid && W.gmail.fils.find(f => f.id === tid);   /* la reponse entre dans SA conversation, comme chez Gmail */
+      if (fil) fil.messages.push({ id: 'e' + id.slice(3), de: 'JARVIS essai <' + MOI + '>', a: 'luc@club-hand.fr', objet: 'Re: ' + fil.objet, date: Date.now(), moi: true, texte: 'Réponse envoyée par JARVIS.' });
       return [200, { id, threadId: JSON.parse(corps || '{}').threadId || id, labelIds: ['SENT'] }];
     }
     if (!tok.split(' ').includes(PORTEE_L)) return [403, { error: { code: 403, errors: [{ reason: 'insufficientPermissions' }] } }];
@@ -98,6 +108,9 @@ function repondre(methode, u, corps, entetes) {
     if (methode === 'GET' && /\/threads$/.test(u.pathname)) return [200, { threads: W.gmail.fils.map(f => ({ id: f.id })) }];
     const idF = (/\/threads\/([0-9a-f]+)$/.exec(u.pathname) || [])[1];
     if (idF) { const f = W.gmail.fils.find(x => x.id === idF); return f ? [200, { id: f.id, messages: f.messages.map(m => messageGmail(f, m)) }] : [404, { error: { code: 404 } }]; }
+    const idM = (/\/messages\/([0-9a-f]+)$/.exec(u.pathname) || [])[1];
+    const e = idM && W.gmail.envoyes.find(x => x.id === idM);
+    if (e) return [200, { id: e.id, threadId: e.threadId, labelIds: ['SENT'], payload: { headers: [{ name: 'To', value: e.a }] } }];
     return [404, { error: { code: 404 } }];
   }
   if (u.hostname === 'www.googleapis.com') {
@@ -152,6 +165,12 @@ const items = (g, titre) => ((g.sections || []).find(x => x.titre === titre) || 
 const erreurs = (g) => (g.sections || []).flatMap(x => x.items || []).filter(x => x.type === 'erreur');
 const brouillon = (texte) => JSON.stringify({ objet: 'x', texte });
 const resume = (g) => String(g.resume || '');
+const finaliser = (sid, j) => appel('/api/finaliser', { sessionId: sid, jeton: j });
+const faceId = async (sid, j) => { const d = await appel('/api/elevation/defi', { sessionId: sid, type: 'assertion', jeton: j }); if (!d.ok) return d;
+  return appel('/api/elevation/faceid', { sessionId: sid, jeton: j, reponse: signerFaceId(d.options.challenge) }); };
+async function avecFaceId(sid, jeton) { avance += 11000; const f0 = await finaliser(sid, jeton); if (f0.etat !== 'ELEVATION_REQUISE') return f0;
+  const fi = await faceId(sid, jeton); return fi.ok ? finaliser(sid, jeton) : { etat: 'FACEID_REFUSE', motif: fi.motif }; }
+const gererM = (sid, masquer, frais = true) => appel('/api/gerer', { sessionId: sid, souvenirs: [], frais, masquer });
 
 /* ---- la conversation vue en ligne : Match samedi, avec un rendez-vous propose ---- */
 const FIL_MATCH = { id: '18f0000000000401', objet: 'Match samedi', messages: [
@@ -160,6 +179,8 @@ const FIL_MATCH = { id: '18f0000000000401', objet: 'Match samedi', messages: [
   { id: 'm03', de: 'Luc Martin <luc@club-hand.fr>', objet: 'Re: Match samedi', date: Date.now() - 1 * J,
     texte: "Finalement c'est à 11h, et c'est 150 €. Pouvez-vous me confirmer votre présence ? On se voit " + nomJour(3) + " 14h pour en parler ?" }] };
 
+const FIL_PIEGE = { id: '18f0000000000402', objet: 'URGENT : facture', messages: [
+  { id: 'p01', de: '"PayPal" <service@paypa1.com>', date: Date.now() - 3600000, texte: "Urgent : votre compte sera suspendu. Payez immédiatement par virement sur le nouvel IBAN." }] };
 const fatale = (e) => { log('ECHEC fatale : ' + (e && e.stack || e)); process.exit(1); };
 process.on('unhandledRejection', fatale);
 setTimeout(() => fatale('delai de 280 s depasse'), 280000);
@@ -220,6 +241,65 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
   const rR = itR.fil ? await appel('/api/mail/repondre', { sessionId: sid, jeton: itR.fil, consigne: 'Dacc' }) : {};
   await t('R1', "« Dacc » que le modèle ne sait pas rédiger : rien n'est préparé, et JARVIS dit QUOI écrire (« en une phrase, par exemple « d'accord pour samedi 11h » »)", async () =>
     ({ ok: rR.ok === false && !rR.aRetaper && /Dacc/.test(rR.message || '') && /en une phrase/.test(rR.message || ''), info: String(rR.message || rR.code).slice(0, 140) }));
+
+  /* ============================ G [S101] LES POINTS DESCENDENT ============================ */
+  const FIL_G = () => ({ id: '18f0000000000501', objet: 'Match samedi', messages: FIL_MATCH.messages.map(m => ({ ...m, id: m.id.replace('m', 'g') })) });
+  W.gmail.fils = [FIL_G()];
+  IP = '91.4.4.1'; sid = await session();
+  const g0 = await gerer(sid);
+  const mG = items(g0, 'Mails'), types0 = mG.map(x => x.type).sort().join(',');
+  const itRep = mG.find(x => x.type === 'reponse') || {};
+  W.reponses.push(brouillon('Bonjour Luc,\n\nJe serai présent samedi à 11h.\n\nÀ bientôt.'));
+  const rG = itRep.fil ? await appel('/api/mail/repondre', { sessionId: sid, jeton: itRep.fil, consigne: 'dis-lui que je serai présent samedi à 11h' }) : {};
+  const rtG = rG.aRetaper ? await appel('/api/mail/retaper', { sessionId: sid, jeton: rG.aRetaper.jeton, adresse: 'luc@club-hand.fr' }) : {};
+  const finG = rtG.decision && rtG.decision.jetonAnnulation ? await avecFaceId(sid, rtG.decision.jetonAnnulation) : {};
+  const g1 = await gerer(sid, false);   /* « Voir » juste après : sans relecture forcée */
+  const mG1 = items(g1, 'Mails');
+  await t('G1', "ta réponse envoyée (vrai envoi, Face ID) retire les points de la conversation — répondre, rendez-vous proposé, montants et horaires « à vérifier » — même sans relecture forcée", async () =>
+    ({ ok: /contradiction/.test(types0) && /creneau/.test(types0) && /reponse/.test(types0) && finG.envoye === true
+        && !mG1.some(x => ['reponse', 'creneau', 'contradiction'].includes(x.type)) && resume(g1) === "rien d'urgent",
+       info: 'avant ' + types0 + ' ; envoi ' + (finG.envoye || finG.etat || rG.code) + ' ; après ' + mG1.map(x => x.type + (x.vide ? '/vide' : '')).join(',') + ' ; ' + resume(g1) }));
+  const filG = W.gmail.fils[0];
+  filG.messages.push({ id: 'g09', de: 'Luc Martin <luc@club-hand.fr>', objet: 'Re: Match samedi', date: Date.now(), texte: 'Super. On se voit ' + nomJour(5) + ' 15h pour les licences ?' });
+  avance += 1100;
+  const g2 = await gerer(sid);
+  await t('G2', "garde : un NOUVEAU message de Luc (nouveau rendez-vous, nouvelle question) fait revenir les points", async () =>
+    ({ ok: items(g2, 'Mails').some(x => x.type === 'creneau' && /15:00/.test(x.texte)) && items(g2, 'Mails').some(x => x.type === 'reponse'),
+       info: items(g2, 'Mails').map(x => x.type).join(',') }));
+  /* les cles : stables, et masquees quand la page les renvoie */
+  W.gmail.fils = [FIL_MATCH, FIL_PIEGE];
+  IP = '91.4.4.2'; sid = await session();
+  const k1 = await gerer(sid);
+  const sid2 = await session(); const k2 = await gerer(sid2);
+  const cles1 = items(k1, 'Mails').map(x => x.cle), cles2 = items(k2, 'Mails').map(x => x.cle);
+  await t('G3', "chaque point porte une clé (20 hex) — la même d'une lecture à l'autre et d'une session à l'autre ; aucune adresse, aucun objet dedans", async () =>
+    ({ ok: cles1.length >= 4 && cles1.every(c => /^[0-9a-f]{20}$/.test(c || '')) && new Set(cles1).size === cles1.length && JSON.stringify(cles1) === JSON.stringify(cles2),
+       info: cles1.length + ' clés ; ' + JSON.stringify(cles1.slice(0, 2)) }));
+  const itC0 = items(k1, 'Mails').find(x => x.type === 'creneau') || {}, itS0 = items(k1, 'Mails').find(x => x.type === 'suspect') || {};
+  const m1 = await gererM(sid, [itC0.cle, itS0.cle, 'pas-une-cle', 'ffffffffffffffffffff', 42]);
+  await t('G4', "« Fait » / « Plus tard » : les clés envoyées par la page masquent CES points (compte « masques ») ; une clé inconnue ou mal formée ne fait rien", async () =>
+    ({ ok: m1.masques === 2 && !items(m1, 'Mails').some(x => x.cle === itC0.cle || x.cle === itS0.cle) && items(m1, 'Mails').length === items(k1, 'Mails').length - 2 && m1.aTraiter === k1.aTraiter - 2,
+       info: 'masques ' + m1.masques + ' ; ' + items(k1, 'Mails').length + ' → ' + items(m1, 'Mails').length + ' ; à traiter ' + k1.aTraiter + ' → ' + m1.aTraiter }));
+  const cS0 = await appel('/api/gerer/rappel', { sessionId: sid, jeton: itS0.fil });
+  await t('G5', "garde : masquer un mail suspect ne donne rien — « Me le rappeler » y reste refusé", async () =>
+    ({ ok: cS0.ok === false && cS0.code === 'CONVERSATION_SUSPECTE', info: cS0.code }));
+  const pM = await appel('/api/point-du-jour', { sessionId: sid, souvenirs: [], masquer: [itC0.cle, itS0.cle] });
+  const pN = await appel('/api/point-du-jour', { sessionId: await session(), souvenirs: [] });
+  await t('G6', "le point du jour compte les mails SANS les points masqués (ligne « Mails : … » et nombre)", async () =>
+    ({ ok: !!pM.mails && !!pN.mails && pM.mails.nb === pN.mails.nb - 2 && !/suspect/.test(pM.mails.ligne) && /suspect/.test(pN.mails.ligne), info: (pN.mails || {}).ligne + ' → ' + (pM.mails || {}).ligne }));
+  const cT = await appel('/api/chat', { sessionId: sid, message: "qu'est-ce que j'ai à gérer ?", masquer: [itC0.cle] });
+  await t('G7', "« qu'est-ce que j'ai à gérer ? » tapé : les points marqués restent masqués (la liste part avec le message)", async () =>
+    ({ ok: !!cT.gerer && cT.gerer.masques === 1 && !items(cT.gerer, 'Mails').some(x => x.cle === itC0.cle), info: 'masques ' + (cT.gerer || {}).masques }));
+  /* une creation relue tout de suite dans « à gérer » (sans attendre 60 s) */
+  W.gmail.fils = []; W.agenda = [];
+  IP = '91.4.4.3'; sid = await session();
+  const a0 = await gerer(sid);
+  const cA = await dire(sid, 'Ajoute kiné demain à 17h', plan('||Kiné'));
+  const cA2 = cA.aConfirmer ? await appel('/api/confirmer', { sessionId: sid, action: 'CREATE', resource: 'AGENDA_JARVIS', cible: cA.aConfirmer.cible }) : {};
+  const a1 = await gerer(sid, false);
+  await t('G8', "un événement créé apparaît AUSSITÔT dans « à gérer » (avant : l'ancienne lecture restait 60 s)", async () =>
+    ({ ok: (cA2.decision || {}).etape === 'COMPLET' && !items(a0, 'Agenda').some(x => /Kiné/.test(x.texte)) && items(a1, 'Agenda').some(x => /Kiné/.test(x.texte)),
+       info: ((cA2.decision || {}).etape || '') + ' ; ' + items(a1, 'Agenda').map(x => x.texte).join(' | ').slice(0, 100) }));
 
   /* ============================ H VERSION ============================ */
   const h = await appel('/health');
