@@ -1,0 +1,214 @@
+'use strict';
+/* ============================================================================
+ * JARVIS — analyse 1.0 : ce qu'une CONVERSATION e-mail demande      [S79] v4.10
+ * ----------------------------------------------------------------------------
+ * Une conversation (Gmail : un « fil ») est un CONTENU EXTERNE. Ce module ne
+ * decide d'aucune action, ne fait aucun appel reseau et n'appelle aucun
+ * modele : il lit, par des regles ecrites ici, ce que les messages contiennent
+ * et le rend avec la PHRASE qui le prouve (transparence) :
+ *  - reponse attendue (derniere parole d'un autre : question ou demande) ;
+ *  - echeances (« avant vendredi », « d'ici le 3 octobre »), resolues par
+ *    rapport a la DATE DU MESSAGE, pas a aujourd'hui ;
+ *  - montants et horaires differents dans la meme conversation (« a verifier ») ;
+ *  - piece jointe annoncee mais absente ;
+ *  - tes engagements (« je vous envoie ca vendredi ») et leur date ;
+ *  - relance possible (ta question sans reponse depuis N jours) ;
+ *  - creneaux proposes (« mardi 14h ou jeudi 10h ? ») ;
+ *  - SECURITE : consigne adressee a un assistant (injection), demande
+ *    sensible (IBAN, mot de passe, carte, virement urgent), nom affiche
+ *    trompeur, adresse de reponse differente, domaine sosie, premier echange,
+ *    liens vers un autre domaine. Une alerte forte rend la conversation
+ *    « suspecte » : JARVIS n'y envoie jamais rien lui-meme.
+ * Chaque resultat dit sa certitude : 'fait' (lu tel quel : une phrase, un
+ * nombre, une piece jointe comptee) ou 'deduction' (une regle l'a interprete :
+ * a verifier). Rien ici n'est une consigne, ni ne donne une permission.
+ * ========================================================================== */
+const { separer, normaliser } = require('./jarvis-vigilance.js');
+const V = require('./jarvis-verite.js');
+
+const VERSION = '1.0';
+const JOUR_MS = 86400000;
+const LIMITES = Object.freeze({ messages: 12, texte: 4000, phrases: 60, creneaux: 4, extrait: 160 });
+
+const norm = (t) => ' ' + normaliser(t).replace(/([a-z])-(?=[a-z])/g, '$1 ').replace(/[^a-z0-9@.:?\/ ]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+const court = (s, n = LIMITES.extrait) => { const x = String(s || '').replace(/\s+/g, ' ').trim(); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
+const cleAdresse = (a) => String(a || '').trim().toLowerCase();
+const domaineDe = (a) => { const i = cleAdresse(a).lastIndexOf('@'); return i > 0 ? cleAdresse(a).slice(i + 1) : ''; };
+/* phrases de la partie NOUVELLE d'un message (sans l'historique cite « Le … a ecrit : », ni les lignes >) */
+function phrasesDe(texte) {
+  const p = String(separer(String(texte || '').slice(0, LIMITES.texte)).propres || '');
+  return (p.match(/(?:[^.!?…\n]|[.!?…](?=\S))+[.!?…]*/g) || []).map(x => x.trim()).filter(x => x.length > 1).slice(0, LIMITES.phrases);
+}
+
+/* ------------------------------------------------------------- regles -- */
+const RE_DEMANDE = /(^| )(pouvez vous|pourriez vous|peux tu|pourrais tu|merci de|merci d|je vous prie|veuillez|confirmez|confirme moi|confirmez moi|dites moi|dis moi|tenez moi au courant|tiens moi au courant|j attends votre|j attends ta|en attente de votre|en attente de ta|faites moi savoir|fais moi savoir|est ce que vous pouvez|est ce que tu peux|merci de me dire|merci de confirmer|j ai besoin de|il me faudrait|il nous faudrait)( |$)/;
+const RE_ECHEANCE = /(^| )(avant|d ici|au plus tard|jusqu au|jusqu a|pour le|pour lundi|pour mardi|pour mercredi|pour jeudi|pour vendredi|pour samedi|pour dimanche|pour demain|date limite|delai|echeance|dernier delai|limite)( |$)/;
+const RE_PJ = /(^| )(ci joint|ci joints|ci jointe|ci jointes|en piece jointe|en pieces jointes|en pj|je vous joins|je te joins|vous trouverez joint|tu trouveras joint|vous trouverez ci joint|tu trouveras ci joint|je joins|attached|attachment|voir pj|voir piece jointe)( |$)/;
+const RE_ENGAGEMENT = /(^| )je (vous |te |t |lui |leur |la |le |les |l )*(envoie|enverrai|envoyerai|transmets|transmettrai|renvoie|renverrai|rappelle|rappellerai|confirme|confirmerai|reviens vers|reviendrai vers|ferai|prepare|preparerai|passe|passerai|donne|donnerai|recontacte|recontacterai|regarde|regarderai|m en occupe|m occupe|m en charge|redige|redigerai|apporte|apporterai|paie|paierai|payerai|regle|reglerai)( |$)/;
+const RE_PROPOSITION = /(^| )(propose|proposer|proposons|dispo|disponible|disponibles|seriez vous|serais tu|es tu libre|etes vous libre|on se voit|se voir|rendez vous|rdv|reunion|rencontre|entretien|appel|visio|vous convient|te convient|ca te va|ca vous va|possible|creneau)( |$)/;
+/* un horaire CHANGE (« finalement c'est a 11h ») : compte aussi pour reperer des versions differentes */
+const RE_CHANGEMENT = /(^| )(finalement|plutot|au lieu de|change|changement|decale|decalee|decales|avance|avancee|reporte|reportee|deplace|deplacee|modifie|modifiee|nouvel horaire|nouvelle heure|nouvelle date|en fait)( |$)/;
+const RE_EVENEMENT = /(^| )(rendez vous|rdv|reunion|match|entrainement|seance|rencontre|convocation|depart|arrivee|tournoi|entretien|cours|stage|livraison)( |$)/;
+const RE_INJECTION = /(^| )(ignore (tes |vos |les |toutes tes |toutes les |toutes vos )?(regles|instructions|consignes)|oublie (tes |vos |les )?(regles|instructions|consignes)|tu es (maintenant|desormais)|en tant qu (ia|assistant)|assistant (ia|virtuel|jarvis)|system prompt|nouvelles instructions|transfere (toutes |tous )?(les |ces )?(factures|mails|e mails|messages|documents|fichiers|pieces)|envoie (toutes |tous )?(les |ces )?(factures|mails|documents|mots de passe|fichiers)|ne (le |la )?dis (rien|pas)|sans (le |la )?prevenir|n en parle pas|supprime ce (message|mail|e mail))( |$)/;
+const RE_SENSIBLE = /(^| )(iban|rib|bic|swift|virement|coordonnees bancaires|nouvelles coordonnees|changement de (compte|coordonnees|banque)|mot de passe|mdp|identifiants|code (de )?(confirmation|verification|secret|pin|sms)|carte bancaire|numero de carte|cryptogramme|carte cadeau|gift card|bitcoin|crypto|paiement urgent|payer (aujourd hui|immediatement|des maintenant))( |$)/;
+const RE_URGENCE = /(^| )(urgent|urgence|immediatement|dans l heure|avant ce soir|sous 24 ?h|derniere relance|dernier rappel|compte (sera )?(suspendu|bloque|ferme|desactive))( |$)/;
+const RE_LIEN = /\b(?:https?:\/\/|www\.)[^\s<>"'«»]+/gi;
+const RE_MONTANT = /(\d{1,3}(?:[ .  ]\d{3})+|\d+)(?:[,.](\d{1,2}))?\s?(€|euros?\b|eur\b)|€\s?(\d+)(?:[,.](\d{1,2}))?/gi;
+const FOURNISSEURS = ['gmail.com', 'googlemail.com', 'yahoo.fr', 'yahoo.com', 'outlook.fr', 'outlook.com', 'hotmail.fr', 'hotmail.com', 'live.fr',
+  'orange.fr', 'wanadoo.fr', 'free.fr', 'sfr.fr', 'laposte.net', 'icloud.com', 'me.com', 'bbox.fr', 'neuf.fr',
+  /* marques souvent imitees */
+  'paypal.com', 'paypal.fr', 'amazon.fr', 'amazon.com', 'apple.com', 'microsoft.com', 'google.com', 'impots.gouv.fr', 'ameli.fr', 'caf.fr',
+  'laposte.fr', 'chronopost.fr', 'colissimo.fr', 'dhl.com', 'ups.com', 'fedex.com', 'tnt.com', 'netflix.com', 'bouyguestelecom.fr',
+  'credit-agricole.fr', 'labanquepostale.fr', 'bnpparibas.net', 'societegenerale.fr', 'lcl.fr', 'boursorama.com', 'ffhandball.fr'];
+
+function distance(a, b) {   /* Levenshtein borne (petits mots) */
+  if (Math.abs(a.length - b.length) > 2) return 3;
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+function montantsDe(phrase) {
+  const out = []; let m; RE_MONTANT.lastIndex = 0;
+  while ((m = RE_MONTANT.exec(phrase))) {
+    const ent = (m[1] || m[4] || '').replace(/[ .  ]/g, ''), dec = m[2] || m[5] || '';
+    const v = Number(ent + (dec ? '.' + dec : ''));
+    if (Number.isFinite(v) && v > 0) out.push(Math.round(v * 100) / 100);
+  }
+  return out;
+}
+const euros = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(2).replace('.', ',')) + ' €';
+const hhmm = (h) => String(h.h).padStart(2, '0') + ':' + String(h.mi).padStart(2, '0');
+
+/* ------------------------------------------------------------ analyse -- */
+/* fil : { id, objet, messages: [{ id, de: { nom, adresse }, repondreA, a: [], date (ms), texte, piecesJointes: [{nom}], moi }] }
+ * o   : { moi (adresse), maintenant (ms), zone, contactsConnus (Set d'adresses), relanceJours } */
+function analyser(fil, o = {}) {
+  const zone = o.zone || 'Europe/Paris', maintenant = Number.isFinite(o.maintenant) ? o.maintenant : Date.now();
+  const auj = V.local(maintenant, zone).jour;
+  const moi = cleAdresse(o.moi);
+  const connus = o.contactsConnus instanceof Set ? o.contactsConnus : new Set();
+  const relanceJours = Number.isInteger(o.relanceJours) && o.relanceJours >= 1 && o.relanceJours <= 30 ? o.relanceJours : 3;
+  const msgs = (Array.isArray(fil && fil.messages) ? fil.messages : []).slice(-LIMITES.messages)
+    .map((m, i) => ({ ...m, i, moi: !!m.moi || (moi && cleAdresse(m.de && m.de.adresse) === moi), date: Number(m.date) || maintenant }));
+  const r = { id: fil && fil.id, objet: court(fil && fil.objet, 150), nbMessages: msgs.length, participants: [], dernier: null,
+    reponseAttendue: null, echeances: [], montants: [], contradictions: [], pjManquantes: [], engagements: [], relance: null,
+    creneaux: [], alertes: [], suspect: false, aGerer: [] };
+  if (!msgs.length) return r;
+  const vus = new Map();
+  for (const m of msgs) { const a = cleAdresse(m.de && m.de.adresse); if (a && !vus.has(a)) vus.set(a, { adresse: a, nom: court(m.de.nom, 60), moi: m.moi }); }
+  r.participants = [...vus.values()];
+  const dernier = msgs[msgs.length - 1];
+  r.dernier = { de: cleAdresse(dernier.de && dernier.de.adresse), nom: court(dernier.de && dernier.de.nom, 60), date: dernier.date, moi: dernier.moi, index: dernier.i };
+  const age = (m) => Math.floor((maintenant - m.date) / JOUR_MS);
+  const alerte = (type, poids, texte, preuve, i) => { if (!r.alertes.some(x => x.type === type && x.texte === texte)) r.alertes.push({ type, poids, texte, preuve: preuve ? court(preuve) : null, message: i }); };
+
+  const valeurs = [], horaires = [];
+  for (const m of msgs) {
+    const ph = phrasesDe(m.texte);
+    for (const s of ph) {
+      const p = norm(s);
+      /* montants */
+      for (const v of montantsDe(s)) { valeurs.push({ v, i: m.i, s }); r.montants.push({ valeur: v, texte: euros(v), message: m.i, extrait: court(s), certitude: 'fait' }); }
+      const rd = V.resoudreDates(s, m.date, zone), rh = V.resoudreHeures(s);
+      /* echeances : une date ET un marqueur de delai */
+      if (RE_ECHEANCE.test(p) && rd.dates.length) for (const d of rd.dates.slice(0, 2))
+        r.echeances.push({ jour: d.jour, iso: d.iso, libelle: V.libelle(d.jour, false), message: m.i, de: m.moi ? 'moi' : 'autre', extrait: court(s),
+          passee: d.jour < auj, certitude: 'deduction' });
+      /* horaires annonces pour un evenement : pour reperer des versions differentes */
+      if (!m.moi && (RE_EVENEMENT.test(p) || RE_CHANGEMENT.test(p)) && (rd.dates.length || rh.heures.length))
+        horaires.push({ jour: rd.dates.length ? rd.dates[0].jour : null, h: rh.heures.length ? rh.heures[0] : null, i: m.i, s });
+      /* piece jointe annoncee mais absente */
+      if (RE_PJ.test(p) && !(Array.isArray(m.piecesJointes) && m.piecesJointes.length) && !r.pjManquantes.some(x => x.message === m.i))
+        r.pjManquantes.push({ message: m.i, de: m.moi ? 'moi' : 'autre', extrait: court(s), certitude: 'fait' });
+      /* tes engagements dates */
+      if (m.moi && RE_ENGAGEMENT.test(p) && rd.dates.length) {
+        const d = rd.dates[0];
+        r.engagements.push({ jour: d.jour, iso: d.iso, libelle: V.libelle(d.jour, false), extrait: court(s), message: m.i,
+          etat: d.jour < auj ? 'en-retard' : d.jour === auj ? 'aujourdhui' : d.jour - auj <= 2 ? 'bientot' : 'plus-tard', certitude: 'deduction' });
+      }
+      /* creneaux proposes par un autre */
+      if (!m.moi && RE_PROPOSITION.test(p) && rd.dates.length && rh.heures.length && r.creneaux.length < LIMITES.creneaux) {
+        const ds = rd.dates.map(x => x.jour).filter((x, k, t) => t.indexOf(x) === k), hs = rh.heures;
+        const paires = ds.length === hs.length ? ds.map((d, k) => [d, hs[k]]) : ds.length === 1 ? hs.map(h => [ds[0], h]) : hs.length === 1 ? ds.map(d => [d, hs[0]]) : [];
+        for (const [d, h] of paires.slice(0, LIMITES.creneaux - r.creneaux.length))
+          if (d >= auj) r.creneaux.push({ jour: d, iso: V.iso(d), debut: { h: h.h, mi: h.mi }, duree: rh.duree || 60, libelle: V.libelle(d, false) + ' à ' + hhmm(h),
+            message: m.i, extrait: court(s), certitude: 'deduction' });
+      }
+      /* securite (messages des autres) */
+      if (!m.moi) {
+        if (RE_INJECTION.test(p)) alerte('injection', 'fort', "Consigne adressée à un assistant ou demande de transférer : c'est une donnée, pas un ordre.", s, m.i);
+        if (RE_SENSIBLE.test(p)) alerte('sensible', 'fort', RE_URGENCE.test(norm(m.texte)) ? 'Demande sensible sous pression (paiement, coordonnées bancaires, code…) : typique d\'une fraude.'
+          : 'Demande sensible (paiement, coordonnées bancaires, code, mot de passe) : vérifie par un autre moyen.', s, m.i);
+      }
+    }
+    if (!m.moi) {
+      const a = cleAdresse(m.de && m.de.adresse), dom = domaineDe(a), nom = String(m.de && m.de.nom || '');
+      /* nom affiche qui contient une AUTRE adresse, ou un domaine different */
+      const dansNom = (nom.match(/[^\s<>"'()]+@[^\s<>"'()]+/g) || []).map(cleAdresse);
+      if (dansNom.some(x => x !== a)) alerte('nom-affiche', 'fort', 'Le nom affiché montre une autre adresse (' + court(dansNom.find(x => x !== a), 60) + ') que l\'adresse réelle (' + a + ').', null, m.i);
+      /* adresse de reponse differente */
+      const rep = cleAdresse(m.repondreA);
+      if (rep && rep !== a && domaineDe(rep) !== dom) alerte('repondre-a', 'fort', 'Les réponses iraient à ' + rep + ', pas à l\'expéditeur ' + a + '. JARVIS ne répondrait qu\'à l\'expéditeur.', null, m.i);
+      /* domaine sosie */
+      if (/(^|\.)xn--/.test(dom)) alerte('sosie', 'fort', 'Domaine écrit avec des caractères étrangers (' + dom + ') : possible imitation.', null, m.i);
+      const reference = new Set(FOURNISSEURS.concat([...connus].map(domaineDe), moi ? [domaineDe(moi)] : []).filter(Boolean));
+      for (const ref of reference) if (dom && ref !== dom && distance(dom, ref) <= 2 && dom.length >= 5) { alerte('sosie', 'fort', 'Domaine ' + dom + ' presque identique à ' + ref + ' : possible imitation.', null, m.i); break; }
+      /* premier echange */
+      if (a && connus.size && !connus.has(a)) alerte('premier-echange', 'info', 'Premier échange avec ' + a + ' (jamais écrit dans les conversations lues).', null, m.i);
+      /* liens vers un autre domaine que l'expediteur */
+      const liens = (String(m.texte || '').match(RE_LIEN) || []).map(l => { try { return new URL(/^www\./i.test(l) ? 'https://' + l : l).hostname.toLowerCase(); } catch { return ''; } }).filter(Boolean);
+      const etrangers = [...new Set(liens.filter(h => dom && !h.endsWith(dom)))];
+      if (etrangers.length) alerte('liens', 'moyen', etrangers.length + ' lien(s) vers un autre domaine que l\'expéditeur (' + etrangers.slice(0, 3).join(', ') + ') : ne clique qu\'en connaissant l\'expéditeur.', null, m.i);
+    }
+  }
+  /* montants differents entre messages differents : a verifier (acompte + solde, ou erreur ?) */
+  const parMsg = new Map(); for (const x of valeurs) { if (!parMsg.has(x.v)) parMsg.set(x.v, x); }
+  if (parMsg.size >= 2 && new Set(valeurs.map(x => x.i)).size >= 2)
+    r.contradictions.push({ type: 'montant', texte: 'Montants différents dans la conversation : ' + [...parMsg.values()].slice(0, 4).map(x => euros(x.v) + ' (message ' + (x.i + 1) + ')').join(', ') + ' — à vérifier.',
+      extraits: [...parMsg.values()].slice(0, 4).map(x => court(x.s)), certitude: 'deduction' });
+  /* horaires differents annonces pour un evenement, par des messages differents */
+  const cles = new Map(); for (const x of horaires) { const k = (x.jour == null ? '?' : x.jour) + '|' + (x.h ? hhmm(x.h) : '?'); if (!cles.has(k)) cles.set(k, x); }
+  const distinctsJ = new Set(horaires.filter(x => x.jour != null).map(x => x.jour)), distinctsH = new Set(horaires.filter(x => x.h).map(x => hhmm(x.h)));
+  if (new Set(horaires.map(x => x.i)).size >= 2 && (distinctsJ.size >= 2 || distinctsH.size >= 2))
+    r.contradictions.push({ type: 'horaire', texte: 'Horaires différents annoncés : ' + [...cles.values()].slice(0, 4).map(x => (x.jour != null ? V.libelle(x.jour, false) : '') + (x.h ? ' ' + hhmm(x.h) : '') + ' (message ' + (x.i + 1) + ')').join(', ') + ' — lequel est le bon ?',
+      extraits: [...cles.values()].slice(0, 4).map(x => court(x.s)), certitude: 'deduction' });
+  /* reponse attendue : la derniere parole est d'un autre, avec une question ou une demande */
+  if (!dernier.moi) {
+    const q = phrasesDe(dernier.texte).find(s => /\?\s*$/.test(s) || RE_DEMANDE.test(norm(s)));
+    if (q) r.reponseAttendue = { de: r.dernier.de, nom: r.dernier.nom, depuis: age(dernier), extrait: court(q), message: dernier.i, certitude: 'deduction' };
+  }
+  /* relance : ta derniere question sans reponse depuis N jours */
+  if (dernier.moi && age(dernier) >= relanceJours) {
+    const q = phrasesDe(dernier.texte).find(s => /\?\s*$/.test(s) || RE_DEMANDE.test(norm(s)));
+    if (q) r.relance = { jours: age(dernier), extrait: court(q), message: dernier.i, certitude: 'deduction' };
+  }
+  r.suspect = r.alertes.some(x => x.poids === 'fort');
+
+  /* ce qui demande ton attention, avec la preuve et les actions PREPARABLES (aucune n'est faite) */
+  const item = (type, priorite, titre, extrait, certitude, actions) => r.aGerer.push({ type, priorite, titre, extrait: extrait || null, certitude, actions, filId: r.id, objet: r.objet });
+  if (r.suspect) item('suspect', 1, 'Mail suspect — « ' + r.objet + ' » : ne réponds pas, ne paie rien, ne clique pas.', (r.alertes.find(x => x.poids === 'fort') || {}).texte, 'deduction', ['mail']);
+  if (r.reponseAttendue && !r.suspect) item('reponse', 2, 'Répondre à ' + (r.reponseAttendue.nom || r.reponseAttendue.de) + ' — « ' + r.objet + ' »' + (r.reponseAttendue.depuis ? ' (depuis ' + r.reponseAttendue.depuis + ' j)' : ''),
+    r.reponseAttendue.extrait, 'deduction', ['repondre', 'mail', 'rappel']);
+  for (const e of r.engagements) if (e.etat !== 'plus-tard')
+    item('engagement', e.etat === 'en-retard' ? 1 : 2, (e.etat === 'en-retard' ? 'En retard : ' : e.etat === 'aujourdhui' ? "Aujourd'hui : " : 'Bientôt : ') + 'tu as promis (' + e.libelle + ')', e.extrait, 'deduction', ['repondre', 'rappel']);
+  for (const e of r.echeances) if (e.jour >= auj - 1 && e.jour <= auj + 3)
+    item('echeance', e.jour <= auj ? 1 : 2, 'Échéance ' + (e.jour < auj ? 'passée' : e.jour === auj ? "aujourd'hui" : e.libelle) + ' — « ' + r.objet + ' »', e.extrait, 'deduction', ['rappel', 'repondre']);
+  if (r.relance) item('relance', 3, 'Sans réponse depuis ' + r.relance.jours + ' jours — « ' + r.objet + ' » : relancer ?', r.relance.extrait, 'deduction', ['repondre', 'rappel']);
+  for (const x of r.pjManquantes) if (x.de === 'autre') item('pj', 3, 'Pièce jointe annoncée mais absente — « ' + r.objet + ' »', x.extrait, 'fait', ['repondre']);
+  for (const c of r.contradictions) item('contradiction', 2, 'À vérifier — « ' + r.objet + ' » : ' + c.texte, (c.extraits || [])[0], 'deduction', ['repondre']);
+  for (const c of r.creneaux) item('creneau', 2, 'Rendez-vous proposé : ' + c.libelle + ' — « ' + r.objet + ' »', c.extrait, 'deduction', ['creneau', 'repondre']);
+  r.aGerer.sort((a, b) => a.priorite - b.priorite);
+  return r;
+}
+
+/* Tes adresses « connues » : celles a qui TU as ecrit dans les conversations lues */
+function contactsConnus(fils, moi) {
+  const s = new Set(), m0 = cleAdresse(moi);
+  for (const f of fils || []) for (const m of (f && f.messages) || [])
+    if (m && (m.moi || (m0 && cleAdresse(m.de && m.de.adresse) === m0))) for (const a of [].concat(m.a || [], m.cc || [])) s.add(cleAdresse(a));
+  return s;
+}
+
+module.exports = Object.freeze({ VERSION, analyser, contactsConnus, phrasesDe, montantsDe, distance, LIMITES });
