@@ -133,6 +133,7 @@ button.lien{background:none;border:none;color:var(--sourd);font-size:12px;
 .retenue .rang{display:flex;gap:7px}
 /* [S30-S32] carte de creation, Face ID, micro */
 .creation .evenement{margin:8px 0 4px;font-size:15px;font-weight:600;color:var(--texte,#e6edf3)}
+.creation .titre-evt{margin:8px 0 0;font-size:21px;font-weight:700;color:var(--texte,#e6edf3);overflow-wrap:anywhere}
 .creation .rang{display:flex;gap:7px;margin-top:10px}
 .elevation{margin-top:8px;padding:11px 13px;background:#101a2b;border:1px solid #1f3a5f;border-radius:8px}
 .elevation p{font-size:13px;margin-bottom:8px}
@@ -1052,7 +1053,9 @@ function rendreDecision(d) {
   if (d.decide === 'CONFIRMATION_REQUISE' && d.aConfirmer) {
     const a = d.aConfirmer;
     const hC = '<div class="decision attente creation"><div class="plan">' + (a.serie ? 'Créer une série dans ton agenda JARVIS' : 'Créer dans ton agenda JARVIS') + '</div>'
-      + '<div class="evenement">' + esc(a.lisible) + '</div>'
+      /* [S99] v4.11 le titre en gros (c'est lui qu'on vérifie d'abord), puis le jour et l'heure */
+      + (a.titre ? '<div class="titre-evt">' + esc(a.titre) + '</div>' : '')
+      + '<div class="evenement">' + esc(a.titre ? String(a.lisible || '').replace(' · ' + a.titre, '') : a.lisible) + '</div>'
       + '<div class="verdict"><b>À confirmer</b><span class="code">annulable ensuite</span></div>'
       + (allege()   /* [S90] l'info sous « + détail » ; les points à vérifier restent visibles */
         ? ((a.avertissements || []).length ? '<div class="signaux">' + a.avertissements.map(x => '<div class="signal fort ligne1">⚠ ' + esc(x) + '</div>').join('') + '</div>' : '')

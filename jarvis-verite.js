@@ -70,7 +70,7 @@
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const AG = require('./jarvis-agenda.js');
 
-const VERSION = '1.5';
+const VERSION = '1.6';
 const JOUR_MS = 86400000;
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const JOURS_COURTS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
@@ -425,7 +425,7 @@ function resoudreHeures(texte) {
  * meme a chaque fois (vu le 26 sept : « je peux seulement lire », puis « un
  * seul evenement a la fois », pour deux demandes semblables). */
 const RE_CREER = /(^| )(ajout|rajout|cree |creer|creez|mets |met |note |noter|notez|programm|planifi|inscri|bloqu|enregistr|cale |caler)/;
-const RE_SERIE = new RegExp('(^| )((tous|toutes) les (' + RE_JOURS + ')s?|(tous|toutes) les (jours|semaines|matins|soirs|deux semaines|15 jours|quinze jours)'
+const RE_SERIE = new RegExp('(^| )((tous|toutes|tout) les (' + RE_JOURS + ')s?|(tous|toutes|tout) les (jours|semaines|matins|soirs|deux semaines|15 jours|quinze jours)'
   + '|chaque (' + RE_JOURS + '|jour|semaine|matin|soir)|hebdomadaire|hebdo|quotidien|quotidienne|(' + RE_JOURS + ')s)( |$)');
 const creationDemandee = (texte) => RE_CREER.test(mots(texte));
 const RE_JOUR_SEUL = new RegExp('(^| )(' + RE_JOURS + ')s?(?! (1er|\\d))( |$)');
@@ -447,7 +447,7 @@ const VIDES_TITRE = new Set(('ajoute ajouter ajoutes rajoute rajouter cree creer
   + 'planifie planifier inscris inscrire bloque bloquer enregistre enregistrer cale caler un une le la les l de du des d a au aux pour sur dans en '
   + 'mon ma mes ton ta tes agenda calendrier evenement evenements que qu j je ai il y avoir stp svp s te plait jarvis moi me '
   + 'demain aujourd hui aujourdhui apres avant hier soir matin midi minuit prochain prochaine dernier derniere suivant suivante huit ce cet cette '
-  + 'pendant durant duree heure heures h min minute minutes mn demi demie et quart jusqu jusque entre vers partir semaine semaines jour jours tous toutes chaque '
+  + 'pendant durant duree heure heures h min minute minutes mn demi demie et quart jusqu jusque entre vers partir semaine semaines jour jours tous toutes tout chaque on '   /* [1.6] « tout les », « m'on » */
   + 'fin debut mi compter des hebdo hebdomadaire serie fois par lundis mardis mercredis jeudis vendredis samedis dimanches '   /* [1.2] series */
   + 'er ' + RE_JOURS.split('|').join(' ') + ' ' + RE_MOIS.split('|').join(' ')).split(' '));
 function titreTape(texte) {
@@ -457,12 +457,26 @@ function titreTape(texte) {
     const n = norm(mot).replace(/[^a-z0-9]+/g, ' ').trim();
     if (!n) continue;
     const parties = n.split(' ');
-    if (parties.every(x => VIDES_TITRE.has(x) || /^\d{1,2}(h\d{0,2}|:\d{2})?$/.test(x) || /^\d{4}$/.test(x) || /^(1er|\d{1,2})$/.test(x))) continue;
+    if (parties.every(x => VIDES_TITRE.has(x) || /^[a-z]$/.test(x) || /^\d{1,2}(h\d{0,2}|:\d{2})?$/.test(x) || /^\d{4}$/.test(x) || /^(1er|\d{1,2})$/.test(x))) continue;   /* [1.6] une lettre seule (« m'on ») n'est pas un titre */
     garde.push(mot.replace(/^[^\p{L}\d]+|[^\p{L}\d]+$/gu, ''));
   }
   const t = garde.filter(Boolean).slice(0, 6).join(' ').slice(0, 100).trim();
   return t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
 }
+
+/* [1.6] v4.11 UN TITRE VIENT DE TES MOTS. Vu en ligne (28 sept) : « Ajoute
+ * l'evenement a mon agenda pour mercredi 30 » (aucun titre tape) -> « hand »,
+ * pris par le modele dans les souvenirs. Un titre propose par le modele n'est
+ * garde que si chacun de ses mots (hors mots de liaison) est dans ce que la
+ * personne a tape ; sinon, le titre tape, ou la question « Quel titre ? ». */
+const motsDuTitre = (titre) => mots(titre).trim().split(' ').filter(w => w && !VIDES_TITRE.has(w)).map(w => w.replace(/(?<=..)s$/, ''));
+function titreDansMots(titre, texte) {
+  const a = motsDuTitre(titre); if (!a.length) return false;
+  const b = new Set(mots(texte).trim().split(' ').map(w => w.replace(/(?<=..)s$/, '')));
+  return a.every(w => b.has(w));
+}
+/* « meme chose tous les vendredis » : le titre renvoie au precedent (jamais pris tel quel) */
+const titreRepris = (titre) => /^ ((la|le|les) )?(memes? choses?|meme|pareil|pareille|idem|meme truc)( (qu|que) (avant|d habitude|mercredi|hier))? $/.test(mots(titre));
 
 /* --------------------------------- suppression d'autre chose : [1.1] -- */
 const RE_AUTRE_OBJET = /(^| )(fichier|fichiers|dossier|dossiers|mail|mails|e mail|email|emails|courriel|courriels|message|messages|facture|factures|paiement|paiements|virement|virements|photo|photos|document|documents|contact|contacts|souvenir|souvenirs|memoire|compte|comptes|envoi|envois)( |$)/;
@@ -518,9 +532,9 @@ function retirerMarque(texte) {
 /* Le texte, pour les series : minuscules, sans accents ni ponctuation. */
 const nettoye = (texte) => ' ' + norm(separer(texte).propres).replace(/['’]/g, ' ').replace(/[^a-z0-9\/: ]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
 const dernierDuMois = (y, mo) => jourDe(y, mo + 1, 1) - 1;
-const RE_FIN_CLAUSE = / jusqu(?:e|es)?( .*?)(?= tous | toutes | chaque | a partir | a compter | des le | a \d| de \d| vers \d| pour |$)/;
+const RE_FIN_CLAUSE = / jusqu(?:e|es)?( .*?)(?= tous | toutes | tout les | chaque | a partir | a compter | des le | a \d| de \d| vers \d| pour |$)/;
 const RE_DEBUT_CLAUSE = new RegExp(' (?:a partir|a compter|des(?= le | aujourd| demain| (?:' + RE_JOURS + ') | \\d))(?: du| de la| de l| de| d)?( .*?)(?= tous | toutes | chaque | jusqu| a \\d| de \\d| vers \\d| pour |$)');
-const RE_NON_HEBDO = / ((tous|toutes) les (jours|matins|soirs|mois|ans|deux semaines|15 jours|quinze jours)|chaque (jour|matin|soir|mois|annee)|quotidien|quotidienne|mensuel|mensuelle|une semaine sur deux|un .{0,12} sur deux) /;
+const RE_NON_HEBDO = / ((tous|toutes|tout) les (jours|matins|soirs|mois|ans|deux semaines|15 jours|quinze jours)|chaque (jour|matin|soir|mois|annee)|quotidien|quotidienne|mensuel|mensuelle|une semaine sur deux|un .{0,12} sur deux) /;
 /* une date de fin lue dans une expression (« au 19 decembre », « fin juin »,
  * « en juin », « la fin de l'annee ») ; bare = reponse nue : un jour de la
  * semaine seul n'y est jamais une fin. null si illisible. */
@@ -732,6 +746,7 @@ function retirerOffres(texte, { rouge = false, adressesLues = [] } = {}) {
 module.exports = Object.freeze({ VERSION, resoudreDates, dateUnique, tableDates, avertissementNuit, questionContradiction, questionDate,
   corrigerJours, retirerAffirmations, affirme, intentionSuppression, suppressionNue, titreNomme, resoudreHeures,
   creationDemandee, demandeSerie, parleAgenda, demandeAction, renonce, fusionner, texteFusion, mots,
-  titreTape, autreObjet, imiteServeur, retirerMarque, lireSerie, finNue, titreSerie,
+  titreTape, titreDansMots, titreRepris, autreObjet, imiteServeur,   /* [1.6] */
+  retirerMarque, lireSerie, finNue, titreSerie,
   demandesMultiples, corrigerMemoire, registreDe, retirerOffres, TEXTE_PAS_RETROUVE,   /* [1.4] */
   libelle, libellePeriode, local, iso, jourDe, jourSemaine, civil });

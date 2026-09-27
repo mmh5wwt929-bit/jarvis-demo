@@ -1637,9 +1637,22 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
   const avertissements = [];
   if (!plan.confirme) {
     const serie = plan.serie === true;   /* [S63] */
-    /* [S56] le titre du modele, sinon celui des mots tapes (« hand ») */
-    const titre = titreDe(plan.target) || (serie ? V.titreSerie(precedent || '', Date.now(), FUSEAU) || V.titreSerie(texte, Date.now(), FUSEAU)
-      : V.titreTape(precedent || '') || V.titreTape(texte));
+    /* [S56] le titre du modele, sinon celui des mots tapes (« hand ») ;
+     * [S99] v4.11 vu en ligne (28 sept) : « Ajoute l'evenement a mon agenda pour
+     * mercredi 30 » (aucun titre tape) -> « hand », pris par le modele dans les
+     * souvenirs ; « Ajoute meme choses tout les vendredis… » -> « Meme choses
+     * tout ». Le titre du modele n'est garde que s'il est dans TES mots ;
+     * « meme chose » reprend le titre de ta creation precedente (dit sur la
+     * carte) ; sinon « Quel titre ? ». Jamais un titre que tu n'as pas ecrit. */
+    const tape = serie ? V.titreSerie(precedent || '', Date.now(), FUSEAU) || V.titreSerie(texte, Date.now(), FUSEAU)
+      : V.titreTape(precedent || '') || V.titreTape(texte);
+    const propose = titreDe(plan.target);
+    let titre = propose && V.titreDansMots(propose, (precedent ? precedent + ' ' : '') + texte) ? propose : tape;
+    if (titre && V.titreRepris(titre)) {
+      const prec = [...s.creations.values()].filter(c => !c.supprime && c.titre).pop();
+      if (prec) { avertissements.push('« ' + titre + ' » : même titre que ta création précédente (« ' + prec.titre + ' »).'); titre = prec.titre; }
+      else titre = '';
+    }
     const q = serie ? quandSerie(texte, precedent) : quandTape(texte, precedent);
     const retenir = (attendTitre) => { s.questionCreation = { texte: String((precedent ? precedent + ' ' : '') + texte).slice(-300), titre: titre.slice(0, 100), attendTitre, serie, tour: tour || 0, ts: Date.now() }; };
     if (q.question) {
@@ -1647,12 +1660,14 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
        * seulement si le modele avait donne un titre -> « 18h » repartait de zero) */
       if (q.motif !== 'DATE_CONTRADICTOIRE' && !q.abandon) retenir(false);
       noterVerdict(s, { decide: 'SANS_OBJET', action: 'CREATE', target: propre(titre || '?', 60), motif: q.motif });
-      return dire(q.question + astuceMail(serie, precedent, q.motif), { decide: 'SANS_OBJET', etape: 'SERVEUR', motif: q.motif });
+      /* [S99] le titre manque aussi : demande en une fois (« 14h RDV Luc » suffit) */
+      const aussiTitre = !titre && !q.abandon && q.motif !== 'DATE_CONTRADICTOIRE' ? ' Et quel titre ? Je ne mets jamais un titre que tu n\'as pas écrit.' : '';
+      return dire(q.question + aussiTitre + astuceMail(serie, precedent, q.motif), { decide: 'SANS_OBJET', etape: 'SERVEUR', motif: q.motif });
     }
     if (!titre) {
       retenir(true);
       noterVerdict(s, { decide: 'SANS_OBJET', action: 'CREATE', target: '?', motif: 'TITRE_ABSENT' });
-      return dire('Quel titre pour ' + (serie ? 'cette série' : 'cet événement') + ' ? Réponds par exemple « entraînement U18 ».' + astuceMail(serie, precedent, 'TITRE_ABSENT'),
+      return dire('Quel titre pour ' + (serie ? 'cette série' : 'cet événement') + ' ? Je ne mets jamais un titre que tu n\'as pas écrit : réponds par exemple « entraînement U18 ».' + astuceMail(serie, precedent, 'TITRE_ABSENT'),   /* [S99] */
         { decide: 'SANS_OBJET', etape: 'SERVEUR', motif: 'TITRE_ABSENT' });
     }
     v = titre ? ECRITURE.validerCible(V.iso(q.jour) + 'T' + hhmm(q.debut.h, q.debut.mi) + '|' + q.duree + '|' + titre + (serie ? '|HEBDO:' + V.iso(q.derniere) : '')) : null;
@@ -1687,7 +1702,7 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
       : "Je te propose de créer dans l'agenda JARVIS : " + v.lisible + ". Vérifie la date et l'heure, puis touche « Créer ».")
       + (avertissements.length ? ' ' + avertissements.join(' ') : ''),
       { decide: 'CONFIRMATION_REQUISE', etape: 'G1_GESTE', motif: null, classe: 'COMPENSABLE', corrige,
-        aConfirmer: { action: 'CREATE', resource: 'AGENDA_JARVIS', cible: v.cle, lisible: v.lisible, avertissements, serie: v.serie ? v.serie.nb : 0 } });
+        aConfirmer: { action: 'CREATE', resource: 'AGENDA_JARVIS', cible: v.cle, lisible: v.lisible, titre: v.titre, avertissements, serie: v.serie ? v.serie.nb : 0 } });   /* [S99] le titre, en gros sur la carte */
   }
   const demande = g.demander({ action: 'CREATE', resource: 'AGENDA_JARVIS', target: v.cle },
     { manuel: true, compensation: v.serie ? "supprimer la série créée dans l'agenda JARVIS (toutes ses séances)" : "supprimer l'événement créé dans l'agenda JARVIS" });
@@ -2398,7 +2413,9 @@ async function preparerReponse(s, sessionId, jeton, consigne, o = {}) {
   if (depasse(s, o)) return refus('MESSAGE_DEPASSE', TEXTE_DEPASSE);
   let texte = '';
   if (r.ok) { try { const b = r.texte.replace(/```(?:json)?/g, '').trim(); const x = JSON.parse(b.slice(b.indexOf('{'), b.lastIndexOf('}') + 1)); texte = String(x.texte == null ? '' : x.texte); } catch { texte = ''; } }
-  if (!texte.trim()) return refus('REDACTION_IMPOSSIBLE', "Je n'ai pas pu rédiger la réponse" + (r.ok ? '' : ' (' + propre(r.erreur, 30) + ')') + ". Rien n'est préparé.");
+  /* [S100] v4.11 vu en ligne : « Dacc » -> « Je n'ai pas pu rédiger la réponse. » sans dire quoi faire */
+  if (!texte.trim()) return refus('REDACTION_IMPOSSIBLE', "Je n'ai pas pu rédiger la réponse" + (r.ok ? ' à partir de « ' + lisible(c, 60) + ' »' : ' (' + propre(r.erreur, 30) + ')') + ". Rien n'est préparé."
+    + (r.ok ? " Écris ce que tu veux dire en une phrase, par exemple « d'accord pour samedi 11h » ou « je ne suis pas disponible mercredi »." : ' Réessaie dans un instant.'));
   const liensPermis = GM.liensDe(c);
   const lienMail = GM.mailto({ a, objet, texte });
   const avertissements = alertes.concat(V.registreDe(texte) === 'mixte' ? ["La réponse mélange « tu » et « vous » : relis-la."] : []);
