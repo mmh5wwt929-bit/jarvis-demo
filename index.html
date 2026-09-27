@@ -624,17 +624,71 @@ function sessionRenouvelee() {
   tour('JARVIS', "La session avait expiré côté serveur : une nouvelle est ouverte, le plancher repart à zéro.", false);
 }
 
-async function api(chemin, corps, dejaRenouvele) {
+/* [S76] v4.9.1 REVEIL DE RENDER. L'instance gratuite s'endort apres 15 min sans
+ * visite ; la requete suivante la reveille (≈30 s, parfois 1 min). Au premier
+ * chargement, Render montre sa propre page d'attente. Page DEJA ouverte :
+ *  - une reponse qui tarde plus de 3 s : la page demande a /health (public,
+ *    sans IA) si le serveur est debout ; pas de reponse JSON en 2 s = il se
+ *    reveille, et JARVIS le dit (sinon, c'est l'IA qui reflechit : rien a dire) ;
+ *  - une page d'attente de Render (HTML) a la place de la reponse de l'API :
+ *    rien n'a ete traite par JARVIS ; la page attend le reveil, puis renvoie la
+ *    MEME requete, une seule fois. */
+const Reveil = (() => {
+  const reglages = { delaiMs: 3000, sondeMs: 2000, maxMs: 90000, pauseMs: 2000 };
+  let bulle = null, enCours = 0;
+  const attente = (ms) => new Promise(r => setTimeout(r, ms));
+  async function debout(ms) {
+    const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+    const t = ctl ? setTimeout(() => ctl.abort(), ms) : null;
+    try {
+      const r = await Promise.race([fetch(API + '/health', { cache: 'no-store', ...(ctl ? { signal: ctl.signal } : {}) }), attente(ms).then(() => null)]);
+      if (!r) return false;
+      const type = (r.headers && typeof r.headers.get === 'function' && r.headers.get('content-type')) || '';
+      if (!/json/i.test(type)) return false;
+      const j = await r.json();
+      return !!(j && j.status === 'ok');
+    } catch (e) { return false; } finally { if (t) clearTimeout(t); }
+  }
+  function montrer() {
+    if (bulle && bulle.isConnected) return;
+    bulle = tour('JARVIS', "JARVIS se réveille (≈30 s, parfois plus) : le serveur gratuit s'était endormi. Ta demande sera traitée dès qu'il est prêt.", false);
+    bulle.classList.add('reveil');
+  }
+  function retirer() { if (bulle && bulle.isConnected) bulle.remove(); bulle = null; }
+  /* une requete en cours : au-dela de 3 s, on regarde si c'est le reveil */
+  async function suivre(promesse) {
+    enCours++;
+    const t = setTimeout(async () => { if (enCours && !(await debout(reglages.sondeMs)) && enCours) montrer(); }, reglages.delaiMs);
+    try { return await promesse; } finally { clearTimeout(t); if (--enCours === 0) retirer(); }
+  }
+  /* page d'attente de Render recue : attendre que le serveur reponde, 90 s au plus */
+  async function attendre() {
+    montrer();
+    const t0 = Date.now();
+    while (Date.now() - t0 < reglages.maxMs) { if (await debout(Math.max(reglages.sondeMs, 4000))) { retirer(); return true; } await attente(reglages.pauseMs); }
+    retirer();
+    return false;
+  }
+  /* une page HTML a la place de la reponse JSON d'une route /api/ : c'est Render */
+  const pageDAttente = (r) => { const type = (r && r.headers && typeof r.headers.get === 'function' && r.headers.get('content-type')) || ''; return /text\/html/i.test(type); };
+  return { reglages, suivre, attendre, debout, pageDAttente };
+})();
+
+async function api(chemin, corps, dejaRenouvele, dejaReveille) {
   await assurerSession();
   const utilise = sid;
   const o = corps ? { method:'POST', headers:{'Content-Type':'application/json'},
                       body: JSON.stringify({ ...corps, sessionId: utilise }) } : {};
-  const r = await versServeur(API + chemin + (corps ? '' : (chemin.includes('?') ? '&' : '?')
-                        + 'sessionId=' + encodeURIComponent(utilise)), o);
+  const r = await Reveil.suivre(versServeur(API + chemin + (corps ? '' : (chemin.includes('?') ? '&' : '?')
+                        + 'sessionId=' + encodeURIComponent(utilise)), o));   /* [S76] */
+  if (Reveil.pageDAttente(r)) {   /* [S76] rien n'a ete traite : on attend le reveil, puis on renvoie UNE fois */
+    if (!dejaReveille && await Reveil.attendre()) return api(chemin, corps, dejaRenouvele, true);
+    throw new Error('le serveur ne se réveille pas, réessaie dans une minute');
+  }
   const d = await r.json();
   if (d && d.erreur === 'SESSION_INCONNUE' && !dejaRenouvele) {
     if (sid === utilise) { sid = null; await assurerSession(); sessionRenouvelee(); }
-    return api(chemin, corps, true);
+    return api(chemin, corps, true, dejaReveille);
   }
   return d;
 }

@@ -581,6 +581,44 @@ https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts
     await t('ML14', "page : carte Gmail → « Ouvrir dans Mail » ferme la carte du compte d'essai (plus de double envoi) et le dit ; aucune requête", async () =>
       ({ ok: !!aG && cG.dataset.utilisee === '1' && cG.querySelector('input.cible').disabled && /Ouvert dans Mail/.test(cG.textContent) && P2.envois.length === nAvant,
          info: aG ? 'utilisee=' + cG.dataset.utilisee : 'pas de lien' }));
+    /* W [S76] le reveil de Render */
+    const reveil = async (o) => {
+      const P = await page({ routes: o.routes }); pages.push(P);
+      Object.assign(P.w.eval('Reveil').reglages, o.reglages || {});
+      P.$('msg').value = o.message || 'bonjour'; P.clic(P.$('envoyer'));
+      return P;
+    };
+    const bulleReveil = (P) => [...P.d.querySelectorAll('#fil .tour')].find(x => /JARVIS se réveille \(≈30 s/.test(x.textContent));
+    const chats = (P) => P.envois.filter(x => /\/api\/chat/.test(x.u));
+    const W1 = await reveil({ reglages: { sondeMs: 500 }, routes: async (u) => u.includes('/api/chat') ? (await dort(4700), { decide: 'SANS_OBJET', etape: 'CONVERSATION', reponse: 'Bien reçu.', plan: { action: 'AUCUNE' } })
+      : /\/health$/.test(u) ? (await dort(3000), { status: 'ok' }) : undefined });
+    await dort(4000);
+    const pendantW1 = !!bulleReveil(W1);
+    await dort(1300);
+    await t('W1', "page déjà ouverte : réponse > 3 s ET /health muet → « JARVIS se réveille (≈30 s…) » ; la bulle disparaît à l'arrivée de la réponse", async () =>
+      ({ ok: pendantW1 && !bulleReveil(W1) && /Bien reçu/.test(W1.$('fil').textContent), info: 'pendant ' + pendantW1 + ', après ' + !!bulleReveil(W1) }));
+    const W2 = await reveil({ reglages: { sondeMs: 500 }, routes: async (u) => u.includes('/api/chat') ? (await dort(4300), { decide: 'SANS_OBJET', etape: 'CONVERSATION', reponse: 'Réfléchi.', plan: { action: 'AUCUNE' } })
+      : /\/health$/.test(u) ? { status: 'ok' } : undefined });
+    await dort(3900);
+    const pendantW2 = !!bulleReveil(W2);
+    await dort(700);
+    await t('W2', "garde : réponse lente mais serveur debout (/health répond) → pas de « se réveille » (c'est l'IA qui réfléchit)", async () =>
+      ({ ok: !pendantW2 && !bulleReveil(W2) && /Réfléchi/.test(W2.$('fil').textContent), info: 'bulle ' + pendantW2 }));
+    let nH = 0, nC = 0;
+    const W3 = await reveil({ message: 'quel temps demain ?', reglages: { sondeMs: 300, pauseMs: 100 }, routes: async (u) => {
+      if (u.includes('/api/chat')) return ++nC === 1 ? { __brut: '<!doctype html><title>Service waking up</title>' } : { decide: 'SANS_OBJET', etape: 'CONVERSATION', reponse: 'Beau temps.', plan: { action: 'AUCUNE' } };
+      if (/\/health$/.test(u)) return ++nH < 2 ? { __brut: '<!doctype html>' } : { status: 'ok' };
+      return undefined; } });
+    await dort(1500);
+    const c3 = chats(W3);
+    await t('W3', "page d'attente de Render (HTML) à la place de la réponse : la page attend le réveil puis renvoie la MÊME demande, une fois ; pas de « injoignable »", async () =>
+      ({ ok: c3.length === 2 && c3.every(x => x.message === 'quel temps demain ?') && /Beau temps/.test(W3.$('fil').textContent) && !/injoignable/.test(W3.$('fil').textContent) && !bulleReveil(W3),
+         info: c3.length + ' envoi(s) ; ' + [...W3.d.querySelectorAll('#fil .tour')].pop().textContent.slice(0, 40) }));
+    const W4 = await reveil({ reglages: { sondeMs: 200, pauseMs: 100, maxMs: 800 }, routes: async (u) => u.includes('/api/chat') || /\/health$/.test(u) ? { __brut: '<!doctype html>' } : undefined });
+    await dort(1800);
+    await t('W4', "serveur qui ne se réveille pas : la page abandonne au bout du délai et le dit (une seule demande envoyée, pas de boucle)", async () =>
+      ({ ok: chats(W4).length === 1 && /ne se réveille pas/.test(W4.$('fil').textContent) && !bulleReveil(W4), info: chats(W4).length + ' envoi(s) ; ' + [...W4.d.querySelectorAll('#fil .tour')].pop().textContent.slice(0, 60) }));
+
     /* D [S74] la page dit ce qui n'est pas fait */
     const P3 = await page({ routes: (u) => u.includes('/api/chat') ? { decide: 'PREPARE', etape: 'MAIL_OUVRIR', outil: 'mailto', aOuvrir: { a: 'paul@exemple.fr', objet: 'o', texte: 't', mailto: 'mailto:paul@exemple.fr?subject=o&body=t' },
       nonFait: { texte: "Une seule action par message : ci-dessus, JARVIS ne traite que l'e-mail. Pas fait : l'ajout à l'agenda (« ajoute-le à mon agenda »)." } } : undefined });
