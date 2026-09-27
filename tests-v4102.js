@@ -189,17 +189,22 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
   await t('R1', "« à gérer » relu après ça : agenda ET boîte lus (avant : « Agenda non lu (CONTEXTE_NON_DECLARE) », « Boîte non lue : échec »)", async () =>
     ({ ok: !erreurs(g1).length && items(g1, 'Mails').some(x => x.type === 'creneau') && items(g1, 'Agenda').length > 0,
        info: erreurs(g1).map(x => x.texte).join(' | ').slice(0, 160) || resume(g1) }));
+  /* un vrai toucher prend plus d'une seconde : le noyau plafonne 20 decisions par seconde et par session */
+  avance += 1100;
   const f1 = itR.fil ? await appel('/api/mail/fil', { sessionId: sid, jeton: itR.fil }) : {};
   await t('R2', "« Voir la conversation » : relue, par une lecture GOUVERNÉE (une transaction par fil)", async () =>
     ({ ok: f1.ok === true && (f1.messages || []).length === 3 && Array.isArray(f1.transactions) && f1.transactions.length === 1 && /^tx_/.test(String(f1.transactions[0])),
        info: (f1.code || '') + ' ' + String(f1.message || '').slice(0, 80) + ' ; tx ' + JSON.stringify(f1.transactions || null) }));
+  avance += 1100;
   const c1 = itC.fil ? await appel('/api/gerer/creneau', { sessionId: sid, jeton: itC.fil, index: itC.creneau }) : {};
   await t('R3', "« Vérifier dans mon agenda » : vérifié (avant : « Agenda non lu (CONTEXTE_NON_DECLARE) : je ne peux pas dire si tu es libre »)", async () =>
     ({ ok: c1.ok === true && c1.libre === true, info: (c1.code || '') + ' ' + String(c1.message || c1.libelle || '').slice(0, 90) }));
+  avance += 1100;
   W.reponses.push(brouillon('Bonjour Luc,\n\nJe confirme ma présence samedi à 11h.\n\nÀ bientôt.'));
   const r2 = itR.fil ? await appel('/api/mail/repondre', { sessionId: sid, jeton: itR.fil, consigne: 'confirme ma présence samedi à 11h' }) : {};
   await t('R4', "une 2e « Préparer une réponse » dans la même session : préparée (avant : « Conversation non relue »)", async () =>
     ({ ok: !!r2.aRetaper && /11h/.test(r2.aRetaper.texte || ''), info: (r2.code || '') + ' ' + String(r2.message || '').slice(0, 90) }));
+  avance += 1100;
   const p1 = await appel('/api/point-du-jour', { sessionId: sid, souvenirs: [] });
   await t('R5', "le point du jour demandé dans cette session : agenda lu (avant : « Le noyau a refusé la lecture (CONTEXTE_NON_DECLARE) »)", async () =>
     ({ ok: p1.ok === true && Array.isArray(p1.jours), info: (p1.code || '') + ' ' + String(p1.message || '').slice(0, 90) }));
