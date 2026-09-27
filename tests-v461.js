@@ -99,7 +99,8 @@ const lancer = async (dir, env = {}) => {
 const santeDe = async (dir, env) => { const s = await lancer(dir, env); s.arreter(); return s.sante; };
 const ESSENTIELS = ['server.js', 'index.html', 'package.json', 'MANIFESTE.json', 'jarvis-5.28.3.js', 'jarvis-plus-5.29.js',
   'jarvis-vigilance.js', 'jarvis-memoire.js', 'jarvis-agenda.js', 'jarvis-ecriture.js', 'jarvis-elevation.js', 'jarvis-manifeste.js',
-  'jarvis-verite.js', 'jarvis-appli.js', 'jarvis-gmail.js'];   /* v4.6.7 : le module verite ; v4.7 : l'appli ; v4.9 : gmail */
+  'jarvis-verite.js', 'jarvis-appli.js', 'jarvis-gmail.js',   /* v4.6.7 : le module verite ; v4.7 : l'appli ; v4.9 : gmail */
+  'confidentialite.html', 'conditions.html'];   /* v4.9.1 : pages exigees par Google */
 const copie = () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-v461-'));
   for (const f of ESSENTIELS) if (fs.existsSync(path.join(DIR, f))) fs.copyFileSync(path.join(DIR, f), path.join(d, f));

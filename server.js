@@ -339,6 +339,18 @@ function cleAcceptee(req) {
   return { ok: false, code: 401, erreur: 'CLE_REQUISE' };
 }
 
+/* [S70] v4.9.1 PAGES PUBLIQUES exigees par Google pour publier l'appli OAuth
+ * en Production (liens « confidentialite » et « conditions » sur un domaine
+ * autorise). Fichiers fixes du depot, dans le manifeste, lus une fois ; sans
+ * aucun script. Absents : 404 (le manifeste dit « manquant »). */
+const PAGES_PUBLIQUES = (() => {
+  const o = new Map();
+  for (const [chemin, f] of [['/confidentialite', 'confidentialite.html'], ['/conditions', 'conditions.html']])
+    try { o.set(chemin, fs.readFileSync(path.join(__dirname, f))); } catch { /* absent */ }
+  return o;
+})();
+const CSP_PAGE_FIXE = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+
 /* [S13] CSP par empreinte : seuls les scripts presents dans index.html au
  * deploiement peuvent s'executer. */
 function cspPour(html) {
@@ -2315,6 +2327,16 @@ const serveur = http.createServer((req, res) => {
     if (f && f.corps) {
       res.writeHead(200, { 'Content-Type': f.type, 'Content-Length': f.corps.length, 'Cache-Control': 'public, max-age=86400' });
       return res.end(req.method === 'HEAD' ? undefined : f.corps);
+    }
+  }
+
+  /* [S70] regles de confidentialite et conditions : publiques, comme la page */
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    const pf = PAGES_PUBLIQUES.get(u.pathname.replace(/(?:\.html|\/)$/, ''));
+    if (pf) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': pf.length, 'Content-Security-Policy': CSP_PAGE_FIXE,
+        'Cache-Control': 'public, max-age=3600' });
+      return res.end(req.method === 'HEAD' ? undefined : pf);
     }
   }
 
