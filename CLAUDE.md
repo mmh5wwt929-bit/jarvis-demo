@@ -1,11 +1,12 @@
 # JARVIS — consignes pour Claude (dépôt public : aucun secret, aucune adresse privée)
 
-## État (branche `Racine`, après fusion de la PR v4.10.1)
-- Passerelle **v4.10.1** (avant : v4.10) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
+## État (branche `Racine`, après fusion de la PR v4.10.2)
+- Passerelle **v4.10.2** (avant : v4.10.1) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
 - Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.3, `jarvis-verite.js` 1.5, `jarvis-analyse.js` 1.1.
 - v4.9.1 : « Ouvrir dans Mail » (mailto:), demande double dite, historique 12 échanges, pages `/confidentialite` et `/conditions`.
 - v4.10 : « qu'est-ce que j'ai à gérer ? » (agenda + conversations + notes, sans IA), conversations entières, réponse dans la conversation, créneau vérifié contre l'agenda, rappels, sauvegarde des souvenirs (fichier).
 - v4.10.1 : fils Gmail regroupés (objet normalisé + même correspondant, 4 au plus), DMARC (1er en-tête Authentication-Results), offres d'agenda retirées, interface allégée sur l'instance privée (« Tout afficher »), lecture 4 par 4, « Repartir au vert », carte périmée relue, « à gérer » dans le point du jour.
+- v4.10.2 : lectures du serveur déclenchées par un toucher passent après une réponse + un message tapé (option `manuel`, READ seulement) ; lecture incomplète jamais « rien d'urgent » (carte orange, pas de cache d'échec) ; source d'agenda non lue nommée, créneau jamais « libre » dans ce cas ; compteurs honnêtes.
 - Render déploie `Racine` seulement « After CI Checks Pass ».
 - Deux services, même code :
   - démo publique (sans `JARVIS_CLE_ACCES`) : **jamais** de variable Gmail, agenda ou élévation ;
@@ -42,6 +43,8 @@
 - Authentification d'un e-mail : seul le PREMIER en-tête `Authentication-Results` (signé `mx.google.com`) compte ; DMARC ne rabaisse une alerte « sensible » que pour un grand service (jamais une messagerie ouverte à tous), sans urgence ni autre alerte forte. Un mail suspect n'offre ni réponse, ni rappel, ni créneau.
 - Interface allégée (instance privée) : jamais replié — le verdict, le mot « suspect », un vrai e-mail (destinataire, objet, texte), Face ID, l'adresse à retaper, Annuler / Confirmer.
 - Une action par message : ce qui n'est pas fait est dit par le serveur ; le modèle ne propose jamais d'agir à la place de la personne.
+- Option `manuel` de la couche : seulement pour un geste du serveur (carte « Créer », envoi retapé, lectures déclenchées par un toucher avec une cible fixée par le serveur). Jamais pour un plan du modèle : il garde son sceau de contexte.
+- Une lecture en échec ou incomplète ne s'affiche jamais comme « rien » : elle le dit, et n'est pas gardée en cache.
 - Fermé par défaut : une variable mal réglée désactive l'outil et `/health` le dit ; jamais de repli silencieux vers la simulation.
 - Aucun secret (clé, jeton, client OAuth, code) dans un commit, un journal, une capture, un message ou une réponse d'API.
 
@@ -52,6 +55,7 @@
 - Tests de mutation : casser chaque correctif à la main → au moins un test doit tomber.
 - `node jarvis-manifeste.js --ecrire` après toute modification d'un fichier du manifeste, puis `--verifier`.
 - Lancer les suites : `npm install --no-save jsdom` puis `for f in tests-*.js; do node "$f" || echo "ECHEC $f"; done`.
+- Le noyau plafonne 20 décisions par seconde et par session (DRY_RUN_RATE_LIMITED) : dans un test, espacer les touchers (`avance += 1100`).
 - Livrer `PROGRESSION-vX.md` : tests à faire en ligne (iPhone, Safari) et réglages Render.
 
 ## Style de réponse attendu
