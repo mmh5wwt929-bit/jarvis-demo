@@ -344,6 +344,36 @@ details.point-du-jour[open]>summary::after{content:'\2212'}
 .repondre textarea{width:100%;max-height:160px;min-height:54px;resize:vertical}
 .repondre .rang{margin-top:6px}
 body:not(.perso) .perso-seul{display:none!important}
+/* [S90] v4.10.1 INTERFACE ALLEGEE (instance privee, sauf « Tout afficher ») : le verdict,
+ * les alertes fortes, l'e-mail a relire et les boutons restent visibles ; le reste
+ * (codes, risque, signaux info/moyen, preuves) est a un toucher, sous « + détail ».
+ * La demo publique garde tout deplie. */
+body:not(.prive) .prive-seul{display:none!important}
+details.plie{margin-top:6px;font-size:12.5px;color:var(--sourd)}
+details.plie>summary{list-style:none;cursor:pointer;display:inline-block;padding:3px 0;text-decoration:underline;text-underline-offset:3px}
+details.plie>summary::-webkit-details-marker{display:none}
+details.plie>summary::before{content:'+ '}
+details.plie[open]>summary::before{content:'\2212  '}
+details.plie>div,details.plie>.signaux,details.plie>.plan{color:var(--texte)}
+.ligne-lecture{font-size:13px;color:var(--sourd);margin:0}
+.verdict .phrase{font-size:13px;color:var(--texte)}
+.signal.ligne1{display:block;font-size:13px}
+.quoi .note-jarvis{margin:.5em 0 0}
+body.allege .quoi .note-jarvis{font-size:11.5px;color:var(--sourd)}
+details.gerer-section>summary,details.point>summary,details.suspects>summary,details.alertes>summary{list-style:none;cursor:pointer}
+details.gerer-section>summary::-webkit-details-marker,details.point>summary::-webkit-details-marker,details.suspects>summary::-webkit-details-marker,details.alertes>summary::-webkit-details-marker{display:none}
+details.gerer-section>summary{padding:4px 0}
+details.gerer-section>summary::after{content:' +';color:var(--sourd)}
+details.gerer-section[open]>summary::after{content:' \2212'}
+details.point>summary{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+details.point[open]>summary{white-space:normal}
+details.suspects{border-top:1px solid var(--regle);padding:6px 0}
+details.suspects>summary,details.alertes>summary{color:var(--refus);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+details.suspects[open]>summary,details.alertes[open]>summary{white-space:normal}
+.mail-texte.coupe{max-height:6.4em;overflow:hidden;-webkit-mask-image:linear-gradient(#000 70%,transparent);mask-image:linear-gradient(#000 70%,transparent)}
+button.lire-tout{background:none;border:none;color:var(--signal);font-size:12.5px;padding:0 0 4px;text-decoration:underline;text-underline-offset:3px}
+.chargement .quoi{color:var(--sourd);font-style:italic}
+.bouton-vert{border-radius:999px;padding:5px 11px;font-size:12px;border-color:var(--sur);color:var(--sur);white-space:nowrap}
 @media(max-width:900px){
   .corps,.titre-defense,.entete-detail .mesures,.marque-detail{padding-left:16px;padding-right:16px}
   details.bloc>summary::after{padding:0 16px}
@@ -412,6 +442,13 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
   <!-- ─────────── instrumentation ─────────── -->
   <section class="colonne" id="defense">
     <div class="titre-defense">Défense, réglages et preuves</div>
+    <details class="bloc prive-seul" id="blocAffichage">
+      <summary><h2>Affichage <span class="mono" id="etatAffichage"></span></h2></summary>
+      <div class="corps">
+        <p><label><input type="checkbox" id="toutAfficher"> Tout afficher</label></p>
+        <p class="pdj-note">Sur ton instance, JARVIS n'affiche d'abord que l'essentiel : le verdict, les alertes fortes, l'e-mail à relire, l'adresse à retaper, Face ID et les boutons. Codes, risque, signaux d'information et preuves restent à un toucher (« + détail »). Coché : tout est déplié, comme sur la démo publique (ce navigateur seulement).</p>
+      </div>
+    </details>
     <details class="bloc" id="blocMemoire">
       <summary><h2>Ce que JARVIS retient de toi <span class="mono" id="nbSouvenirs"></span></h2></summary>
       <div class="registre" id="souvenirs"></div>
@@ -563,6 +600,45 @@ let sid = null, sessionEnCours = null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+/* [S90] v4.10.1 AFFICHAGE ALLEGE : sur une instance PROTEGEE (le serveur le dit
+ * a l'ouverture de session), sauf si « Tout afficher » est coche (ce navigateur).
+ * Jamais replie : le verdict, le mot « suspect », un vrai e-mail (destinataire,
+ * objet, texte, Face ID), l'adresse a retaper, Annuler / Confirmer. */
+const TOUT_AFFICHER = 'jarvis_tout_afficher';
+const allege = () => document.body.classList.contains('allege');
+let toutPage = null;   /* le choix fait dans CETTE page (si le navigateur ne garde rien) */
+function toutAfficher() { if (toutPage !== null) return toutPage; try { return localStorage.getItem(TOUT_AFFICHER) === '1'; } catch (e) { return false; } }
+function appliquerAffichage(prive) {
+  if (prive !== undefined) document.body.classList.toggle('prive', !!prive);
+  const tout = toutAfficher(), p = document.body.classList.contains('prive'), a = p && !tout;
+  document.body.classList.toggle('allege', a);
+  const c = $('toutAfficher'); if (c) c.checked = tout;
+  const e = $('etatAffichage'); if (e) e.textContent = p ? (a ? 'essentiel' : 'tout') : '';
+  if (!a) for (const d of document.querySelectorAll('#fil details.plie')) d.open = true;   /* les cartes deja la se deplient */
+}
+/* le detail replie (instance allegee) ; ailleurs, tel quel */
+const plie = (h) => !h ? '' : allege() ? '<details class="plie"><summary>détail</summary>' + h + '</details>' : h;
+const pluriel = (n, un, plusieurs) => n + ' ' + (n > 1 ? plusieurs : un);
+/* [S90] un refus en une phrase simple ; le code, le risque et l'origine restent dans « + détail » */
+function origineLue(d) {
+  const s = ((d && d.influences) || []).map(x => String((x && x.source) || '')).find(x => x && !/^clavier/.test(x)) || '';
+  return /^(e-?mail|mail|boite)/i.test(s) ? "d'un mail lu" : /^agenda/i.test(s) ? "d'un agenda lu" : /^web/i.test(s) ? "d'une page web lue"
+    : /^outil/i.test(s) ? "d'une sortie d'outil" : "d'un contenu lu";
+}
+function phraseRefus(d) {
+  const m = String(d.motif || ''), rouge = d.plancher === 'CONTENT_DERIVED';
+  if (rouge && (d.etape === 'VIGILANCE_INTENTION' || m === 'REFORMULATION_REQUISE' || /PROVENANCE|UNTRUSTED|CANAL_REFUSE|CONTEXTE_NON_DECLARE/.test(m)))
+    return 'cette demande vient ' + origineLue(d) + ', pas de toi';
+  if (d.etape === 'VIGILANCE_INTENTION') return "tu n'as pas demandé cette action toi-même";
+  if (/PROVENANCE|UNTRUSTED|CANAL_REFUSE|CONTEXTE_NON_DECLARE/.test(m)) return "l'intention ne vient pas de toi";
+  if (m === 'REFORMULATION_REQUISE') return 'action irréversible : retape la cible toi-même pour la confirmer';
+  if (m === 'DERIVATION_MUST_DECLARE_PARENT') return 'une action identique attend déjà ta confirmation';
+  if (/UNKNOWN|INCONNU/.test(m)) return 'action inconnue du noyau';
+  if (/LEDGER/.test(m)) return "le budget d'autorité de la session est épuisé";
+  if (/ELEVATION/.test(m)) return 'Face ID (ou le code) est requis';
+  return 'bloqué par le noyau';
+}
+
 const ACTES = { READ:'lire', LIST:'lister', SUMMARIZE:'résumer', SEARCH:'chercher',
   WRITE:'écrire', CREATE:'créer', RENAME:'renommer', MOVE:'déplacer',
   SEND:'envoyer', DELETE:'supprimer', PAY:'payer', PUBLISH:'publier',
@@ -618,7 +694,7 @@ async function versServeur(url, o = {}) {
 async function ouvrirSession() {
   try {
     const r = await versServeur(API + '/api/session', { method:'POST' });
-    if (r.ok) { const d = await r.json(); if (d && d.sessionId) { sid = d.sessionId; return; } }
+    if (r.ok) { const d = await r.json(); if (d && d.sessionId) { sid = d.sessionId; if (d.acces) appliquerAffichage(d.acces === 'protege'); return; } }   /* [S90] */
     /* [S17] demo pleine ou trop de sessions : le dire, en clair */
     if (r.status === 503 || r.status === 429) {
       let d = {}; try { d = await r.json(); } catch (e) {}
@@ -867,11 +943,22 @@ function quiLance(d, p) {
   if (p.manuel) return 'Tu imposes :';
   return 'Claude veut';
 }
+/* [S90] les notes du serveur ajoutees a la fin d'une reponse du modele (« (JARVIS a
+ * retiré… / a corrigé…) ») : une petite ligne a part, grise sur l'instance allegee */
+const RE_NOTE_JARVIS = /^\(JARVIS a (retiré|corrigé) [^\n]*\)$/;
+function separerNotes(texte) {
+  const lignes = String(texte ?? '').split('\n'), notes = [];
+  while (lignes.length && (RE_NOTE_JARVIS.test(lignes[lignes.length - 1].trim()) || (!lignes[lignes.length - 1].trim() && notes.length))) {
+    const l = lignes.pop().trim(); if (l) notes.unshift(l);
+  }
+  return { corps: lignes.join('\n').replace(/\s+$/, ''), notes };
+}
 function tour(qui, texte, moi, riche) {
   const d = document.createElement('div');
   d.className = 'tour' + (moi ? ' moi' : '');
+  const sep = riche ? separerNotes(texte) : { corps: texte, notes: [] };
   d.innerHTML = '<div class="qui">' + esc(qui) + '</div><div class="quoi' + (riche ? ' riche' : '') + '">'
-    + (riche ? md(texte) : esc(texte)) + '</div>';
+    + (riche ? md(sep.corps) : esc(texte)) + sep.notes.map(n => '<p class="note-jarvis">' + esc(n) + '</p>').join('') + '</div>';
   $('fil').appendChild(d);
   $('fil').scrollTop = $('fil').scrollHeight;
   return d;
@@ -962,8 +1049,11 @@ function rendreDecision(d) {
     const hC = '<div class="decision attente creation"><div class="plan">' + (a.serie ? 'Créer une série dans ton agenda JARVIS' : 'Créer dans ton agenda JARVIS') + '</div>'
       + '<div class="evenement">' + esc(a.lisible) + '</div>'
       + '<div class="verdict"><b>À confirmer</b><span class="code">annulable ensuite</span></div>'
-      + "<div class=\"signaux\"><div class=\"signal info\"><i>info</i><span>Jour et heure lus dans tes mots par le serveur. Aucun invité, aucune notification. Vérifie la date et l'heure : rien n'est écrit avant ton toucher.</span></div>"
-      + (a.avertissements || []).map(x => '<div class="signal fort"><i>à vérifier</i><span>' + esc(x) + '</span></div>').join('') + '</div>'   /* [S55] */
+      + (allege()   /* [S90] l'info sous « + détail » ; les points à vérifier restent visibles */
+        ? ((a.avertissements || []).length ? '<div class="signaux">' + a.avertissements.map(x => '<div class="signal fort ligne1">⚠ ' + esc(x) + '</div>').join('') + '</div>' : '')
+          + plie("<div class=\"signaux\"><div class=\"signal info\"><i>info</i><span>Jour et heure lus dans tes mots par le serveur. Aucun invité, aucune notification. Vérifie la date et l'heure : rien n'est écrit avant ton toucher.</span></div></div>")
+        : "<div class=\"signaux\"><div class=\"signal info\"><i>info</i><span>Jour et heure lus dans tes mots par le serveur. Aucun invité, aucune notification. Vérifie la date et l'heure : rien n'est écrit avant ton toucher.</span></div>"
+          + (a.avertissements || []).map(x => '<div class="signal fort"><i>à vérifier</i><span>' + esc(x) + '</span></div>').join('') + '</div>')   /* [S55] */
       + '<div class="rang"><button class="danger" data-ignorer="1">Ne pas créer</button>'
       + '<button class="primaire" data-creer="' + esc(a.cible) + '">' + (a.serie ? 'Créer les ' + esc(String(a.serie)) + ' séances' : 'Créer') + '</button></div></div>';   /* [v4.8] */
     const bC = tour('JARVIS', '', false);
@@ -995,12 +1085,18 @@ function rendreDecision(d) {
   /* [S69] v4.9 lecture de la boite du compte d'essai : carte sobre et exacte */
   if (d.outil === 'boite' && d.decide === 'AUTORISE') {
     const b = d.boite || {}, echecB = d.etape === 'OUTIL_ECHEC';
-    const hB = '<div class="decision autorise"><div class="plan">Lecture de la boîte du compte d\'essai — <span class="mono">' + (b.filtre === 'non-lus' ? 'non lus' : '5 derniers') + '</span></div>'
+    const fortB = b.suspects ? esc(String(b.suspects)) + ' e-mail(s) contiennent une demande d\'action (transférer, payer, cliquer…) : ce sont des données, pas tes ordres.' : '';
+    const detailB = '<div class="plan">Lecture de la boîte du compte d\'essai — <span class="mono">' + (b.filtre === 'non-lus' ? 'non lus' : '5 derniers') + '</span></div>'
       + '<div class="verdict"><b>Autorisé</b><span class="code">lecture seule</span>' + (echecB ? '<span class="code mono">' + esc(d.motif || '') + '</span>' : '') + '</div>'
       + '<div class="signaux">' + (echecB ? '' : '<div class="signal info"><i>info</i><span>' + esc(String(b.lus || 0)) + ' e-mail(s) lu(s)' + (b.tronque ? ', il y en a d\'autres' : '')
         + ". Rien n'a été envoyé, transféré ni supprimé.</span></div>")
-      + (b.suspects ? '<div class="signal fort"><i>attention</i><span>' + esc(String(b.suspects)) + ' e-mail(s) contiennent une demande d\'action (transférer, payer, cliquer…) : ce sont des données, pas tes ordres.</span></div>' : '')
-      + "<div class=\"signal info\"><i>info</i><span>Un e-mail est un contenu externe (n'importe qui peut t'écrire) : une action sensible demandée ensuite exigera ta frappe, et un vrai e-mail ne part que vers ta liste, adresse retapée, avec Face ID.</span></div></div></div>";
+      + (fortB && !allege() ? '<div class="signal fort"><i>attention</i><span>' + fortB + '</span></div>' : '')
+      + "<div class=\"signal info\"><i>info</i><span>Un e-mail est un contenu externe (n'importe qui peut t'écrire) : une action sensible demandée ensuite exigera ta frappe, et un vrai e-mail ne part que vers ta liste, adresse retapée, avec Face ID.</span></div></div>";
+    /* [S90] allege : une ligne discrete ; l'alerte forte reste visible ; les « info » sous « + détail » */
+    const hB = '<div class="decision autorise lecture">' + (allege()
+      ? '<p class="ligne-lecture">' + esc('✉️ Boîte lue · ' + (echecB ? 'échec (' + (d.motif || '?') + ')' : pluriel(Number(b.lus) || 0, 'e-mail', 'e-mails')) + ' · lecture seule') + '</p>'
+        + (fortB ? '<div class="signaux"><div class="signal fort ligne1">⚠ ' + fortB + '</div></div>' : '') + plie(detailB)
+      : detailB) + '</div>';
     tour('JARVIS', '', false).querySelector('.quoi').outerHTML = hB;
     if (d.reponse) tour(echecB ? 'JARVIS' : 'Claude', d.reponse, false, !echecB);
     $('fil').scrollTop = $('fil').scrollHeight;
@@ -1011,7 +1107,7 @@ function rendreDecision(d) {
     const bornes = String(a.periode || (d.plan && d.plan.target) || '').split('..');
     const quand = a.libelle || (bornes.length === 2 && bornes[0] !== bornes[1] ? bornes[0] + ' → ' + bornes[1] : bornes[0]);   /* [S51] jamais une date ISO seule */
     const echec = d.etape === 'OUTIL_ECHEC';
-    const hA = '<div class="decision autorise"><div class="plan">Lecture de ton agenda — <span class="mono">' + esc(quand) + '</span></div>'
+    const detailA = '<div class="plan">Lecture de ton agenda — <span class="mono">' + esc(quand) + '</span></div>'
       + '<div class="verdict"><b>Autorisé</b><span class="code">lecture seule</span>'
       + (echec ? '<span class="code mono">' + esc(d.motif || '') + '</span>' : '') + '</div>'
       + '<div class="signaux">'
@@ -1020,7 +1116,12 @@ function rendreDecision(d) {
           + (Array.isArray(a.nonLus) && a.nonLus.length ? ' · non lu : ' + esc(a.nonLus.map(x => (x.source === 'JARVIS' ? 'agenda JARVIS' : 'agenda principal') + ' (' + x.code + ')').join(', ')) : '')
           + (a.tronque ? ', liste incomplète' : '') + ". Rien n'a été modifié.</span></div>")
       + "<div class=\"signal info\"><i>info</i><span>Le contenu de l'agenda est externe (une invitation peut venir de n'importe qui) : "
-      + 'une action sensible demandée ensuite exigera ta frappe.</span></div></div></div>';
+      + 'une action sensible demandée ensuite exigera ta frappe.</span></div></div>';
+    /* [S90] allege : « 📅 Agenda lu · 0 événement · lecture seule » ; le reste sous « + détail » */
+    const hA = '<div class="decision autorise lecture">' + (allege()
+      ? '<p class="ligne-lecture">' + esc('📅 Agenda lu · ' + (echec ? 'échec (' + (d.motif || '?') + ')' : pluriel(Number(a.evenements) || 0, 'événement', 'événements'))
+          + (Array.isArray(a.nonLus) && a.nonLus.length ? ' · un agenda non lu' : '') + ' · lecture seule') + '</p>' + plie(detailA)
+      : detailA) + '</div>';
     const blocA = tour('JARVIS', '', false);
     blocA.querySelector('.quoi').outerHTML = hA;
     if (d.reponse) tour('Claude', d.reponse, false, true);
@@ -1031,26 +1132,37 @@ function rendreDecision(d) {
   const mot  = d.decide === 'AUTORISE' ? 'Autorisé' : d.decide === 'EN_ATTENTE' ? 'Retenu' : 'Refusé';
   const n = d.note || {};
   const p = d.plan || {};
-  let h = '<div class="decision ' + etat + '">'
-        + (p.action ? '<div class="plan">' + quiLance(d, p) + ' <span class="acte">'
+  const planH = p.action ? '<div class="plan">' + quiLance(d, p) + ' <span class="acte">'
             + esc(ACTES[p.action] || p.action.toLowerCase()) + '</span>'
             + (p.target ? ' — <span class="mono">' + esc(p.target) + '</span>' : '')
             + (p.pourquoi ? '<div class="pourquoi">' + esc(p.pourquoi) + '</div>' : '')
-            + '</div>' : '')
+            + '</div>' : '';
+  const signalH = (s) => '<div class="signal ' + esc(s.poids) + '"><i>' + esc(s.poids) + '</i><span>' + esc(s.texte) + '</span></div>';
+  const altH = n.alternatives && n.alternatives.length ? '<div class="alt">' + n.alternatives.map(a => '<div>' + esc(a) + '</div>').join('') + '</div>' : '';
+  let h = '<div class="decision ' + etat + '">';
+  if (allege()) {
+    /* [S90] le verdict et sa phrase simple ; les alertes FORTES, une par ligne ; ce qui sera
+     * fait reste visible s'il y a une carte a remplir ou une action retenue ; codes, risque,
+     * signaux info / moyen et alternatives sous « + détail » */
+    const garderPlan = d.decide === 'EN_ATTENTE' || d.decide === 'AUTORISE' || (d.motif === 'REFORMULATION_REQUISE' && d.aReformuler);
+    const forts = (n.signaux || []).filter(s => s.poids === 'fort'), autres = (n.signaux || []).filter(s => s.poids !== 'fort');
+    h += (garderPlan ? planH : '')
+      + '<div class="verdict"><b>' + mot + '</b>' + (d.decide === 'REFUSE' ? '<span class="phrase">' + esc(phraseRefus(d)) + '</span>' : '') + '</div>'
+      + (forts.length ? '<div class="signaux">' + forts.map(s => '<div class="signal fort ligne1">⚠ ' + esc(s.texte) + '</div>').join('') + '</div>' : '')
+      + plie((garderPlan ? '' : planH)
+        + (d.motif || n.niveau ? '<div class="verdict">' + (d.motif ? '<span class="code mono">' + esc(d.motif) + '</span>' : '')
+          + (n.niveau ? '<span class="code">risque ' + esc(n.niveau.toLowerCase()) + ' · ' + n.risque + '</span>' : '') + '</div>' : '')
+        + (autres.length ? '<div class="signaux">' + autres.map(signalH).join('') + '</div>' : '')
+        + (d.plancher === 'CONTENT_DERIVED' && d.decide === 'REFUSE' ? '<p class="pourquoi">Origine : ' + esc(((d.influences || []).map(x => x.source).join(', ')) || 'contenu externe') + '</p>' : '')
+        + altH);
+  } else {
+    h += planH
         + '<div class="verdict"><b>' + mot + '</b>'
         + (d.motif ? '<span class="code mono">' + esc(d.motif) + '</span>' : '')
         + (n.niveau ? '<span class="code">risque ' + esc(n.niveau.toLowerCase()) + ' · ' + n.risque + '</span>' : '')
-        + '</div>';
-  if (n.signaux && n.signaux.length) {
-    h += '<div class="signaux">';
-    for (const s of n.signaux)
-      h += '<div class="signal ' + esc(s.poids) + '"><i>' + esc(s.poids) + '</i><span>' + esc(s.texte) + '</span></div>';
-    h += '</div>';
-  }
-  if (n.alternatives && n.alternatives.length) {
-    h += '<div class="alt">';
-    for (const a of n.alternatives) h += '<div>' + esc(a) + '</div>';
-    h += '</div>';
+        + '</div>'
+        + (n.signaux && n.signaux.length ? '<div class="signaux">' + n.signaux.map(signalH).join('') + '</div>' : '')
+        + altH;
   }
   h += '</div>';
 
@@ -1458,12 +1570,26 @@ function afficherGerer(r) {
   if (!r || !Array.isArray(r.sections)) return tour('JARVIS', (r && (r.message || r.resume)) || "« À gérer » indisponible.", false);
   if (!r.sections.length) return tour('JARVIS', r.resume || 'Rien à lire ici.', false);
   const source = (it) => it.type === 'agenda' || it.type === 'note' || it.type === 'conflit';
-  const h = '<div class="decision autorise gerer"><div class="plan">À gérer — ' + esc(r.date || '') + ' <span class="code">' + esc(r.resume || '') + '</span></div>'
+  const preuveH = (it) => (it.preuve ? '<p class="preuve">' + (source(it) ? 'Source : ' + esc(it.preuve) : it.type === 'suspect' ? 'Pourquoi : ' + esc(it.preuve) : 'Preuve : « ' + esc(it.preuve) + ' »') + '</p>' : '')
+    + (it.certitude && it.type !== 'erreur' ? '<p class="certitude">' + esc(CERTITUDE[it.certitude] || '') + '</p>' : '');
+  const classe = (it) => 'gerer-item' + (it.type === 'suspect' || it.type === 'conflit' ? ' fort' : '');
+  const cle = (it) => ' data-cle="' + esc(String(it.texte || '').slice(0, 200)) + '" data-objet="' + esc(String(it.objet || '').slice(0, 200)) + '"';   /* [S93] relire si la session a expiré */
+  let h;
+  if (allege()) {
+    /* [S90] sections repliables (avec le nombre) ; un point = une ligne + ses boutons ; la preuve au toucher ;
+     * les mails suspects regroupés dans un bloc replié « ⚠ N mails suspects » */
+    const point = (it) => '<div class="' + classe(it) + '"' + cle(it) + '>' + (it.preuve || it.certitude ? '<details class="point"><summary>' + esc(it.texte) + '</summary>' + preuveH(it) + '</details>' : '<p>' + esc(it.texte) + '</p>') + boutonsGerer(it) + '</div>';
+    h = '<div class="decision autorise gerer"><div class="plan">À gérer — ' + esc(r.date || '') + ' <span class="code">' + esc(r.resume || '') + '</span></div>'
+      + r.sections.map(sec => {
+        const tous = sec.items || [], suspects = tous.filter(it => it.type === 'suspect'), autres = tous.filter(it => it.type !== 'suspect');
+        return '<details class="gerer-section" open><summary><b>' + esc(sec.titre) + '</b> <span class="code">(' + tous.length + ')</span></summary>'
+          + (suspects.length ? '<details class="suspects"><summary>⚠ ' + esc(pluriel(suspects.length, 'mail suspect', 'mails suspects')) + ' : ne réponds pas, ne paie rien, ne clique pas</summary>' + suspects.map(point).join('') + '</details>' : '')
+          + autres.map(point).join('') + '</details>';
+      }).join('')
+      + plie('<p class="pdj-note">' + esc(r.regle || '') + '</p>') + '</div>';
+  } else h = '<div class="decision autorise gerer"><div class="plan">À gérer — ' + esc(r.date || '') + ' <span class="code">' + esc(r.resume || '') + '</span></div>'
     + r.sections.map(sec => '<div class="gerer-section"><b>' + esc(sec.titre) + '</b>' + (sec.items || []).map(it =>
-        '<div class="gerer-item' + (it.type === 'suspect' || it.type === 'conflit' ? ' fort' : '') + '"><p>' + esc(it.texte) + '</p>'
-        + (it.preuve ? '<p class="preuve">' + (source(it) ? 'Source : ' + esc(it.preuve) : it.type === 'suspect' ? 'Pourquoi : ' + esc(it.preuve) : 'Preuve : « ' + esc(it.preuve) + ' »') + '</p>' : '')
-        + (it.certitude && it.type !== 'erreur' ? '<p class="certitude">' + esc(CERTITUDE[it.certitude] || '') + '</p>' : '')
-        + boutonsGerer(it) + '</div>').join('') + '</div>').join('')
+        '<div class="' + classe(it) + '"' + cle(it) + '><p>' + esc(it.texte) + '</p>' + preuveH(it) + boutonsGerer(it) + '</div>').join('') + '</div>').join('')
     + '<p class="pdj-note">' + esc(r.regle || '') + '</p></div>';
   return carteJarvis(h);
 }
@@ -1479,17 +1605,25 @@ function ouvrirReponse(j, consigne, objet) {
 function afficherConversation(r) {
   if (!r || !r.ok) return tour('JARVIS', (r && r.message) || 'Conversation non lue.', false);
   const j = jetonFil(r.fil), an = r.analyse || {};
-  const alertes = (an.alertes || []).filter(x => x.poids !== 'info');
+  const alertes = (an.alertes || []).filter(x => x.poids !== 'info').sort((a, b) => (b.poids === 'fort') - (a.poids === 'fort'));   /* [S90] la plus forte d'abord */
   const reperes = [].concat((an.contradictions || []).map(x => x.texte), (an.pjManquantes || []).filter(x => x.de === 'autre').map(x => 'Pièce jointe annoncée mais absente : « ' + x.extrait + ' »'),
     (an.engagements || []).map(x => 'Tu as promis (' + x.libelle + ') : « ' + x.extrait + ' »'), (an.echeances || []).map(x => 'Échéance ' + x.libelle + ' : « ' + x.extrait + ' »'),
     (an.creneaux || []).map(x => 'Rendez-vous proposé : ' + x.libelle), an.relance ? ['Sans réponse depuis ' + an.relance.jours + ' jours : « ' + an.relance.extrait + ' »'] : []);
+  const alerteH = (x) => '<div class="signal ' + (x.poids === 'fort' ? 'fort' : 'info') + '"><i>' + (x.poids === 'fort' ? 'alerte' : 'attention') + '</i><span>' + esc(x.texte) + '</span></div>';
+  const lourd = allege();   /* [S90] */
+  const suspectH = r.suspect ? '<div class="signal fort' + (lourd ? ' ligne1">⚠ Suspect : ' : '"><i>suspect</i><span>') + 'JARVIS n\'enverra rien dans cette conversation : ne réponds pas, ne paie rien, ne clique pas.' + (lourd ? '' : '</span>') + '</div>' : '';
+  /* [S90] allégé : les alertes en une ligne dépliable ; un long mail coupé à quelques lignes, « Lire tout » */
+  const alertesH = !lourd ? '<div class="signaux">' + suspectH + alertes.map(alerteH).join('') + '</div>'
+    : (suspectH ? '<div class="signaux">' + suspectH + '</div>' : '')
+      + (alertes.length ? '<details class="alertes"><summary>⚠ ' + esc(pluriel(alertes.length, 'alerte', 'alertes')) + ' : ' + esc(alertes[0].texte) + '</summary><div class="signaux">' + alertes.map(alerteH).join('') + '</div></details>' : '');
+  const long = (t) => lourd && (String(t || '').length > 320 || String(t || '').split('\n').length > 5);
   const h = '<div class="decision ' + (r.suspect ? 'refuse' : 'autorise') + ' conversation" data-fil="' + esc(j) + '" data-objet="' + esc(r.objet) + '"><div class="plan">Conversation « ' + esc(r.objet) + ' » <span class="code">lecture seule</span></div>'
-    + '<div class="signaux">' + (r.suspect ? '<div class="signal fort"><i>suspect</i><span>JARVIS n\'enverra rien dans cette conversation : ne réponds pas, ne paie rien, ne clique pas.</span></div>' : '')
-    + alertes.map(x => '<div class="signal ' + (x.poids === 'fort' ? 'fort' : 'info') + '"><i>' + (x.poids === 'fort' ? 'alerte' : 'attention') + '</i><span>' + esc(x.texte) + '</span></div>').join('') + '</div>'
+    + alertesH
     + (r.messages || []).map(m => '<div class="fil-message' + (m.moi ? ' moi' : '') + '"><p class="mail-entete"><b>' + esc(m.de) + '</b> · ' + esc(m.date) + '</p>'
-      + '<div class="mail-texte">' + esc(m.texte) + '</div>' + ((m.piecesJointes || []).length ? '<p class="mail-entete">Pièce(s) jointe(s) : ' + esc(m.piecesJointes.join(', ')) + '</p>' : '') + '</div>').join('')
+      + '<div class="mail-texte' + (long(m.texte) ? ' coupe' : '') + '">' + esc(m.texte) + '</div>' + (long(m.texte) ? '<button type="button" class="lire-tout" data-lire-tout="1">Lire tout</button>' : '')
+      + ((m.piecesJointes || []).length ? '<p class="mail-entete">Pièce(s) jointe(s) : ' + esc(m.piecesJointes.join(', ')) + '</p>' : '') + '</div>').join('')
     + (reperes.length ? '<div class="gerer-section"><b>Repéré par les règles (à vérifier)</b>' + reperes.map(x => '<p class="preuve">• ' + esc(x) + '</p>').join('') + '</div>' : '')
-    + '<p class="pdj-note">' + esc(r.transparence || '') + '</p>'
+    + (lourd ? plie('<p class="pdj-note">' + esc(r.transparence || '') + '</p>') : '<p class="pdj-note">' + esc(r.transparence || '') + '</p>')
     + (j && !r.suspect ? '<div class="rang gerer-actions"><button type="button" data-gerer="repondre" data-fil="' + esc(j) + '">Préparer une réponse</button>'
       + '<button type="button" data-gerer="rappel" data-fil="' + esc(j) + '">Me le rappeler</button></div>' : '') + '</div>';   /* [S89] suspect : aucun bouton */
   return carteJarvis(h);
@@ -1603,6 +1737,8 @@ document.addEventListener('click', async (ev) => {
     t.textContent = r.hidden ? "Imposer l'action à la main" : "Laisser l'assistant décider";
   }
   if (t.dataset.oublier !== undefined) { Memoire.oublier(+t.dataset.oublier); return; }
+  /* [S90] un long mail coupé : « Lire tout » le montre en entier */
+  if (t.dataset.lireTout) { const m = t.previousElementSibling; if (m) m.classList.remove('coupe'); t.hidden = true; return; }
   /* [S84] sauvegarde / restauration (le partage d'iOS exige le geste : aucune attente avant) */
   if (t.id === 'souvSauver') { sauverSouvenirs(); return; }
   if (t.id === 'souvRestaurer') { const f = $('souvFichier'); f.value = ''; f.click(); return; }
@@ -1915,6 +2051,12 @@ document.addEventListener('click', (ev) => {
 });
 $('envoyer').addEventListener('click', envoyer);
 $('souvFichier').addEventListener('change', (e) => restaurerSouvenirs(e.target.files && e.target.files[0]));   /* [S84] */
+/* [S90] « Tout afficher » : ce navigateur seulement ; les cartes déjà là se déplient */
+$('toutAfficher').addEventListener('change', (e) => {
+  toutPage = !!e.target.checked;
+  try { localStorage.setItem(TOUT_AFFICHER, toutPage ? '1' : '0'); } catch (x) { /* navigation privée : pour cette page seulement */ }
+  appliquerAffichage();
+});
 Voix.init();   /* [S32] micro visible seulement si le navigateur sait dicter */
 /* [S48] bloc Agenda JARVIS : seulement si des variables Google sont posées */
 const ETAPES_GOOGLE = { CLE: 'Clé du compte de service', AGENDA: 'Agenda JARVIS', ECRITURE: "Droit d'écriture" };

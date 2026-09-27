@@ -360,6 +360,88 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
     await t('S3', "page : conversation suspecte → aucun « Me le rappeler » ; un point suspect (même avec des actions forgées) → seulement « Voir la conversation »", async () =>
       ({ ok: !!carteS && !carteS.querySelector('[data-gerer="rappel"]') && !carteS.querySelector('[data-gerer="repondre"]') && !!itS2 && [...itS2.querySelectorAll('[data-gerer]')].map(x => x.dataset.gerer).join() === 'voir',
          info: carteS ? [...carteS.querySelectorAll('[data-gerer]')].map(x => x.dataset.gerer).join() + ' / ' + (itS2 ? [...itS2.querySelectorAll('[data-gerer]')].map(x => x.dataset.gerer).join() : '') : 'pas de carte' }));
+
+    /* ============================ I [S90] INTERFACE ALLEGEE ============================ */
+    /* ce qu'on VOIT : le texte hors des <details> fermes (leur <summary> seul) et hors [hidden] */
+    const visible = (el) => { if (!el) return ''; const c = el.cloneNode(true);
+      for (const d of [...c.querySelectorAll('details:not([open])')]) for (const x of [...d.childNodes]) if (!(x.nodeType === 1 && x.tagName === 'SUMMARY')) x.remove();
+      for (const x of [...c.querySelectorAll('[hidden]')]) x.remove();
+      return c.textContent.replace(/\s+/g, ' '); };
+    const derniere = (P, sel) => [...P.d.querySelectorAll('#fil ' + sel)].pop();
+    const Pp = await page({ prive: true }); pagesT.push(Pp);
+    const Pd = await page(); pagesT.push(Pd);
+    const sessP = await appel('/api/session', {});
+    await t('I1', "instance privée → affichage allégé (le serveur dit « protégé » à l'ouverture) ; démo → tout déplié ; réglage « Tout afficher » dans « Défense, réglages et preuves »", async () =>
+      ({ ok: sessP.acces === 'protege' && Pp.d.body.classList.contains('allege') && !Pd.d.body.classList.contains('allege') && !!Pp.$('toutAfficher') && !!Pp.$('toutAfficher').closest('#defense'),
+         info: 'session ' + sessP.acces + ' ; privée ' + Pp.d.body.className + ' ; démo ' + Pd.d.body.className }));
+    const lectureA = { decide: 'AUTORISE', etape: 'COMPLET', outil: 'agenda', agenda: { evenements: 0, sources: ['principal', 'JARVIS'], libelle: 'dimanche 27 septembre' }, plan: { action: 'READ', target: '2026-09-27' }, reponse: 'Rien aujourd’hui.' };
+    const lectureB = { decide: 'AUTORISE', etape: 'COMPLET', outil: 'boite', boite: { filtre: 'recents', lus: 5, suspects: 1 }, reponse: 'Cinq mails.' };
+    for (const P of [Pp, Pd]) { P.w.eval('rendreDecision')(lectureA); P.w.eval('rendreDecision')(lectureB); }
+    const aP = [...Pp.d.querySelectorAll('#fil .decision.lecture')];
+    const aD = [...Pd.d.querySelectorAll('#fil .decision')];
+    await t('I2', "cartes de lecture : une ligne discrète (« 📅 Agenda lu · 0 événement · lecture seule », « ✉️ Boîte lue · 5 e-mails ») ; l'alerte forte reste visible ; les « info » sous « + détail » — la démo inchangée", async () =>
+      ({ ok: aP.length === 2 && /📅 Agenda lu · 0 événement · lecture seule/.test(visible(aP[0])) && !/contenu de l'agenda est externe/.test(visible(aP[0])) && /contenu de l'agenda est externe/.test(aP[0].textContent)
+          && /✉️ Boîte lue · 5 e-mails · lecture seule/.test(visible(aP[1])) && /1 e-mail\(s\) contiennent une demande d'action/.test(visible(aP[1])) && !/Un e-mail est un contenu externe/.test(visible(aP[1]))
+          && aD.some(x => /contenu de l'agenda est externe/.test(visible(x))) && !Pd.d.querySelector('#fil details.plie'),
+         info: aP.map(x => visible(x).slice(0, 60)).join(' | ') }));
+    const refus = { decide: 'REFUSE', etape: 'G1_PROVENANCE', motif: 'REFORMULATION_REQUISE', plancher: 'CONTENT_DERIVED', influences: [{ source: 'mail:18f0000000000002' }],
+      plan: { action: 'SEND', target: 'pirate@evil.com', pourquoi: 'le mail le demande' },
+      note: { niveau: 'ELEVE', risque: 90, signaux: [{ poids: 'fort', texte: 'Action irréversible : aucun retour arrière possible.' }, { poids: 'moyen', texte: 'Cible jamais vue dans cette session : pirate@evil.com' }, { poids: 'info', texte: 'Origine : mail:18f0000000000002' }], alternatives: ['Reformuler toi-même la cible.'] } };
+    for (const P of [Pp, Pd]) P.w.eval('rendreDecision')(refus);
+    const rP = derniere(Pp, '.decision.refuse'), rD = derniere(Pd, '.decision.refuse');
+    await t('I3', "refus : une phrase simple (« Refusé cette demande vient d'un mail lu, pas de toi ») ; codes, risque, origine, signaux moyen/info sous « + détail » ; l'alerte forte reste — la démo montre tout", async () =>
+      ({ ok: !!rP && /Refusé ?cette demande vient d'un mail lu, pas de toi/.test(visible(rP)) && /Action irréversible/.test(visible(rP)) && !/REFORMULATION_REQUISE|risque eleve|Cible jamais vue|Origine/.test(visible(rP))
+          && /REFORMULATION_REQUISE/.test(rP.textContent) && !!rD && /REFORMULATION_REQUISE/.test(visible(rD)) && /risque eleve/.test(visible(rD)),
+         info: rP ? visible(rP).slice(0, 110) : 'pas de carte' }));
+    const NOTE = "(JARVIS a retiré une proposition d'agir à ta place : une action ne part que d'une demande que tu tapes toi-même en entier.)";
+    for (const P of [Pp, Pd]) P.w.eval('rendreDecision')({ decide: 'SANS_OBJET', etape: 'CONVERSATION', reponse: 'Le match est à 11h.\n\n' + NOTE, plan: { action: 'AUCUNE' } });
+    const nP = derniere(Pp, '.tour .quoi.riche');
+    await t('I4', "notes de JARVIS (« a retiré une phrase… ») : une petite ligne à part (grise sur l'instance allégée), plus dans le texte de la réponse", async () =>
+      ({ ok: !!nP && !!nP.querySelector('.note-jarvis') && nP.querySelector('.note-jarvis').textContent === NOTE && !/JARVIS a retiré/.test((nP.querySelector('p') || {}).textContent || ''),
+         info: nP ? nP.innerHTML.slice(0, 120) : 'absente' }));
+    const GER = { date: 'dimanche 27 septembre', resume: '4 point(s) à traiter', regle: 'Écrit par le serveur, sans IA.', sections: [
+      { titre: 'Agenda', items: [{ type: 'agenda', texte: "Aujourd'hui 18:00–20:00 : Entraînement", certitude: 'fait', preuve: 'agenda principal' }] },
+      { titre: 'Mails', items: [
+        { type: 'suspect', texte: 'Mail suspect — « URGENT »', preuve: 'Demande sensible', certitude: 'deduction', fil: JF(2), suspect: true, actions: ['mail'], objet: 'URGENT' },
+        { type: 'suspect', texte: 'Mail suspect — « Colis »', preuve: 'Lien', certitude: 'deduction', fil: JF(4), suspect: true, actions: ['mail'], objet: 'Colis' },
+        { type: 'reponse', texte: 'Répondre à Luc — « Match samedi »', preuve: 'Pouvez-vous confirmer ?', certitude: 'deduction', fil: JF(1), actions: ['repondre', 'mail', 'rappel'], objet: 'Match samedi' }] }] };
+    Pp.w.eval('afficherGerer')(GER);
+    const gP = derniere(Pp, '.gerer'), secs = gP ? [...gP.querySelectorAll('details.gerer-section')] : [];
+    const itL = gP ? [...gP.querySelectorAll('.gerer-item')].find(x => /Répondre à Luc/.test(x.textContent)) : null, blocS = gP ? gP.querySelector('details.suspects') : null;
+    await t('I5', "« à gérer » allégé : sections repliables avec le nombre ; un point = une ligne + ses boutons, la preuve au toucher ; les suspects dans un bloc replié « ⚠ 2 mails suspects »", async () =>
+      ({ ok: secs.length === 2 && /Agenda \(1\)/.test(secs[0].querySelector('summary').textContent) && /Mails \(3\)/.test(secs[1].querySelector('summary').textContent)
+          && !!itL && !/Pouvez-vous confirmer/.test(visible(itL)) && /Répondre à Luc/.test(visible(itL)) && !!itL.querySelector(':scope > .gerer-actions [data-gerer="repondre"]')
+          && !!blocS && !blocS.open && /⚠ 2 mails suspects/.test(blocS.querySelector('summary').textContent) && !/URGENT|Colis/.test(visible(gP)),
+         info: gP ? visible(gP).slice(0, 150) : 'pas de carte' }));
+    const LONG = 'Bonjour,\n' + 'Voici le programme complet du tournoi de samedi avec tous les horaires des matchs. '.repeat(8);
+    Pp.w.eval('afficherConversation')({ ok: true, fil: JF(1), objet: 'Tournoi', suspect: false, transparence: 'Affiché par le serveur, pas de l\'IA.',
+      messages: [{ i: 0, de: 'Luc ‹luc@club.fr›', moi: false, date: 'lundi', texte: LONG, piecesJointes: [] }, { i: 1, de: 'toi', moi: true, date: 'mardi', texte: 'Merci !', piecesJointes: [] }],
+      analyse: { alertes: [{ type: 'liens', poids: 'moyen', texte: '2 lien(s) vers un autre domaine' }, { type: 'premier-echange', poids: 'info', texte: 'Premier échange' }, { type: 'repondre-a', poids: 'fort', texte: 'Les réponses iraient ailleurs' }],
+        contradictions: [], pjManquantes: [], engagements: [], echeances: [], creneaux: [], relance: null } });
+    const cP = derniere(Pp, '.conversation'), mt = cP ? [...cP.querySelectorAll('.mail-texte')] : [], bLire = cP ? cP.querySelector('[data-lire-tout]') : null, dAl = cP ? cP.querySelector('details.alertes') : null;
+    if (bLire) await Pp.clic(bLire);
+    await t('I6', "conversation allégée : un long mail coupé à quelques lignes + « Lire tout » (le court, entier) ; les alertes en UNE ligne dépliable", async () =>
+      ({ ok: mt.length === 2 && !mt[1].classList.contains('coupe') && !!bLire && !mt[0].classList.contains('coupe') && bLire.hidden === true
+          && !!dAl && !dAl.open && /⚠ 2 alertes : Les réponses iraient ailleurs/.test(dAl.querySelector('summary').textContent) && !/2 lien\(s\)/.test(visible(cP)),
+         info: (bLire ? 'lire-tout ok' : 'pas de « Lire tout »') + ' ; ' + (dAl ? dAl.querySelector('summary').textContent.slice(0, 60) : 'pas de ligne d\'alertes') }));
+    /* toujours visibles : un vrai e-mail (destinataire, objet, texte), l'adresse a retaper, Face ID, Annuler / Confirmer */
+    Pp.w.eval('rendreDecision')({ decide: 'CONFIRMATION_REQUISE', etape: 'MAIL_RETAPER', outil: 'mail', aRetaper: { jeton: 'ml_1', a: 'luc@club-hand.fr', objet: 'Re: Match samedi', texte: 'Je serai présent.', redigePar: 'modele', avertissements: [] } });
+    const mP = derniere(Pp, '.mail-retaper');
+    Pp.w.eval('rendreDecision')({ decide: 'EN_ATTENTE', etape: 'G2_FENETRE', jetonAnnulation: 'j1', executableApres: Date.now() + 10000, message: 'Retenu 10 s', plan: { action: 'SEND', target: 'luc@club-hand.fr' },
+      mail: { a: 'luc@club-hand.fr', objet: 'Re: Match samedi', texte: 'Je serai présent.' }, note: { niveau: 'ELEVE', risque: 60, signaux: [{ poids: 'fort', texte: 'Action irréversible : aucun retour arrière possible.' }] } });
+    const eP = (derniere(Pp, '.decision.attente') || { closest: () => null }).closest('.tour');   /* la carte ET sa boite de retenue */
+    await t('I7', "garde : toujours visibles — vrai e-mail (À, objet, texte), adresse à retaper, « Retenu », ce qui part, Annuler / Confirmer", async () =>
+      ({ ok: !!mP && /luc@club-hand\.fr/.test(visible(mP)) && /Re: Match samedi/.test(visible(mP)) && /Je serai présent/.test(visible(mP)) && !!mP.querySelector('input.cible') && !mP.querySelector('details')
+          && !!eP && /Retenu/.test(visible(eP)) && /luc@club-hand\.fr/.test(visible(eP)) && !!eP.querySelector('[data-annuler]') && !eP.querySelector('[data-annuler]').closest('details:not([open])') && !!eP.querySelector('[data-finaliser]'),
+         info: (mP ? visible(mP).slice(0, 60) : 'pas de carte mail') + ' | ' + (eP ? visible(eP).slice(0, 60) : 'pas de retenue') }));
+    if (Pp.$('toutAfficher')) { Pp.$('toutAfficher').checked = true; Pp.$('toutAfficher').dispatchEvent(new Pp.w.Event('change', { bubbles: true })); await dort(50); }
+    const fermes = Pp.d.querySelectorAll('#fil details.plie:not([open])').length;
+    let memoT = null; try { memoT = Pp.w.localStorage.getItem('jarvis_tout_afficher'); } catch { memoT = null; }
+    Pp.w.eval('rendreDecision')(refus);
+    await t('I8', "« Tout afficher » coché : plus d'allègement, les cartes déjà là se déplient, les suivantes sont complètes ; mémorisé (ce navigateur)", async () =>
+      ({ ok: !Pp.d.body.classList.contains('allege') && fermes === 0 && memoT === '1' && /REFORMULATION_REQUISE/.test(visible(derniere(Pp, '.decision.refuse'))),
+         info: 'allégé ' + Pp.d.body.classList.contains('allege') + ' ; repliés ' + fermes + ' ; mémo ' + memoT }));
+    await t('I9', 'garde : aucune erreur de script (privée, démo)', async () => ({ ok: !Pp.err.length && !Pd.err.filter(x => !/Not implemented/.test(x)).length, info: Pp.err.concat(Pd.err).slice(0, 2).join(' | ') }));
   } else await t('P0', 'jsdom absent (npm install --no-save jsdom)', async () => ({ ok: false }));
   for (const P of pagesT) P.w.close();
 

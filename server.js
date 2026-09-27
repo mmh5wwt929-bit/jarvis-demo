@@ -2965,7 +2965,8 @@ const serveur = http.createServer((req, res) => {
     if (!c.ok) return json(429, { erreur: 'TROP_DE_SESSIONS', reessayerDans: c.reessayerDans });
     if (!placeLibre()) return json(503, { erreur: 'DEMO_SATUREE', reessayerDans: 300 });   /* [S17] */
     const { id, s } = creerSession();
-    return json(200, { sessionId: id, ...etatDe(s) });
+    /* [S90] v4.10.1 la page allege son affichage sur une instance PROTEGEE seulement (la demo garde tout deplie) */
+    return json(200, { sessionId: id, acces: CLE_ACCES ? 'protege' : 'public', ...etatDe(s) });
   }
 
   if (u.pathname === '/api/tests' && req.method === 'GET') {

@@ -469,7 +469,7 @@ const RE_AUTRE_OBJET = /(^| )(fichier|fichiers|dossier|dossiers|mail|mails|e mai
 const autreObjet = (texte) => RE_AUTRE_OBJET.test(mots(texte));
 
 /* ------------------------------ phrases que seul le serveur ecrit : [1.1] -- */
-const RE_SERVEUR_SEUL = /(touche « ?(supprimer( la s[ée]rie)?|cr[ée]er( les \d+ s[ée]ances)?|ne pas cr[ée]er|confirmer) ?»|rien n'est (supprim[ée]|[ée]crit) avant ton toucher|disparition v[ée]rifi[ée]e|confirm[ée] par google|jour et heure lus dans tes mots|cr[ée][ée] par jarvis dans cette session|ne sont pas encore possibles : c'est la prochaine [ée]tape)/i;
+const RE_SERVEUR_SEUL = /(touche « ?(supprimer( la s[ée]rie)?|cr[ée]er( les \d+ s[ée]ances)?|ne pas cr[ée]er|confirmer) ?»|rien n'est (supprim[ée]|[ée]crit) avant ton toucher|disparition v[ée]rifi[ée]e|confirm[ée] par google|jour et heure lus dans tes mots|cr[ée][ée] par jarvis dans cette session|ne sont pas encore possibles : c'est la prochaine [ée]tape|\(jarvis a (retir[ée]|corrig[ée]))/i;   /* [1.5] ses notes aussi */
 function imiteServeur(texte) {
   const s = String(texte == null ? '' : texte);
   const retirees = [];
