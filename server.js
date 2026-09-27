@@ -318,6 +318,16 @@
  *   [S87] offre d'agir retiree aussi pour l'agenda (« tu veux que je cree un
  *         evenement… ? ») ; [S88] astuce « a gerer » quand une creation manque
  *         d'un jour ou d'une heure ; [S89] mail suspect : pas de « Me le rappeler ».
+ *
+ * v4.10.2 — vu en ligne le 27 sept (23 h 20 – 23 h 37) sur la v4.10.1 :
+ *   [S95] apres « Preparer une reponse » + un message tape, toutes les lectures
+ *         d'un toucher refusees (CONTEXTE_NON_DECLARE) : elles passent comme
+ *         gestes du serveur (READ seulement, cible fixee par le serveur).
+ *   [S96] lecture en echec affichee « rien d'urgent » : « lecture incomplete »,
+ *         carte orange ; un echec n'est plus garde en cache.
+ *   [S97] une des deux sources d'agenda non lue n'est plus ignoree en silence :
+ *         « a gerer » la nomme, « Verifier dans mon agenda » ne dit plus « libre ».
+ *   [S98] compteurs : « Rien… » ne compte pas, une erreur affiche « non lu ».
  * ========================================================================== */
 
 const http = require('http');
@@ -1447,7 +1457,7 @@ async function pointDuJour(s) {
   if (!AGENDA && !ECRITURE) return garder({ actif: true, ok: true, jours: [], nonLus: [], resume: '' });
   const periode = AG.periodeDe(V.iso(auj) + '..' + V.iso(auj + 1), now, FUSEAU);
   if (!periode) return garder({ actif: true, ok: false, code: 'PERIODE_INVALIDE', message: 'Point du jour indisponible.' });
-  const demande = g.demander({ action: 'READ', resource: 'AGENDA', target: periode.cle });
+  const demande = g.demander({ action: 'READ', resource: 'AGENDA', target: periode.cle }, LECTURE_DU_SERVEUR);   /* [S95] */
   if (demande.decide !== 'AUTORISE')
     return garder({ actif: true, ok: false, code: demande.motif || 'REFUSE', message: 'Le noyau a refusé la lecture (' + propre(demande.motif || 'refus', 40) + ').' });
   let permis = null, permisJ = null;
@@ -2188,11 +2198,27 @@ function reglagesSouvenirs(souvenirs) {
   }
   return { relanceJours, taches: taches.slice(0, 8) };
 }
+/* [S95] v4.10.2 LES LECTURES DU SERVEUR, DECLENCHEES PAR UN TOUCHER.
+ * Vu en ligne (27 sept) : apres « Preparer une reponse » (session au rouge) et
+ * UN message tape (le planificateur scelle le contexte), « a gerer », « Voir
+ * la conversation », « Verifier dans mon agenda », une 2e reponse et le point
+ * du jour etaient TOUS refuses (CONTEXTE_NON_DECLARE) : seul « Repartir au
+ * vert » debloquait. G1_CONTEXTE protege les PLANS DU MODELE (un plan doit
+ * venir du contexte que la couche a assemble). Ces lectures-ci n'ont pas de
+ * plan : l'action (READ), la ressource et la cible sont fixees par le serveur
+ * (« fils », « fil:<id> » d'un jeton serveur, une periode calculee), a la
+ * suite d'un toucher. Elles passent donc comme les autres gestes du serveur
+ * (carte « Creer », envoi retape) : option « manuel ». Pour une lecture, elle
+ * ne leve QUE le controle du sceau (C3 ne concerne que l'irreversible) :
+ * transaction, journal, permis a usage unique, plancher au rouge : inchanges.
+ * Les lectures planifiees par le modele (« lis mes mails », « j'ai quoi
+ * demain ? ») gardent leur sceau. Jamais pour une ecriture ni un envoi. */
+const LECTURE_DU_SERVEUR = Object.freeze({ manuel: true });
 /* LIRE, gouverne : READ MAIL « fils » ou « fil:<id> » -> { ok, moi, fils, transactionId } */
 async function lireConversations(s, cible) {
   if (!MAIL_LECTURE) return { ok: false, code: MAIL_LECTURE_MOTIF || 'LECTURE_INACTIVE' };
   const g = s.g;
-  const demande = g.demander({ action: 'READ', resource: 'MAIL', target: cible });
+  const demande = g.demander({ action: 'READ', resource: 'MAIL', target: cible }, LECTURE_DU_SERVEUR);   /* [S95] */
   if (demande.decide !== 'AUTORISE') return { ok: false, code: demande.motif || 'REFUSE' };
   let permis = null;
   const exe = g.executer(demande, (action) => { permis = MAIL_LECTURE.permisLecture(action); return { lecture: 'autorisee' }; });
@@ -2209,16 +2235,21 @@ async function lireAgendaJours(s, j0, j1) {
   const g = s.g, now = Date.now();
   const periode = AG.periodeDe(V.iso(j0) + (j1 > j0 ? '..' + V.iso(j1) : ''), now, FUSEAU);
   if (!periode) return { ok: false, code: 'PERIODE_INVALIDE' };
-  const demande = g.demander({ action: 'READ', resource: 'AGENDA', target: periode.cle });
+  const demande = g.demander({ action: 'READ', resource: 'AGENDA', target: periode.cle }, LECTURE_DU_SERVEUR);   /* [S95] */
   if (demande.decide !== 'AUTORISE') return { ok: false, code: demande.motif || 'REFUSE' };
   let permis = null, permisJ = null;
   const exe = g.executer(demande, (action) => { if (AGENDA) permis = AGENDA.permis(action); if (ECRITURE) permisJ = ECRITURE.permisLecture(action); return { lecture: 'autorisee' }; });
   if (exe.etat !== 'EXECUTE' || (!permis && !permisJ)) return { ok: false, code: exe.motif || 'PERMIS_REFUSE' };
   const [lu, luJ] = await Promise.all([permis ? AGENDA.lire(permis) : null, permisJ ? ECRITURE.lister(permisJ) : null]);
-  const lus = [lu && { source: 'principal', r: lu }, luJ && { source: 'JARVIS', r: luJ }].filter(x => x && x.r.ok);
-  if (!lus.length) return { ok: false, code: ((lu && lu.code) || (luJ && luJ.code) || 'LECTURE_IMPOSSIBLE'), transactionId: exe.transactionId };
+  const sources = [lu && { source: 'principal', r: lu }, luJ && { source: 'JARVIS', r: luJ }].filter(Boolean);
+  const lus = sources.filter(x => x.r.ok);
+  /* [S97] v4.10.2 une source en echec n'est plus ignoree EN SILENCE (avant : agenda
+   * JARVIS en panne + iCloud lu = « Rien dans l'agenda », « Tu es libre » sur un
+   * entrainement) : elle est nommee, et chaque appelant le dit. */
+  const nonLus = sources.filter(x => !x.r.ok).map(x => ({ source: x.source, code: propre(x.r.code || 'LECTURE_IMPOSSIBLE', 40) }));
+  if (!lus.length) return { ok: false, code: ((lu && lu.code) || (luJ && luJ.code) || 'LECTURE_IMPOSSIBLE'), nonLus, transactionId: exe.transactionId };
   const f = V.fusionner(lus.map(x => ({ source: x.source, evenements: x.r.evenements })), FUSEAU);
-  return { ok: true, evenements: f.evenements, transactionId: exe.transactionId, periode: periode.cle };
+  return { ok: true, evenements: f.evenements, transactionId: exe.transactionId, periode: periode.cle, lus: lus.map(x => x.source), nonLus };
 }
 const bornesJour = (j) => { const a = V.civil(j), b = V.civil(j + 1); return [AG.versUtc(FUSEAU, a.y, a.mo, a.d), AG.versUtc(FUSEAU, b.y, b.mo, b.d)]; };
 const msCreneau = (jour, h) => { const c = V.civil(jour); return AG.versUtc(FUSEAU, c.y, c.mo, c.d, h.h, h.mi); };
@@ -2252,8 +2283,13 @@ async function agendaAGerer(s, auj) {
     for (let i = 1; i < h.length; i++) if (Date.parse(h[i].debut) < Date.parse(h[i - 1].fin))
       items.unshift({ type: 'conflit', priorite: 1, texte: 'Conflit ' + (j === auj ? "aujourd'hui" : 'demain') + ' : « ' + lisible(h[i - 1].titre, 60) + ' » et « ' + lisible(h[i].titre, 60) + ' » se chevauchent (' + horaire(Date.parse(h[i].debut)) + ').', certitude: 'fait' });
   }
-  if (!items.length) items.push({ type: 'agenda', texte: "Rien dans l'agenda aujourd'hui ni demain.", certitude: 'fait' });
-  return { ok: true, items };
+  /* [S98] « Rien… » est marque vide (la page ne le compte pas) ; [S97] une source non lue :
+   * le « rien » ne vaut que pour ce qui a ete lu, et c'est dit en tete */
+  const nonLus = ag.nonLus || [];
+  if (!items.length) items.push({ type: 'agenda', vide: true, certitude: 'fait',
+    texte: nonLus.length ? "Rien dans l'" + (ag.lus || []).map(x => NOMS_AGENDA[x]).join(" ni dans l'") + " aujourd'hui ni demain." : "Rien dans l'agenda aujourd'hui ni demain." });
+  for (const x of nonLus) items.unshift({ type: 'erreur', certitude: 'fait', texte: "L'" + NOMS_AGENDA[x.source] + " n'a pas pu être lu (" + x.code + ') : ce qui suit ne le compte pas.' });
+  return { ok: !nonLus.length, items };
 }
 async function mailsAGerer(s, rg) {
   const cle = String(rg.relanceJours || '');
@@ -2274,11 +2310,13 @@ async function mailsAGerer(s, rg) {
         creneau: x.type === 'creneau' ? an.creneaux.findIndex(c => x.titre.includes(c.libelle)) : undefined });
     }
     items.sort((a, b) => (b.type === 'suspect') - (a.type === 'suspect') || (a.priorite ?? 9) - (b.priorite ?? 9));
-    if (!items.length) items.push({ type: 'mail', texte: 'Rien dans tes conversations des 14 derniers jours ne demande ton attention.', certitude: 'deduction' });
+    if (!items.length) items.push({ type: 'mail', vide: true, texte: 'Rien dans tes conversations des 14 derniers jours ne demande ton attention.', certitude: 'deduction' });   /* [S98] */
     if (lu.illisibles) items.push({ type: 'erreur', texte: lu.illisibles + ' conversation(s) non lue(s) (délai ou erreur).', certitude: 'fait' });
   }
   const r = { ok: !!lu.ok, code: lu.ok ? null : lu.code, items: items.slice(0, 25) };
-  s.mailsGerer = { ts: Date.now(), cle, r };
+  /* [S96] v4.10.2 seule une lecture COMPLETE est gardee 60 s ; un echec (ou une conversation
+   * illisible) n'est plus reservi a l'ecran suivant : on relit */
+  s.mailsGerer = lu.ok && !lu.illisibles ? { ts: Date.now(), cle, r } : null;
   return r;
 }
 async function aGerer(s, souvenirs) {
@@ -2292,10 +2330,15 @@ async function aGerer(s, souvenirs) {
   /* 3. tes notes (souvenirs) : tes propres mots, jamais une permission */
   if (rg.taches.length) sections.push({ titre: 'Tes notes', items: rg.taches.map(t => ({ type: 'note', texte: t, certitude: 'fait', preuve: 'dans « Ce que JARVIS retient de toi »' })) });
   const nb = sections.reduce((n, x) => n + x.items.filter(i => !['agenda', 'erreur', 'note', 'mail'].includes(i.type) || i.type === 'conflit').length, 0);
-  const r = { actif: !!(AGENDA || ECRITURE || MAIL_LECTURE), sections, sources, aTraiter: nb, date: V.libelle(auj, false),
-    resume: sections.length ? (nb ? nb + ' point(s) à traiter' : 'rien d\'urgent') : (CLE_ACCES ? "Ni agenda ni boîte mail ne sont branchés sur cette instance." : "C'est la démo publique : ni agenda ni boîte mail."),
+  /* [S96] v4.10.2 vu en ligne : agenda ET boite en echec → « rien d'urgent ». Une lecture
+   * incomplete ne dit JAMAIS « rien » : elle le signale (la carte passe a l'orange). */
+  const incomplet = (ag && !ag.ok) || (ml && !ml.ok) || sections.some(x => x.items.some(i => i.type === 'erreur'));
+  const r = { actif: !!(AGENDA || ECRITURE || MAIL_LECTURE), sections, sources, aTraiter: nb, date: V.libelle(auj, false), incomplet: !!incomplet,
+    resume: !sections.length ? (CLE_ACCES ? "Ni agenda ni boîte mail ne sont branchés sur cette instance." : "C'est la démo publique : ni agenda ni boîte mail.")
+      : incomplet ? (nb ? nb + " point(s) à traiter, lecture incomplète" : "lecture incomplète : rien n'est garanti")
+      : (nb ? nb + ' point(s) à traiter' : 'rien d\'urgent'),
     regle: "Écrit par le serveur, sans IA : chaque point vient d'une règle, avec la phrase qui le prouve. Rien n'est envoyé ni écrit sans ton geste." };
-  s.gerer = { ts: Date.now(), r };
+  s.gerer = incomplet ? null : { ts: Date.now(), r };   /* [S96] un echec n'est pas garde en cache */
   return r;
 }
 
@@ -2417,6 +2460,11 @@ async function verifierCreneau(s, jeton, index) {
   const debut = msCreneau(c.jour, c.debut), fin = debut + (c.duree || 60) * 60000;
   const ag = await lireAgendaJours(s, c.jour, c.jour);
   if (!ag.ok) return { ok: false, code: ag.code, message: "Agenda non lu (" + propre(ag.code, 40) + ") : je ne peux pas dire si tu es libre." };
+  /* [S97] v4.10.2 une des deux sources non lue : ni « Tu es libre », ni « autre creneau libre »
+   * (avant : agenda JARVIS en panne → « Tu es libre » par-dessus un entrainement) */
+  if (ag.nonLus && ag.nonLus.length)
+    return { ok: false, code: 'AGENDA_INCOMPLET', message: 'Je ne peux pas dire si tu es libre : ' + ag.nonLus.map(x => "l'" + NOMS_AGENDA[x.source] + ' (' + x.code + ')').join(' et ')
+      + " n'a pas pu être lu. Réessaie dans un instant." };
   const conflits = chevauchent(ag.evenements, debut, fin);
   /* sinon, le premier creneau libre de meme duree ce jour-la (8 h - 21 h), au plus pres */
   let autre = null;
@@ -2922,11 +2970,11 @@ const serveur = http.createServer((req, res) => {
       detail = true;
     }
     if (!detail)
-      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.10.1',
+      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.10.2',
         acces: CLE_ACCES ? 'protege' : 'public', ...(CLE_ACCES ? { config: verdict } : {}),
         manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
         node: String(process.versions.node).split('.')[0] });
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.10.1', verite: V.VERSION,
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.10.2', verite: V.VERSION,
       agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : ECRITURE_MOTIF ? 'erreur-config' : 'inactif',   /* [S30] [S48] */
       ecritureMotif: ECRITURE_MOTIF,
       mail: MAIL_ENVOI ? 'actif' : MAIL_ENVOI_MOTIF ? 'erreur-config' : 'inactif', mailMotif: MAIL_ENVOI_MOTIF,   /* [S68] */

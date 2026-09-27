@@ -405,7 +405,7 @@ button.lire-tout{background:none;border:none;color:var(--signal);font-size:12.5p
       <div class="mesure">ancres publiées <b id="mAncres" class="mono">0</b></div>
       <div class="mesure">contexte déclaré <b id="mCouv" class="mono">—</b></div>
     </div>
-    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.10.1</div>
+    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.10.2</div>
   </div>
 </header>
 
@@ -1580,22 +1580,27 @@ function afficherGerer(r) {
   const source = (it) => it.type === 'agenda' || it.type === 'note' || it.type === 'conflit';
   const preuveH = (it) => (it.preuve ? '<p class="preuve">' + (source(it) ? 'Source : ' + esc(it.preuve) : it.type === 'suspect' ? 'Pourquoi : ' + esc(it.preuve) : 'Preuve : « ' + esc(it.preuve) + ' »') + '</p>' : '')
     + (it.certitude && it.type !== 'erreur' ? '<p class="certitude">' + esc(CERTITUDE[it.certitude] || '') + '</p>' : '');
-  const classe = (it) => 'gerer-item' + (it.type === 'suspect' || it.type === 'conflit' ? ' fort' : '');
+  const classe = (it) => 'gerer-item' + (it.type === 'suspect' || it.type === 'conflit' || it.type === 'erreur' ? ' fort' : '');
+  /* [S96] v4.10.2 une lecture incomplete : carte ORANGE, jamais verte ; [S98] le compteur ne compte
+   * ni le « Rien… » (vide) ni une erreur : « (0) », « (non lu) », « (2, lecture incomplète) » */
+  const couleur = r.incomplet ? 'attente' : 'autorise';
+  const compte = (tous) => { const n = tous.filter(it => !it.vide && it.type !== 'erreur').length;
+    return tous.some(it => it.type === 'erreur') ? (n ? n + ', lecture incomplète' : 'non lu') : String(n); };
   const cle = (it) => ' data-cle="' + esc(String(it.texte || '').slice(0, 200)) + '" data-objet="' + esc(String(it.objet || '').slice(0, 200)) + '"';   /* [S93] relire si la session a expiré */
   let h;
   if (allege()) {
     /* [S90] sections repliables (avec le nombre) ; un point = une ligne + ses boutons ; la preuve au toucher ;
      * les mails suspects regroupés dans un bloc replié « ⚠ N mails suspects » */
     const point = (it) => '<div class="' + classe(it) + '"' + cle(it) + '>' + (it.preuve || it.certitude ? '<details class="point"><summary>' + esc(it.texte) + '</summary>' + preuveH(it) + '</details>' : '<p>' + esc(it.texte) + '</p>') + boutonsGerer(it) + '</div>';
-    h = '<div class="decision autorise gerer"><div class="plan">À gérer — ' + esc(r.date || '') + ' <span class="code">' + esc(r.resume || '') + '</span></div>'
+    h = '<div class="decision ' + couleur + ' gerer"><div class="plan">À gérer — ' + esc(r.date || '') + ' <span class="code">' + esc(r.resume || '') + '</span></div>'
       + r.sections.map(sec => {
         const tous = sec.items || [], suspects = tous.filter(it => it.type === 'suspect'), autres = tous.filter(it => it.type !== 'suspect');
-        return '<details class="gerer-section" open><summary><b>' + esc(sec.titre) + '</b> <span class="code">(' + tous.length + ')</span></summary>'
+        return '<details class="gerer-section" open><summary><b>' + esc(sec.titre) + '</b> <span class="code">(' + esc(compte(tous)) + ')</span></summary>'
           + (suspects.length ? '<details class="suspects"><summary>⚠ ' + esc(pluriel(suspects.length, 'mail suspect', 'mails suspects')) + ' : ne réponds pas, ne paie rien, ne clique pas</summary>' + suspects.map(point).join('') + '</details>' : '')
           + autres.map(point).join('') + '</details>';
       }).join('')
       + plie('<p class="pdj-note">' + esc(r.regle || '') + '</p>') + '</div>';
-  } else h = '<div class="decision autorise gerer"><div class="plan">À gérer — ' + esc(r.date || '') + ' <span class="code">' + esc(r.resume || '') + '</span></div>'
+  } else h = '<div class="decision ' + couleur + ' gerer"><div class="plan">À gérer — ' + esc(r.date || '') + ' <span class="code">' + esc(r.resume || '') + '</span></div>'
     + r.sections.map(sec => '<div class="gerer-section"><b>' + esc(sec.titre) + '</b>' + (sec.items || []).map(it =>
         '<div class="' + classe(it) + '"' + cle(it) + '><p>' + esc(it.texte) + '</p>' + preuveH(it) + boutonsGerer(it) + '</div>').join('') + '</div>').join('')
     + '<p class="pdj-note">' + esc(r.regle || '') + '</p></div>';

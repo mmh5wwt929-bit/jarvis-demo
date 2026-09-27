@@ -350,7 +350,7 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
 
   /* ============================ H VERSION ============================ */
   const h = await appel('/health');
-  await t('H1', '/health : passerelle v4.10.1', async () => ({ ok: h.passerelle === 'v4.10.1', info: h.passerelle }));
+  await t('H1', '/health : passerelle v4.10.1 ou plus', async () => ({ ok: /^v4\.(10\.([1-9]|\d\d)|(1[1-9]|[2-9]\d)(\.\d+)?)$/.test(h.passerelle), info: h.passerelle }));   /* [v4.10.2] */
 
   /* ============================ L [S91] LIRE 4 PAR 4 ============================ */
   const idsL = [1, 2, 3, 4, 5, 6, 7, 8, 9].map(k => '18f00000000001' + String(k).padStart(2, '0'));
