@@ -669,8 +669,12 @@ const Reveil = (() => {
     retirer();
     return false;
   }
-  /* une page HTML a la place de la reponse JSON d'une route /api/ : c'est Render */
-  const pageDAttente = (r) => { const type = (r && r.headers && typeof r.headers.get === 'function' && r.headers.get('content-type')) || ''; return /text\/html/i.test(type); };
+  /* une page HTML (200 ou 503) a la place de la reponse JSON d'une route /api/ :
+   * c'est la page d'attente de Render, la demande n'a pas ete traitee. Une
+   * erreur HTML 52x (Cloudflare : delai depasse APRES traitement) n'est jamais
+   * renvoyee : la demande a pu etre traitee, on ne la rejoue pas. */
+  const pageDAttente = (r) => { const type = (r && r.headers && typeof r.headers.get === 'function' && r.headers.get('content-type')) || '';
+    return /text\/html/i.test(type) && (r.status === 200 || r.status === 503); };
   return { reglages, suivre, attendre, debout, pageDAttente };
 })();
 

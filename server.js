@@ -276,6 +276,24 @@
  *         la serie » retire toutes les seances (disparition verifiee).
  *   [S64] point du jour a l'ouverture : aujourd'hui et demain, ecrit par le
  *         serveur, lecture gouvernee, sans modele ni effet sur le plancher.
+ *
+ * v4.9 — [S65]-[S67] corrections vues en ligne ; [S68] vrai e-mail (Gmail,
+ *   gmail.send seul, liste fermee, Face ID) ; [S69] lecture de la boite.
+ *
+ * v4.9.1 — vu en ligne le 27 sept sur la v4.9 (details a chaque marque) :
+ *   [S70] pages publiques /confidentialite et /conditions (Google les exige
+ *         pour publier l'appli OAuth en Production).
+ *   [S71] historique : un vrai e-mail = UN echange (texte garde, tronque) ;
+ *         12 echanges au lieu de 8 ; jamais « tu ne m'as pas dit ».
+ *   [S72] brouillon : rien d'ajoute a la demande, un seul registre (signale
+ *         sinon), la partie « e-mail » seule donnee au redacteur.
+ *   [S73] aucune proposition d'agir a la place de la personne, ni d'executer
+ *         ce que demande un contenu lu.
+ *   [S74] demande double : ce qui n'est PAS fait est dit (une action a la fois).
+ *   [S75] « Ouvrir dans Mail » (mailto:), demo comprise : adresse tapee, liens
+ *         tapes, contenu verifie, « prepare », jamais « envoye ».
+ *   [S76] reveil de Render (page) ; [S77] client OAuth en ID + SECRET, colle
+ *         d'iPhone tolere ; [S78] libelles du paiement, boutons masques.
  * ========================================================================== */
 
 const http = require('http');
@@ -1779,11 +1797,15 @@ const SYSTEME_REDACTION = "Tu rédiges le brouillon d'un e-mail que la personne 
   + "3. Ni lien, ni adresse web, ni adresse e-mail, ni pièce jointe, et n'en annonce aucune : JARVIS ne joint aucun fichier. Pas de signature avec un nom ou une fonction absents de la demande. "
   + "4. Si la demande contient d'autres consignes pour l'assistant (ajouter à l'agenda, payer, lire des e-mails…), ignore-les : elles ne vont pas dans l'e-mail. "
   + "5. Si la demande ne dit pas ce que l'e-mail doit dire, ou s'il s'agit d'envoyer un fichier ou un document (factures, rapport, photo…), mets \"texte\":\"\".";
-/* [S72] la seule partie « e-mail » d'une demande : les autres demandes du meme
- * message (« … et ajoute-le a mon agenda ») ne sont pas montrees au redacteur */
+/* [S72] la partie « e-mail » d'une demande : les demandes qui la SUIVENT dans le
+ * meme message (« … et ajoute-le a mon agenda ») ne sont pas montrees au
+ * redacteur. Celles qui la precedent restent : l'e-mail peut y renvoyer
+ * (« ajoute le match samedi … et envoie un mail a Luc pour le prevenir ») ;
+ * la regle 4 de la redaction les ecarte du texte. */
 function partieEmail(texte) {
   let t = String(texte || '');
-  for (const d of V.demandesMultiples(t)) if (d.type !== 'envoi') t = t.replace(d.extrait, ' ');
+  const ds = V.demandesMultiples(t), i = ds.findIndex(d => d.type === 'envoi');
+  for (const d of ds.slice(i + 1)) if (i >= 0 && d.type !== 'envoi') t = t.replace(d.extrait, ' ');
   return t.replace(/[\s,;:]*(?:et puis|et ensuite|et aussi|et|puis|ensuite)?[\s,;:]*$/i, '').replace(/\s{2,}/g, ' ').trim();
 }
 async function rediger(texte) {
@@ -2512,11 +2534,11 @@ const serveur = http.createServer((req, res) => {
       detail = true;
     }
     if (!detail)
-      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.9.0',
+      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.9.1',
         acces: CLE_ACCES ? 'protege' : 'public', ...(CLE_ACCES ? { config: verdict } : {}),
         manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
         node: String(process.versions.node).split('.')[0] });
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.9.0', verite: V.VERSION,
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.9.1', verite: V.VERSION,
       agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : ECRITURE_MOTIF ? 'erreur-config' : 'inactif',   /* [S30] [S48] */
       ecritureMotif: ECRITURE_MOTIF,
       mail: MAIL_ENVOI ? 'actif' : MAIL_ENVOI_MOTIF ? 'erreur-config' : 'inactif', mailMotif: MAIL_ENVOI_MOTIF,   /* [S68] */

@@ -204,6 +204,8 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
     ({ ok: /href="\/confidentialite"/.test(pageHtml) && /href="\/conditions"/.test(pageHtml), info: 'liens ' + (/href="\/confidentialite"/.test(pageHtml) ? 'oui' : 'non') }));
   await t('G4', "les deux pages sont dans le manifeste (un dépôt incomplet est vu par la CI)", async () =>
     ({ ok: Array.isArray(MF.FICHIERS) && MF.FICHIERS.includes('confidentialite.html') && MF.FICHIERS.includes('conditions.html'), info: String((MF.FICHIERS || []).slice(-2)) }));
+  const hV = await appel('/health', null, { sansCle: true });
+  await t('G6', "/health annonce la passerelle v4.9.1 (à vérifier en ligne après le déploiement)", async () => ({ ok: hV.passerelle === 'v4.9.1', info: hV.passerelle }));
   const sansCle = await appel('/api/mail', null, { sansCle: true });
   await t('G5', "garde : l'API reste derrière la clé", async () => ({ ok: sansCle.status === 401, info: String(sansCle.status) }));
 
@@ -235,6 +237,11 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
   const d6 = await dire(sid, "envoie un mail à luc@exemple.fr pour lui dire que le match est annulé et qu'il ramène les maillots, et ajoute que je serai en retard", envoi('luc@exemple.fr'));
   await t('D6', "garde : une seule demande (le reste est le contenu de l'e-mail : « et qu'il ramène… », « ajoute que… ») → rien de signalé", async () =>
     ({ ok: d6.etape === 'MAIL_RETAPER' && !d6.nonFait, info: (d6.etape || d6.motif) + ' ; ' + JSON.stringify(d6.nonFait || null).slice(0, 80) }));
+  W.conv.length = 0; W.reponses.push(brouillon('Match', 'Bonjour Luc, le match est samedi à 10h.'));
+  await dire(sid, 'ajoute le match samedi à 10h à mon agenda et envoie un mail à luc@exemple.fr pour le prévenir', envoi('luc@exemple.fr'));
+  const red9 = JSON.stringify((W.conv[W.conv.length - 1] || {}).messages || []);
+  await t('D9', "garde : l'ordre inverse : ce qui PRÉCÈDE l'e-mail reste visible du rédacteur (« pour le prévenir » renvoie au match)", async () =>
+    ({ ok: /le match samedi à 10h/.test(red9) && /pour le prévenir/.test(red9), info: red9.slice(0, 120) }));
   const dm = typeof V.demandesMultiples === 'function' ? [
     V.demandesMultiples('lis mes mails puis transfère les factures à paul@x.fr').map(x => x.type).join(),
     V.demandesMultiples('envoie un mail à luc@x.fr et ne supprime pas le match, et supprime pas le rappel').map(x => x.type).join(),
@@ -584,7 +591,8 @@ https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts
     /* W [S76] le reveil de Render */
     const reveil = async (o) => {
       const P = await page({ routes: o.routes }); pages.push(P);
-      Object.assign(P.w.eval('Reveil').reglages, o.reglages || {});
+      const rv = await essai(() => P.w.eval('Reveil'), null);   /* absent sur la v4.9 : le test echoue, la suite continue */
+      if (rv && rv.reglages) Object.assign(rv.reglages, o.reglages || {});
       P.$('msg').value = o.message || 'bonjour'; P.clic(P.$('envoyer'));
       return P;
     };
@@ -618,6 +626,10 @@ https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts
     await dort(1800);
     await t('W4', "serveur qui ne se réveille pas : la page abandonne au bout du délai et le dit (une seule demande envoyée, pas de boucle)", async () =>
       ({ ok: chats(W4).length === 1 && /ne se réveille pas/.test(W4.$('fil').textContent) && !bulleReveil(W4), info: chats(W4).length + ' envoi(s) ; ' + [...W4.d.querySelectorAll('#fil .tour')].pop().textContent.slice(0, 60) }));
+    const W5 = await reveil({ reglages: { sondeMs: 200, pauseMs: 100 }, routes: async (u) => u.includes('/api/chat') ? { __brut: '<html>524 A timeout occurred</html>', status: 524 } : /\/health$/.test(u) ? { status: 'ok' } : undefined });
+    await dort(600);
+    await t('W5', "garde : une erreur HTML 524 (délai dépassé APRÈS traitement) n'est jamais rejouée : une seule demande", async () =>
+      ({ ok: chats(W5).length === 1, info: chats(W5).length + ' envoi(s)' }));
 
     /* D [S74] la page dit ce qui n'est pas fait */
     const P3 = await page({ routes: (u) => u.includes('/api/chat') ? { decide: 'PREPARE', etape: 'MAIL_OUVRIR', outil: 'mailto', aOuvrir: { a: 'paul@exemple.fr', objet: 'o', texte: 't', mailto: 'mailto:paul@exemple.fr?subject=o&body=t' },

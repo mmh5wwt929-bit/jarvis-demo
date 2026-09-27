@@ -1,8 +1,9 @@
 # JARVIS — consignes pour Claude (dépôt public : aucun secret, aucune adresse privée)
 
-## État en ligne (branche `Racine`)
-- Passerelle **v4.9.0**, empreinte du manifeste `458afd8d005f`, Node 24 (Render), CI GitHub Actions Node 22 et 24.
-- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.0.
+## État (branche `Racine`, après fusion de la PR v4.9.1)
+- Passerelle **v4.9.1** (avant : v4.9.0, empreinte `458afd8d005f`) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
+- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.1, `jarvis-verite.js` 1.4.
+- v4.9.1 : « Ouvrir dans Mail » (mailto:), demande double dite, historique 12 échanges, pages `/confidentialite` et `/conditions`.
 - Render déploie `Racine` seulement « After CI Checks Pass ».
 - Deux services, même code :
   - démo publique (sans `JARVIS_CLE_ACCES`) : **jamais** de variable Gmail, agenda ou élévation ;
@@ -22,6 +23,7 @@
 | `jarvis-elevation.js` | Face ID (WebAuthn) et code de secours, liés à UNE transaction. |
 | `jarvis-gmail.js` | Gmail du compte d'essai : envoi (liste fermée) et lecture, deux jetons séparés. |
 | `jarvis-appli.js` | Manifeste web et icônes (écran d'accueil). |
+| `confidentialite.html`, `conditions.html` | Pages publiques exigées par Google (appli OAuth en Production). |
 | `jarvis-manifeste.js` + `MANIFESTE.json` | Empreintes SHA-256 des fichiers qui tournent ; CI refuse un dépôt non conforme. |
 | `tests-*.js` | Une suite par version ; `tests-vXY.js` = les tests de la version XY. |
 
@@ -30,7 +32,8 @@
 - Vrai e-mail = **Face ID seul** (le code de secours est refusé), après adresse retapée et fenêtre de 10 s.
 - Droits minimaux : un jeton `gmail.send` seul pour envoyer, un autre `gmail.readonly` seul pour lire ; portée vérifiée à chaque jeton d'accès ; même jeton pour les deux = refus.
 - Tout contenu lu (e-mail, agenda) est **externe** (`CONTENT_DERIVED`), déclaré à la couche avant que le modèle le voie ; il ne fournit jamais une action, une cible, un lien, ni une offre d'exécuter ce qu'il demande.
-- Destinataire d'un envoi : adresse tapée par la personne dans la demande (C3), jamais tirée d'un contenu lu ou d'un souvenir.
+- Destinataire d'un envoi : adresse tapée par la personne dans la demande (C3), jamais tirée d'un contenu lu ou d'un souvenir. Vrai pour « Ouvrir dans Mail » aussi (pas de liste, pas de Face ID : c'est la personne qui envoie ; trace « préparé », jamais « envoyé »).
+- Une action par message : ce qui n'est pas fait est dit par le serveur ; le modèle ne propose jamais d'agir à la place de la personne.
 - Fermé par défaut : une variable mal réglée désactive l'outil et `/health` le dit ; jamais de repli silencieux vers la simulation.
 - Aucun secret (clé, jeton, client OAuth, code) dans un commit, un journal, une capture, un message ou une réponse d'API.
 
