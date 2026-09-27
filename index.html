@@ -371,7 +371,7 @@ body:not(.perso) .perso-seul{display:none!important}
       <div class="mesure">ancres publiées <b id="mAncres" class="mono">0</b></div>
       <div class="mesure">contexte déclaré <b id="mCouv" class="mono">—</b></div>
     </div>
-    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.9</div>
+    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.10.1</div>
   </div>
 </header>
 
@@ -1448,7 +1448,9 @@ const jetonFil = (x) => typeof x === 'string' && /^fl_[0-9a-f-]{36}$/.test(x) ? 
 const carteJarvis = (h) => { const b = tour('JARVIS', '', false); b.querySelector('.quoi').outerHTML = h; $('fil').scrollTop = $('fil').scrollHeight; return b.lastElementChild || b; };
 function boutonsGerer(it) {
   const j = jetonFil(it.fil); if (!j) return '';
-  const acts = [...new Set(['voir'].concat((it.actions || []).filter(a => ACTIONS_GERER[a] && (a !== 'creneau' || (Number.isInteger(it.creneau) && it.creneau >= 0)))))];
+  /* [S89] v4.10.1 un mail suspect : ni réponse, ni rappel, ni créneau (le serveur les refuse aussi) */
+  const suspect = it.suspect === true || it.type === 'suspect';
+  const acts = [...new Set(['voir'].concat((it.actions || []).filter(a => ACTIONS_GERER[a] && !(suspect && a !== 'voir') && (a !== 'creneau' || (Number.isInteger(it.creneau) && it.creneau >= 0)))))];
   return '<div class="rang gerer-actions">' + acts.map(a => '<button type="button" data-gerer="' + a + '" data-fil="' + esc(j) + '"'
     + (a === 'creneau' ? ' data-index="' + it.creneau + '"' : '') + '>' + ACTIONS_GERER[a] + '</button>').join('') + '</div>';
 }
@@ -1488,8 +1490,8 @@ function afficherConversation(r) {
       + '<div class="mail-texte">' + esc(m.texte) + '</div>' + ((m.piecesJointes || []).length ? '<p class="mail-entete">Pièce(s) jointe(s) : ' + esc(m.piecesJointes.join(', ')) + '</p>' : '') + '</div>').join('')
     + (reperes.length ? '<div class="gerer-section"><b>Repéré par les règles (à vérifier)</b>' + reperes.map(x => '<p class="preuve">• ' + esc(x) + '</p>').join('') + '</div>' : '')
     + '<p class="pdj-note">' + esc(r.transparence || '') + '</p>'
-    + (j ? '<div class="rang gerer-actions">' + (r.suspect ? '' : '<button type="button" data-gerer="repondre" data-fil="' + esc(j) + '">Préparer une réponse</button>')
-      + '<button type="button" data-gerer="rappel" data-fil="' + esc(j) + '">Me le rappeler</button></div>' : '') + '</div>';
+    + (j && !r.suspect ? '<div class="rang gerer-actions"><button type="button" data-gerer="repondre" data-fil="' + esc(j) + '">Préparer une réponse</button>'
+      + '<button type="button" data-gerer="rappel" data-fil="' + esc(j) + '">Me le rappeler</button></div>' : '') + '</div>';   /* [S89] suspect : aucun bouton */
   return carteJarvis(h);
 }
 function afficherCreneau(r) {

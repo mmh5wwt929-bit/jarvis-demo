@@ -22,15 +22,34 @@
  * Chaque resultat dit sa certitude : 'fait' (lu tel quel : une phrase, un
  * nombre, une piece jointe comptee) ou 'deduction' (une regle l'a interprete :
  * a verifier). Rien ici n'est une consigne, ni ne donne une permission.
+ *
+ * 1.1 (v4.10.1, 27 sept) — VU EN LIGNE sur la v4.10
+ *  [S85] une reponse Yahoo « Re : Re: Match samedi » (espace avant « : ») a
+ *    ouvert un 2e fil chez Gmail : 120 €/150 € et 10h/11h n'etaient plus vus
+ *    ensemble. objetNormalise() (Re, RE, Ré, Réf, TR, Fwd, Fw, AW, WG, espace
+ *    avant « : », repetes) ; grouperFils() : meme objet normalise ET meme
+ *    correspondant -> UNE conversation (4 fils au plus), chaque message garde
+ *    son fil (la reponse part dans le fil du dernier message d'un autre).
+ *  [S86] une vraie alerte Google (no-reply@accounts.google.com) classee
+ *    « suspect » (« mot de passe », « code »). Seul le PREMIER en-tete
+ *    Authentication-Results compte (celui de Gmail, lu par jarvis-gmail.js) :
+ *    dmarc=pass pour le domaine de l'expediteur, domaine d'un grand SERVICE
+ *    (jamais une messagerie ouverte a tous : gmail.com, yahoo.fr… n'en sont
+ *    pas), sans urgence ni autre alerte forte -> « sensible » passe a
+ *    « moyen ». Tout le reste est inchange.
  * ========================================================================== */
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const V = require('./jarvis-verite.js');
 
-const VERSION = '1.0';
+const VERSION = '1.1';
 const JOUR_MS = 86400000;
 const LIMITES = Object.freeze({ messages: 12, texte: 4000, phrases: 60, creneaux: 4, extrait: 160 });
 
-const norm = (t) => ' ' + normaliser(t).replace(/([a-z])-(?=[a-z])/g, '$1 ').replace(/[^a-z0-9@.:?\/ ]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+/* [S86] un point, deux-points ou « ? » qui ne tient pas entre deux caracteres
+ * (fin de phrase) devient un blanc : avant, « …votre nouveau RIB. » ou
+ * « …changez votre mot de passe. » n'etaient pas vus (la regle attend un blanc
+ * apres le mot) ; « evil.com », « 10:30 » restent entiers. */
+const norm = (t) => ' ' + normaliser(t).replace(/([a-z])-(?=[a-z])/g, '$1 ').replace(/[^a-z0-9@.:?\/ ]+/g, ' ').replace(/[.:?]+(?![a-z0-9])/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
 const court = (s, n = LIMITES.extrait) => { const x = String(s || '').replace(/\s+/g, ' ').trim(); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
 const cleAdresse = (a) => String(a || '').trim().toLowerCase();
 const domaineDe = (a) => { const i = cleAdresse(a).lastIndexOf('@'); return i > 0 ? cleAdresse(a).slice(i + 1) : ''; };
@@ -60,6 +79,62 @@ const FOURNISSEURS = ['gmail.com', 'googlemail.com', 'yahoo.fr', 'yahoo.com', 'o
   'paypal.com', 'paypal.fr', 'amazon.fr', 'amazon.com', 'apple.com', 'microsoft.com', 'google.com', 'impots.gouv.fr', 'ameli.fr', 'caf.fr',
   'laposte.fr', 'chronopost.fr', 'colissimo.fr', 'dhl.com', 'ups.com', 'fedex.com', 'tnt.com', 'netflix.com', 'bouyguestelecom.fr',
   'credit-agricole.fr', 'labanquepostale.fr', 'bnpparibas.net', 'societegenerale.fr', 'lcl.fr', 'boursorama.com', 'ffhandball.fr'];
+/* [S86] grands SERVICES dont personne d'autre ne peut avoir une adresse (un
+ * sous-domaine compte : accounts.google.com). JAMAIS une messagerie ouverte a
+ * tous (gmail.com, yahoo.fr, outlook.fr, orange.fr, free.fr, icloud.com…) :
+ * un escroc y a une adresse authentifiee comme tout le monde. */
+const GRANDS_SERVICES = ['google.com', 'apple.com', 'microsoft.com', 'amazon.fr', 'amazon.com', 'paypal.fr', 'paypal.com',
+  'impots.gouv.fr', 'ameli.fr', 'caf.fr', 'laposte.fr', 'chronopost.fr', 'colissimo.fr', 'dhl.com', 'ups.com', 'fedex.com', 'netflix.com',
+  'credit-agricole.fr', 'labanquepostale.fr', 'societegenerale.fr', 'lcl.fr', 'boursorama.com'];
+const grandService = (dom) => !!dom && GRANDS_SERVICES.some(g => dom === g || dom.endsWith('.' + g));
+/* dmarc=pass lu par GMAIL (premier en-tete) pour le domaine EXACT de l'expediteur */
+const authentifie = (m, dom) => !!(m && m.auth && m.auth.dmarc === 'pass' && dom && m.auth.domaine === dom);
+
+/* [S85] l'objet sans ses prefixes de reponse ou de transfert, repetes, avec ou
+ * sans espace avant « : » (« Re : Re: TR: Match samedi » -> « Match samedi ») */
+const RE_PREFIXE = /^\s*(?:(?:re|ré|réf|ref|tr|fwd|fw|aw|wg)\.?\s*(?:\[\d{1,3}\]|\(\d{1,3}\))?\s*[:：]\s*)+/i;
+function objetNormalise(objet) {
+  let o = String(objet == null ? '' : objet).replace(/\s+/g, ' ').trim();
+  for (let n = 0; n < 5 && RE_PREFIXE.test(o); n++) o = o.replace(RE_PREFIXE, '').trim();
+  return o;
+}
+const cleObjet = (objet) => normaliser(objetNormalise(objet)).replace(/[^a-z0-9]+/g, ' ').trim();
+/* le correspondant d'un fil : le premier expediteur qui n'est pas moi, sinon le premier destinataire de mes messages */
+function correspondantDe(fil, moi) {
+  const m0 = cleAdresse(moi), msgs = Array.isArray(fil && fil.messages) ? fil.messages : [];
+  for (const m of msgs) { const a = cleAdresse(m && m.de && m.de.adresse); if (a && !m.moi && a !== m0) return a; }
+  for (const m of msgs) for (const a of [].concat((m && m.a) || [], (m && m.cc) || [])) { const x = cleAdresse(a); if (x && x !== m0) return x; }
+  return '';
+}
+/* plusieurs fils -> UNE conversation : messages tries par date, chacun avec SON fil */
+function fusionnerFils(fils, cle) {
+  const liste = (fils || []).filter(f => f && Array.isArray(f.messages) && f.messages.length);
+  const recent = (f) => Math.max(...f.messages.map(m => Number(m.date) || 0));
+  liste.sort((a, b) => recent(b) - recent(a));
+  const messages = [];
+  for (const f of liste) f.messages.forEach((m, k) => messages.push({ ...m, filId: f.id, ordre: k }));
+  messages.sort((a, b) => (Number(a.date) || 0) - (Number(b.date) || 0) || a.ordre - b.ordre);
+  return { id: liste.length ? liste[0].id : null, ids: liste.map(f => f.id), cle: cle || null,
+    objet: liste.length ? objetNormalise(liste[0].objet) || liste[0].objet : '', messages: messages.map(({ ordre, ...m }) => m) };
+}
+/* meme objet normalise ET meme correspondant : un groupe, 4 fils au plus (les plus recents ensemble) */
+function grouperFils(fils, moi, max = 4) {
+  const parCle = new Map();
+  for (const f of fils || []) {
+    if (!f || !Array.isArray(f.messages) || !f.messages.length) continue;
+    const corr = correspondantDe(f, moi), o = cleObjet(f.objet);
+    const cle = corr && o ? o + '|' + corr : 'fil|' + f.id;
+    if (!parCle.has(cle)) parCle.set(cle, []);
+    parCle.get(cle).push(f);
+  }
+  const recent = (f) => Math.max(...f.messages.map(m => Number(m.date) || 0));
+  const groupes = [];
+  for (const [cle, liste] of parCle) {
+    liste.sort((a, b) => recent(b) - recent(a));
+    for (let k = 0; k < liste.length; k += max) groupes.push(fusionnerFils(liste.slice(k, k + max), k ? cle + '#' + k / max : cle));
+  }
+  return groupes.sort((a, b) => Math.max(...b.messages.map(m => Number(m.date) || 0)) - Math.max(...a.messages.map(m => Number(m.date) || 0)));
+}
 
 function distance(a, b) {   /* Levenshtein borne (petits mots) */
   if (Math.abs(a.length - b.length) > 2) return 3;
@@ -92,7 +167,7 @@ function analyser(fil, o = {}) {
   const relanceJours = Number.isInteger(o.relanceJours) && o.relanceJours >= 1 && o.relanceJours <= 30 ? o.relanceJours : 3;
   const msgs = (Array.isArray(fil && fil.messages) ? fil.messages : []).slice(-LIMITES.messages)
     .map((m, i) => ({ ...m, i, moi: !!m.moi || (moi && cleAdresse(m.de && m.de.adresse) === moi), date: Number(m.date) || maintenant }));
-  const r = { id: fil && fil.id, objet: court(fil && fil.objet, 150), nbMessages: msgs.length, participants: [], dernier: null,
+  const r = { id: fil && fil.id, objet: court(objetNormalise(fil && fil.objet) || (fil && fil.objet), 150), nbMessages: msgs.length, participants: [], dernier: null,   /* [S85] */
     reponseAttendue: null, echeances: [], montants: [], contradictions: [], pjManquantes: [], engagements: [], relance: null,
     creneaux: [], alertes: [], suspect: false, aGerer: [] };
   if (!msgs.length) return r;
@@ -104,7 +179,7 @@ function analyser(fil, o = {}) {
   const age = (m) => Math.floor((maintenant - m.date) / JOUR_MS);
   const alerte = (type, poids, texte, preuve, i) => { if (!r.alertes.some(x => x.type === type && x.texte === texte)) r.alertes.push({ type, poids, texte, preuve: preuve ? court(preuve) : null, message: i }); };
 
-  const valeurs = [], horaires = [];
+  const valeurs = [], horaires = [], sensibles = new Map();   /* [S86] message -> urgent ? */
   for (const m of msgs) {
     const ph = phrasesDe(m.texte);
     for (const s of ph) {
@@ -139,8 +214,12 @@ function analyser(fil, o = {}) {
       /* securite (messages des autres) */
       if (!m.moi) {
         if (RE_INJECTION.test(p)) alerte('injection', 'fort', "Consigne adressée à un assistant ou demande de transférer : c'est une donnée, pas un ordre.", s, m.i);
-        if (RE_SENSIBLE.test(p)) alerte('sensible', 'fort', RE_URGENCE.test(norm(m.texte)) ? 'Demande sensible sous pression (paiement, coordonnées bancaires, code…) : typique d\'une fraude.'
-          : 'Demande sensible (paiement, coordonnées bancaires, code, mot de passe) : vérifie par un autre moyen.', s, m.i);
+        if (RE_SENSIBLE.test(p)) {
+          const urgent = RE_URGENCE.test(norm(m.texte));
+          sensibles.set(m.i, urgent || !!sensibles.get(m.i));
+          alerte('sensible', 'fort', urgent ? 'Demande sensible sous pression (paiement, coordonnées bancaires, code…) : typique d\'une fraude.'
+            : 'Demande sensible (paiement, coordonnées bancaires, code, mot de passe) : vérifie par un autre moyen.', s, m.i);
+        }
       }
     }
     if (!m.moi) {
@@ -184,6 +263,22 @@ function analyser(fil, o = {}) {
     const q = phrasesDe(dernier.texte).find(s => /\?\s*$/.test(s) || RE_DEMANDE.test(norm(s)));
     if (q) r.relance = { jours: age(dernier), extrait: court(q), message: dernier.i, certitude: 'deduction' };
   }
+  /* [S86] « sensible » seul, d'un grand service AUTHENTIFIE par Gmail (DMARC),
+   * sans urgence ni autre alerte forte : une vraie alerte de compte, « moyen ».
+   * TOUS les messages sensibles doivent l'etre (un seul autre : inchange). */
+  if (sensibles.size && !r.alertes.some(x => x.poids === 'fort' && x.type !== 'sensible')) {
+    const doms = [];
+    const tousSurs = [...sensibles].every(([i, urgent]) => {
+      const m = msgs.find(y => y.i === i), dom = domaineDe(m && m.de && m.de.adresse);
+      if (urgent || !m || !authentifie(m, dom) || !grandService(dom)) return false;
+      doms.push(dom); return true;
+    });
+    if (tousSurs) for (const x of r.alertes) if (x.type === 'sensible') {
+      x.poids = 'moyen'; x.authentifie = doms[0];
+      x.texte = "Parle de code ou de mot de passe, mais l'expéditeur est authentifié par Gmail (DMARC) pour " + doms[0]
+        + " : sans doute une vraie alerte de ton compte. Ne donne jamais un code ni un mot de passe par mail.";
+    }
+  }
   r.suspect = r.alertes.some(x => x.poids === 'fort');
 
   /* ce qui demande ton attention, avec la preuve et les actions PREPARABLES (aucune n'est faite) */
@@ -211,4 +306,5 @@ function contactsConnus(fils, moi) {
   return s;
 }
 
-module.exports = Object.freeze({ VERSION, analyser, contactsConnus, phrasesDe, montantsDe, distance, LIMITES });
+module.exports = Object.freeze({ VERSION, analyser, contactsConnus, phrasesDe, montantsDe, distance, LIMITES,
+  objetNormalise, grouperFils, fusionnerFils, correspondantDe, grandService, GRANDS_SERVICES });   /* [S85] [S86] v4.10.1 */

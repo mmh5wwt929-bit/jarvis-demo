@@ -8,6 +8,12 @@
  * 1.2 (v4.10) : les CONVERSATIONS (lireFils) [S80] ; la REPONSE dans une
  *   conversation, hors liste fermee mais verifiee contre le fil avant l'envoi,
  *   puis dans les Envoyes apres (permisReponse, envoyerReponse) [S81]
+ * 1.3 (v4.10.1) : [S86] l'authentification lue par GMAIL : le PREMIER en-tete
+ *   Authentication-Results seulement (Gmail l'ajoute en tete a la reception ;
+ *   ceux d'en dessous viennent de l'expediteur, falsifiables), et seulement
+ *   s'il est signe « mx.google.com » ; [S85] References gardees (identifiants
+ *   <…> valides) : avant, nettoyer() les rendait illisibles et la reponse ne
+ *   portait que In-Reply-To.
  * ----------------------------------------------------------------------------
  * MOINDRE PRIVILEGE, PAR CONSTRUCTION
  *  - Deux jetons OAuth (refresh tokens) du compte d'essai, obtenus a part :
@@ -45,7 +51,7 @@ const https = require('https');
 const crypto = require('crypto');
 const { URL } = require('url');
 
-const VERSION = '1.2';
+const VERSION = '1.3';
 const LIMITES_MAIL = Object.freeze({ delaiMs: 12000, maxOctets: 1024 * 1024, permisMs: 30 * 1000,
   objetMax: 150, texteMax: 3000, autorisesMax: 10, plafondDefaut: 5, plafondMax: 20,
   lusMax: 5, extraitMax: 1200, diagnosticMs: 20000, lectureTotaleMs: 20000,
@@ -574,6 +580,20 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
   });
 }
 
+/* [S86] v4.10.1 ce que GMAIL a verifie a la reception : le PREMIER en-tete
+ * « Authentication-Results » (entete() rend le premier), signe mx.google.com ;
+ * dmarc=<resultat> et header.from=<domaine>. Rien d'autre n'est cru. */
+function authDe(m) {
+  const h = entete(m, 'authentication-results');
+  if (!/^\s*mx\.google\.com\s*;/i.test(h)) return null;
+  const dm = /(?:^|;)\s*dmarc\s*=\s*([a-z]+)([^;]*)/i.exec(h);
+  if (!dm) return null;
+  const from = /(?:^|\s)header\.from\s*=\s*([A-Za-z0-9.-]{1,253})(?=[\s;]|$)/i.exec(dm[2]);
+  return Object.freeze({ dmarc: dm[1].toLowerCase(), domaine: from ? from[1].toLowerCase().replace(/\.$/, '') : null });
+}
+/* [S85] les identifiants de References, valides seulement (<…> sans blanc), 10 au plus */
+const referencesDe = (m) => entete(m, 'references').split(/\s+/).filter(x => RE_MESSAGE_ID.test(x)).slice(-10).join(' ');
+
 /* [S80] une conversation Gmail -> { id, objet, messages[] } (donnees, bornees) */
 function convertirFil(id, json, moi) {
   const m0 = cleAdresse(moi);
@@ -587,11 +607,13 @@ function convertirFil(id, json, moi) {
       repondreA: (adressesDe(entete(m, 'reply-to'))[0] || {}).adresse || null, date: Number(m.internalDate) || 0,
       objet: nettoyer(decoderEntete(entete(m, 'subject')), 200), texte: brut.slice(0, LIMITES_MAIL.texteFil), coupe: brut.length > LIMITES_MAIL.texteFil,
       piecesJointes: Object.freeze(piecesDe(m.payload)), messageId: RE_MESSAGE_ID.test(mid) ? mid : null,
-      references: nettoyer(entete(m, 'references'), 2000), moi: labels.includes('SENT') || (!!m0 && de.adresse === m0), nonLu: labels.includes('UNREAD') });
+      references: referencesDe(m), auth: authDe(m),   /* [S85] [S86] */
+      moi: labels.includes('SENT') || (!!m0 && de.adresse === m0), nonLu: labels.includes('UNREAD') });
   });
   return Object.freeze({ id, objet: messages.length ? messages[0].objet : '', messages: Object.freeze(messages) });
 }
 
 module.exports = Object.freeze({ VERSION, creerMail, adresseValide, liensDe, verifierContenu, messageBrut, motEncode, lireClient, lireAutorises, valeurPropre, mailto,
   verifierReponse, adressesDe, decoderEntete, partieNouvelle, convertirFil,   /* [S80] [S81] v4.10 */
+  authDe,   /* [S86] v4.10.1 */
   PORTEE_ENVOI, PORTEE_LECTURE, LIMITES_MAIL });
