@@ -432,11 +432,13 @@ const ELEVATION_EXIGEE = !!(ELEVATION && ELEVATION.actif) || ELEVATION_MAL_CONFI
  *  mal regle, il est refuse (ferme par defaut), pas « envoye en simulation ». */
 let MAIL = null, MAIL_ENVOI = null, MAIL_LECTURE = null, MAIL_ENVOI_MOTIF = null, MAIL_LECTURE_MOTIF = null;
 const MAIL_ENVOI_CONFIGURE = ['JARVIS_GMAIL_ENVOI', 'JARVIS_MAIL_AUTORISES'].some(VAR_ENV);
-const MAIL_LECTURE_CONFIGUREE = VAR_ENV('JARVIS_GMAIL_LECTURE') || VAR_ENV('JARVIS_GMAIL_CLIENT_LECTURE');
-if (MAIL_ENVOI_CONFIGURE || MAIL_LECTURE_CONFIGUREE || VAR_ENV('JARVIS_GMAIL_CLIENT')) {
+/* [S77] v4.9.1 : le client OAuth en JSON, OU en ID + SECRET (plus simple a coller sur iPhone) */
+const MAIL_LECTURE_CONFIGUREE = ['JARVIS_GMAIL_LECTURE', 'JARVIS_GMAIL_CLIENT_LECTURE', 'JARVIS_GMAIL_CLIENT_LECTURE_ID', 'JARVIS_GMAIL_CLIENT_LECTURE_SECRET'].some(VAR_ENV);
+if (MAIL_ENVOI_CONFIGURE || MAIL_LECTURE_CONFIGUREE || ['JARVIS_GMAIL_CLIENT', 'JARVIS_GMAIL_CLIENT_ID', 'JARVIS_GMAIL_CLIENT_SECRET'].some(VAR_ENV)) {
   if (!CLE_ACCES) console.error('Gmail : IGNORE : instance publique (pas de JARVIS_CLE_ACCES).');
   else {
-    MAIL = GM.creerMail({ client: process.env.JARVIS_GMAIL_CLIENT, clientLecture: process.env.JARVIS_GMAIL_CLIENT_LECTURE,
+    MAIL = GM.creerMail({ client: process.env.JARVIS_GMAIL_CLIENT, clientId: process.env.JARVIS_GMAIL_CLIENT_ID, clientSecret: process.env.JARVIS_GMAIL_CLIENT_SECRET,
+      clientLecture: process.env.JARVIS_GMAIL_CLIENT_LECTURE, clientLectureId: process.env.JARVIS_GMAIL_CLIENT_LECTURE_ID, clientLectureSecret: process.env.JARVIS_GMAIL_CLIENT_LECTURE_SECRET,
       envoi: process.env.JARVIS_GMAIL_ENVOI, lecture: process.env.JARVIS_GMAIL_LECTURE,
       autorises: process.env.JARVIS_MAIL_AUTORISES, plafond: process.env.JARVIS_MAIL_PLAFOND, zone: FUSEAU });
     if (MAIL_ENVOI_CONFIGURE) {
@@ -1731,6 +1733,26 @@ const ERREURS_MAIL = {
   CONNEXION_REFUSEE: 'Google a refusé la connexion'
 };
 const erreurMail = (code) => ERREURS_MAIL[code] || 'échec (' + propre(code, 40) + ')';
+/* [S77] v4.9.1 : les motifs de CONFIGURATION Gmail, dits en francais (jamais une valeur) */
+const CONFIG_MAIL = (() => {
+  const o = {
+    JETON_ENVOI_ABSENT: "JARVIS_GMAIL_ENVOI est vide", JETON_ENVOI_ILLISIBLE: "JARVIS_GMAIL_ENVOI n'est pas un jeton lisible (recolle le refresh_token seul, sans guillemets)",
+    JETON_LECTURE_ILLISIBLE: "JARVIS_GMAIL_LECTURE n'est pas un jeton lisible (recolle le refresh_token seul, sans guillemets)",
+    MEME_JETON_POUR_LIRE_ET_ENVOYER: "le même jeton sert à lire et à envoyer : il en faut deux, un par droit",
+    LISTE_VIDE: "JARVIS_MAIL_AUTORISES est vide", LISTE_ILLISIBLE: "JARVIS_MAIL_AUTORISES contient une entrée qui n'est pas une adresse e-mail (10 au plus)",
+    PLAFOND_ILLISIBLE: "JARVIS_MAIL_PLAFOND doit être un nombre de 1 à 20", FACE_ID_REQUIS: "l'envoi réel exige une clé Face ID (JARVIS_PASSKEYS)"
+  };
+  for (const [p, v, nom] of [['CLIENT', 'JARVIS_GMAIL_CLIENT', ''], ['CLIENT_LECTURE', 'JARVIS_GMAIL_CLIENT_LECTURE', ' de lecture']]) Object.assign(o, {
+    [p + '_ABSENT']: 'client OAuth' + nom + ' absent : ' + v + ' (le JSON), ou ' + v + '_ID + ' + v + '_SECRET',
+    [p + '_JSON_ILLISIBLE']: v + " n'est pas un JSON lisible : recolle tout le fichier, ou utilise plutôt " + v + '_ID + ' + v + '_SECRET',
+    [p + '_ID_ABSENT']: "l'ID du client" + nom + ' manque (' + v + '_ID, ou client_id dans le JSON)',
+    [p + '_SECRET_ABSENT']: 'le code secret du client' + nom + ' manque (' + v + '_SECRET, ou client_secret dans le JSON)',
+    [p + '_ID_ILLISIBLE']: "l'ID du client" + nom + ' est illisible : il finit par .apps.googleusercontent.com',
+    [p + '_SECRET_ILLISIBLE']: 'le code secret du client' + nom + ' est illisible (il commence en général par GOCSPX-)',
+    [p + '_EN_DOUBLE']: 'le client' + nom + ' est donné deux fois (JSON, et ID + SECRET) avec des valeurs différentes : supprime une des deux formes' });
+  return Object.freeze(o);
+})();
+const expliquerMail = (code) => code ? (CONFIG_MAIL[code] || ERREURS_LECTURE[code] || ERREURS_MAIL[code] || null) : null;
 /* « objet : … texte : … » tapes par la personne : pris tels quels, sans modele */
 const RE_OBJET_TEXTE = /(?:^|[\s,;:.])objet\s*:\s*(.+?)\s*[,;.]?\s*(?:(?:le\s+)?(?:texte|message|contenu)\s*:\s*)([\s\S]+)$/i;
 const sansGuillemets = (x) => String(x).trim().replace(/^[«"“]\s*/, '').replace(/\s*[»"”]$/, '').trim();
@@ -2636,7 +2658,9 @@ const serveur = http.createServer((req, res) => {
       if (net && net.texte) memoriser(s, id, confirmation, net.texte, 'modele');
       s.enAttente.delete(b.jeton);
       /* [S47] la reponse dit TOUJOURS la simulation : on ne s'en remet pas au modele */
-      const texteRep = net && net.texte ? (/simul/i.test(net.texte) ? net.texte : TEXTE_SIMULATION + '\n\n' + net.texte) : TEXTE_SIMULATION;
+      /* [S78] un paiement simule n'est pas « parti » */
+      const simu = att && att.action === 'PAY' ? "En simulation : aucun paiement n'a réellement eu lieu." : att && att.action !== 'SEND' ? "En simulation : rien n'a réellement été fait." : TEXTE_SIMULATION;
+      const texteRep = net && net.texte ? (/simul/i.test(net.texte) ? net.texte : simu + '\n\n' + net.texte) : simu;
       return json(200, { etat: 'EXECUTE', reponse: texteRep, simule: true, motif: rep.ok ? null : rep.erreur, retirees: net ? net.retirees.length : 0,
         trace: s.g.trace(String(b.jeton)), ...etatDe(s) });   /* [S29] */
     });
@@ -2823,13 +2847,15 @@ const serveur = http.createServer((req, res) => {
     if (!s) return inconnue();
     return json(200, { configure: !!MAIL, envoi: MAIL_ENVOI ? 'actif' : MAIL_ENVOI_MOTIF ? 'erreur-config' : 'inactif', envoiMotif: MAIL_ENVOI_MOTIF,
       lecture: MAIL_LECTURE ? 'actif' : MAIL_LECTURE_MOTIF ? 'erreur-config' : 'inactif', lectureMotif: MAIL_LECTURE_MOTIF,
+      envoiExplication: expliquerMail(MAIL_ENVOI_MOTIF), lectureExplication: expliquerMail(MAIL_LECTURE_MOTIF),   /* [S77] */
       autorises: MAIL ? MAIL.nbAutorises : 0, plafond: MAIL ? MAIL.plafond : 0, restants: MAIL_ENVOI ? MAIL_ENVOI.restants() : 0 });
   }
   if (u.pathname === '/api/mail/diagnostic' && req.method === 'GET') {
     const s = sessionDe(sid());
     if (!s) return inconnue();
     if (!MAIL) return json(200, { ok: false, code: 'GMAIL_ABSENT', message: "Aucun compte Gmail n'est relié (variables JARVIS_GMAIL_… absentes)." });
-    return MAIL.diagnostic().then(d => json(200, { ...d, envoi: MAIL_ENVOI ? 'actif' : MAIL_ENVOI_MOTIF ? 'erreur-config' : 'inactif', envoiMotif: MAIL_ENVOI_MOTIF,
+    return MAIL.diagnostic().then(d => json(200, { ...d, etapes: (d.etapes || []).map(e => e.ok ? e : { ...e, explication: expliquerMail(e.code) }),   /* [S77] */
+      envoi: MAIL_ENVOI ? 'actif' : MAIL_ENVOI_MOTIF ? 'erreur-config' : 'inactif', envoiMotif: MAIL_ENVOI_MOTIF,
       lecture: MAIL_LECTURE ? 'actif' : MAIL_LECTURE_MOTIF ? 'erreur-config' : 'inactif', lectureMotif: MAIL_LECTURE_MOTIF }),
       () => json(500, { ok: false, code: 'DIAGNOSTIC_IMPOSSIBLE' }));
   }

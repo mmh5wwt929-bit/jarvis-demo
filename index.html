@@ -962,7 +962,8 @@ function rendreDecision(d) {
   if (d.decide === 'EN_ATTENTE') {
     h += '<div class="retenue"><p class="compte">' + esc(d.message) + '</p><div class="rang">'
       +  '<button class="danger" data-annuler="' + esc(d.jetonAnnulation) + '">Annuler</button>'
-      +  '<button data-finaliser="' + esc(d.jetonAnnulation) + '" data-apres="' + esc(String(Number(d.executableApres) || 0)) + '" disabled>Confirmer l\'envoi</button></div></div>';
+      +  '<button data-finaliser="' + esc(d.jetonAnnulation) + '" data-action="' + esc(p.action || '') + '" data-apres="' + esc(String(Number(d.executableApres) || 0)) + '" disabled>'
+      +  esc(CONFIRMER_ACTE[p.action] || 'Confirmer') + '</button></div></div>';   /* [S78] un paiement n'est pas « envoyé » */
   }
   const bloc = tour('JARVIS', '', false);
   bloc.querySelector('.quoi').outerHTML = h;
@@ -972,6 +973,12 @@ function rendreDecision(d) {
   $('fil').scrollTop = $('fil').scrollHeight;
 }
 
+/* [S78] v4.9.1 : les mots de la confirmation suivent l'action (vu en ligne :
+ * un paiement simule finissait en « Envoyé. » sous « Confirmer l'envoi ») */
+const CONFIRMER_ACTE = { SEND: "Confirmer l'envoi" };
+const FAIT_SIMULE = { SEND: 'Envoyé.', PAY: 'Payé (simulation)' };
+const VERBE_CONFIRME = { SEND: 'envoyer', PAY: 'payer' };
+const acteDe = (jeton) => { const b = boutonsConfirmer(jeton)[0]; return (b && b.dataset.action) || ''; };
 /* [S23] « Confirmer l'envoi » reste grise tant que la fenetre court : le serveur
  * refuserait (TROP_TOT) et on voyait « Pas encore » en boucle. Le serveur reste
  * seul juge ; la page evite seulement le clic inutile. */
@@ -987,7 +994,8 @@ function compteARebours(jusqua, p) {
     const boite = p.closest('.retenue');
     if (boite && boite.dataset.close) { clearInterval(t); activerConfirmations(); return; }
     const r = Math.ceil((jusqua - Date.now()) / 1000);
-    if (r <= 0) { p.textContent = "Fenêtre écoulée. Confirme pour envoyer, ou annule."; activerConfirmations(); clearInterval(t); }
+    const acte = boite ? ((boite.querySelector('[data-finaliser]') || {}).dataset || {}).action : '';
+    if (r <= 0) { p.textContent = 'Fenêtre écoulée. Confirme pour ' + (VERBE_CONFIRME[acte] || 'valider') + ', ou annule.'; activerConfirmations(); clearInterval(t); }
     else p.textContent = 'Action irréversible retenue — ' + r + ' s avant que la confirmation soit possible.';
   }, 500);
 }
@@ -1066,13 +1074,17 @@ function direDansRetenue(jeton, texte) {
   const boite = retenueDe(jeton), p = boite && boite.querySelector('.compte');
   if (p) p.textContent = texte; else tour('JARVIS', texte, false);
 }
-function clore(jeton, texte) {
+/* [S78] masquer : l'action est FAITE (envoyée, payée) ; « Annuler » et le
+ * bouton grisé n'ont plus de sens, ils disparaissent (vu en ligne sous
+ * « Envoyé pour de vrai »). Annulée ou périmée : ils restent, grisés. */
+function clore(jeton, texte, masquer) {
   confirmationsFaites.add(jeton);
   const carte = carteElevation(jeton); if (carte) fermerCarte(carte);
   const boite = retenueDe(jeton); if (!boite) return;
   boite.dataset.close = '1';
   const p = boite.querySelector('.compte'); if (p) p.textContent = texte;
-  for (const b of boite.querySelectorAll('button')) { b.disabled = true; if (b.dataset.finaliser) b.dataset.apres = '9e15'; }
+  for (const b of boite.querySelectorAll('button')) { b.disabled = true; if (b.dataset.finaliser) b.dataset.apres = '9e15'; if (masquer) b.hidden = true; }
+  if (masquer) { const rg = boite.querySelector('.rang'); if (rg) rg.hidden = true; }
 }
 async function finaliserJeton(jeton) {
   const ouverte = carteElevation(jeton);
@@ -1084,7 +1096,7 @@ async function finaliserJeton(jeton) {
   for (const b of boutons) b.disabled = true;          /* [S35] pas de double envoi pendant la requête */
   let r = null;
   try { r = await api('/api/finaliser', { jeton }); } catch (e) { r = null; } finally { confirmationsEnCours.delete(jeton); }
-  if (!r) { rendre(); return direDansRetenue(jeton, 'Pas de réponse du serveur : réessaie « Confirmer l\'envoi ».'); }
+  if (!r) { rendre(); return direDansRetenue(jeton, 'Pas de réponse du serveur : réessaie « ' + (CONFIRMER_ACTE[acteDe(jeton)] || 'Confirmer') + ' ».'); }
   if (limiteAtteinte(r)) return rendre();
   majEtat(r);
   if (r.etat === 'ELEVATION_REQUISE') { rendre(); return demanderElevation(jeton, r.moyens || {}, r.pour); }
@@ -1092,14 +1104,15 @@ async function finaliserJeton(jeton) {
   if (r.etat === 'INTROUVABLE') return clore(jeton, 'Déjà traitée (envoyée ou annulée) : plus rien à confirmer.');
   if (r.etat === 'PERIME') return clore(jeton, r.message || TEXTE_PERIMEE);   /* [S40] */
   if (r.etat === 'EXECUTE' && r.reel) {   /* [S68] vrai e-mail : le SERVEUR dit s'il est parti, preuve de Google */
-    clore(jeton, r.envoye ? 'Envoyé pour de vrai.' : r.code === 'RESULTAT_INCERTAIN' ? 'Résultat incertain : vérifie les envoyés.' : "Pas parti : rien n'a été envoyé.");
+    clore(jeton, r.envoye ? 'Envoyé pour de vrai.' : r.code === 'RESULTAT_INCERTAIN' ? 'Résultat incertain : vérifie les envoyés.' : "Pas parti : rien n'a été envoyé.", true);   /* [S78] */
     tour('JARVIS', r.reponse || (r.envoye ? 'Envoyé.' : 'Pas parti.'), false);
     if (r.trace) ajouterTrace(r.trace);
     return;
   }
   if (r.etat === 'EXECUTE') {
-    clore(jeton, 'Envoyé.');
-    tour('JARVIS', 'Envoyé.', false);
+    const fait = FAIT_SIMULE[acteDe(jeton)] || 'Fait (simulation)';   /* [S78] */
+    clore(jeton, fait, true);
+    tour('JARVIS', fait, false);
     if (r.trace) ajouterTrace(r.trace);   /* [S29] [v4.7] */
     if (r.reponse) tour('Claude', r.reponse, false);
     return;
@@ -1584,7 +1597,8 @@ function afficherGmail(r) {
   const ok = r && r.ok;
   $('gmailMessage').textContent = !r ? 'Pas de réponse du serveur.' : r.message
     || (ok ? 'Prêt. Rien n\'a été envoyé.' : 'À régler : voir ci-dessous.') + (r.compte ? '' : '');
-  $('gmailEtapes').innerHTML = ((r && r.etapes) || []).map(e => '<div>' + (e.ok ? '✓ ' : '✗ ') + esc(ETAPES_GMAIL[e.etape] || e.etape) + (e.ok ? '' : ' : ' + esc(e.code)) + '</div>').join('')
+  $('gmailEtapes').innerHTML = ((r && r.etapes) || []).map(e => '<div>' + (e.ok ? '✓ ' : '✗ ') + esc(ETAPES_GMAIL[e.etape] || e.etape)
+      + (e.ok ? '' : ' : ' + (e.explication ? esc(e.explication) + ' <span class="mono">(' + esc(e.code) + ')</span>' : esc(e.code))) + '</div>').join('')   /* [S77] */
     + (r && r.compte ? '<div>Compte lu : <span class="mono">' + esc(r.compte) + '</span></div>' : '')
     + (r && Number.isFinite(r.autorises) ? '<div>Adresses autorisées : ' + esc(String(r.autorises)) + ' · envois restants aujourd\'hui : ' + esc(String(r.restants)) + ' / ' + esc(String(r.plafond)) + '</div>' : '');
   $('etatGmail').textContent = ok ? 'prêt' : 'à régler';

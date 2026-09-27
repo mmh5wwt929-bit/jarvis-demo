@@ -325,7 +325,167 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
     ({ ok: /Je ne peux pas envoyer/.test(o4.reponse || '') && /tape « envoie un mail à nom@domaine\.fr/.test(o4.reponse || '') && !/retiré une proposition/.test(o4.reponse || ''),
        info: JSON.stringify(o4.reponse || '').slice(0, 120) }));
 
+  /* ============== Y [S78] PAIEMENT : LE SERVEUR NE DIT PAS « PARTI » ============== */
+  IP = '86.6.6.1'; sid = await session();
+  const y0 = await dire(sid, 'paie la facture à luc@exemple.fr', { action: 'PAY', resource: 'BANQUE', target: 'luc@exemple.fr' });
+  W.reponses.push("C'est réglé.");
+  const y1 = y0.jetonAnnulation ? await avecFaceId(sid, y0.jetonAnnulation) : {};
+  await t('Y1', "paiement simulé confirmé : la réponse dit « aucun paiement n'a réellement eu lieu » (plus « rien n'est réellement parti »)", async () =>
+    ({ ok: y1.etat === 'EXECUTE' && /En simulation : aucun paiement n'a réellement eu lieu/.test(y1.reponse || '') && !/réellement parti/.test(y1.reponse || ''),
+       info: (y1.etat || y1.motif) + ' « ' + String(y1.reponse || '').slice(0, 70) + ' »' }));
+
+  /* ============== C [S77] CLIENT OAUTH : JSON OU ID + SECRET, COLLE DEPUIS UN IPHONE ============== */
+  const fauxT = () => { const vus = []; return { vus, transport: async (methode, url, entetes, corps) => { vus.push({ url, corps });
+    return /oauth2/.test(url) ? { ok: true, status: 200, texte: JSON.stringify({ access_token: 'a', expires_in: 3600, scope: /rt-lecture/.test(corps) ? PORTEE_L : PORTEE_E }) }
+      : { ok: true, status: 200, texte: JSON.stringify({ emailAddress: 'jarvis.essai@gmail.com' }) }; } }; };
+  const mk = (o) => { const f = fauxT(); const m = typeof GM.creerMail === 'function' ? essai(() => GM.creerMail({ envoi: RT_E, lecture: RT_L, autorises: AUTORISES, transport: f.transport, ...o }), null) : null; return { m, f }; };
+  const c1 = mk({ clientId: CLIENT_ID, clientSecret: CLIENT_SECRET });
+  const m1 = await c1.m, d1c = m1 ? await essai(() => m1.diagnostic(), {}) : {};
+  await t('C1', "ID + SECRET sans JSON (JARVIS_GMAIL_CLIENT_ID / _SECRET) : envoi et lecture actifs, le jeton est demandé avec CE client", async () =>
+    ({ ok: !!m1 && m1.envoiActif === true && m1.lectureActive === true && d1c.ok === true && c1.f.vus.some(x => /oauth2/.test(x.url) && x.corps.includes('client_id=' + encodeURIComponent(CLIENT_ID))),
+       info: m1 ? (m1.motifEnvoi || 'envoi ok') + ' ; ' + (m1.motifLecture || 'lecture ok') : 'module' }));
+  const colles = await Promise.all([
+    mk({ client: '{“web”:{“client_id”:“' + CLIENT_ID + '”,“client_secret”:“' + CLIENT_SECRET + '”}}' }).m,
+    mk({ client: '{« web »:{« client_id »:« ' + CLIENT_ID + ' »,« client_secret »:« ' + CLIENT_SECRET + ' »}}' }).m,
+    mk({ clientId: '  ' + CLIENT_ID + '/ \n', clientSecret: '“' + CLIENT_SECRET + '”' }).m,
+    mk({ clientId: CLIENT_ID.slice(0, 20) + ' ' + CLIENT_ID.slice(20), clientSecret: CLIENT_SECRET, envoi: ' “' + RT_E + '” ' }).m]);
+  await t('C2', "collé depuis un iPhone : guillemets courbes “ ” ou « », espaces, retour à la ligne, « / » en trop → accepté", async () =>
+    ({ ok: colles.every(m => m && m.envoiActif === true), info: colles.map(m => m ? (m.motifEnvoi || 'ok') : 'module').join(', ') }));
+  const motifs = await Promise.all([
+    { client: '{"web": {"client_id": "' + CLIENT_ID + '"' }, { clientId: '12345678', clientSecret: CLIENT_SECRET }, { clientId: CLIENT_ID, clientSecret: 'a b?c' },
+    { clientId: CLIENT_ID }, { clientSecret: CLIENT_SECRET }, { client: CLIENT, clientId: CLIENT_ID, clientSecret: 'GOCSPX-un-autre-secret' },
+    { client: CLIENT, clientLectureId: 'x.apps.googleusercontent.com', clientLectureSecret: CLIENT_SECRET }].map(o => mk(o).m));
+  const vuM = motifs.map(m => m ? (m.motifEnvoi || 'ok') + '/' + (m.motifLecture || 'ok') : 'module');
+  await t('C3', "motifs PRÉCIS (JSON, ID ou SECRET ; absent ; en double ; client de lecture), sans jamais la valeur", async () =>
+    ({ ok: vuM.join() === ['CLIENT_JSON_ILLISIBLE/CLIENT_JSON_ILLISIBLE', 'CLIENT_ID_ILLISIBLE/CLIENT_ID_ILLISIBLE', 'CLIENT_SECRET_ILLISIBLE/CLIENT_SECRET_ILLISIBLE',
+        'CLIENT_SECRET_ABSENT/CLIENT_SECRET_ABSENT', 'CLIENT_ID_ABSENT/CLIENT_ID_ABSENT', 'CLIENT_EN_DOUBLE/CLIENT_EN_DOUBLE', 'ok/CLIENT_LECTURE_ID_ILLISIBLE'].join()
+        && !JSON.stringify(motifs.map(m => m && [m.motifEnvoi, m.motifLecture])).includes('GOCSPX'), info: vuM.join(', ') }));
+
+  /* ---- serveurs a cote (la demo, et d'autres configurations), monde simule par un fichier ---- */
+  const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-v491-'));
+  const SC = path.join(TMP, 'scenario.json'), JO = path.join(TMP, 'journal.jsonl'), PRE = path.join(TMP, 'precharge.js');
+  const scenario = (o) => fs.writeFileSync(SC, JSON.stringify(o));
+  const journal = () => { try { return fs.readFileSync(JO, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse); } catch { return []; } };
+  scenario({});
+  fs.writeFileSync(PRE, `'use strict';
+const https = require('https'); const fs = require('fs'); const { EventEmitter } = require('events');
+const SC = ${JSON.stringify(SC)}, JO = ${JSON.stringify(JO)};
+const lire = () => { try { return JSON.parse(fs.readFileSync(SC, 'utf8')); } catch { return {}; } };
+const noter = (x) => fs.appendFileSync(JO, JSON.stringify(x) + '\\n');
+let nConv = 0;
+function repondre(methode, u, corps) {
+  const sc = lire();
+  if (u.hostname === 'api.anthropic.com') {
+    const b = JSON.parse(corps || '{}');
+    if (!b.system) { const p = String((b.messages[0] || {}).content || ''); const dem = p.split("Demande de l'utilisateur :\\n").pop().trim();
+      let best = null; for (const k of Object.keys(sc.plans || {})) if (dem.includes(k) && (!best || k.length > best.length)) best = k;
+      noter({ type: 'plan', demande: dem.slice(0, 300) });
+      return [200, { content: [{ type: 'text', text: JSON.stringify(best ? sc.plans[best] : { action: 'AUCUNE' }) }] }]; }
+    noter({ type: 'conv', system: b.system.slice(0, 200), messages: b.messages, temperature: b.temperature });
+    const r = (sc.reponses || [])[nConv++]; return [200, { content: [{ type: 'text', text: r == null ? "D'accord." : r }], usage: {} }];
+  }
+  if (u.hostname === 'oauth2.googleapis.com') { const q = new URLSearchParams(corps || ''); noter({ type: 'jeton', client: q.get('client_id') });
+    return [200, { access_token: 'at', expires_in: 3600, scope: /lecture/.test(q.get('refresh_token') || '') ? '${PORTEE_L}' : '${PORTEE_E}' }]; }
+  if (u.hostname === 'gmail.googleapis.com') { noter({ type: 'gmail', methode, path: u.pathname }); if (/profile/.test(u.pathname)) return [200, { emailAddress: 'jarvis.essai@gmail.com' }];
+    if (/send/.test(u.pathname)) return [200, { id: '18cabcdef0123', threadId: '18cabcdef0123' }]; return [200, { messages: [] }]; }
+  return [404, {}];
+}
+https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts; opts = {}; } if (typeof url === 'object' && !(url instanceof URL)) { opts = url; url = 'https://' + url.hostname + (url.path || '/'); }
+  const u = new URL(String(url)); const q = new EventEmitter(); let c = ''; q.write = (x) => { c += x; }; q.setTimeout = () => q; q.destroy = () => q;
+  q.end = (x) => { if (x) c += x; setTimeout(() => { const [st, j] = repondre((opts && opts.method) || 'GET', u, c);
+    const r = new EventEmitter(); r.statusCode = st; r.headers = {}; r.complete = true; r.resume = () => {}; cb(r); if (j != null) r.emit('data', Buffer.from(JSON.stringify(j))); r.emit('end'); r.emit('close'); }, 2); };
+  return q; };
+`);
+  let pc = PORT + 20;
+  const cotes = [];
+  const cote = async (env) => {
+    const p = pc++;
+    const e = spawn(process.execPath, ['-r', PRE, 'server.js'], { cwd: DIR, stdio: ['ignore', 'pipe', 'pipe'],
+      env: { PATH: process.env.PATH, ANTHROPIC_API_KEY: 'test', PORT: String(p), JARVIS_APPELS_HEURE: '500', ...env } });
+    let sortie = ''; e.stdout.on('data', d => { sortie += d; }); e.stderr.on('data', d => { sortie += d; });
+    const hd = { 'Content-Type': 'application/json', 'CF-Connecting-IP': '87.0.0.' + (p % 200), ...(env.JARVIS_CLE_ACCES ? { 'X-Jarvis-Cle': env.JARVIS_CLE_ACCES } : {}) };
+    const req = async (m, ch, b) => { const r = await fetch('http://localhost:' + p + ch, { method: m, headers: hd, body: b ? JSON.stringify(b) : undefined, signal: AbortSignal.timeout(8000) });
+      const x = await r.text(); try { return { status: r.status, ...JSON.parse(x) }; } catch { return { status: r.status, brut: x }; } };
+    let h = null; for (let i = 0; i < 100 && !h && e.exitCode === null; i++) { await dort(100); try { const x = await req('GET', '/api/health'); if (x.passerelle) h = x; } catch { /* pas encore */ } }
+    const sidC = (await essai(() => req('POST', '/api/session'), {})).sessionId;
+    const x = { h, req, sid: sidC, sortie: () => sortie, chat: (m, o = {}) => req('POST', '/api/chat', { sessionId: sidC, message: m, ...o }), arreter: () => { try { e.kill('SIGKILL'); } catch { /* deja */ } } };
+    cotes.push(x); return x;
+  };
+  const MAIL_ENV = { JARVIS_CLE_ACCES: CLE, JARVIS_PASSKEYS: PASSKEY, JARVIS_GMAIL_ENVOI: RT_E, JARVIS_GMAIL_LECTURE: RT_L, JARVIS_MAIL_AUTORISES: AUTORISES };
+  const sIdS = await cote({ ...MAIL_ENV, JARVIS_GMAIL_CLIENT_ID: CLIENT_ID, JARVIS_GMAIL_CLIENT_SECRET: CLIENT_SECRET, JARVIS_CONFIG_ATTENDUE: 'faceid,mail,boite' });
+  const dgS = sIdS.h ? await sIdS.req('GET', '/api/mail/diagnostic?sessionId=' + sIdS.sid) : {};
+  await t('C4', "serveur : JARVIS_GMAIL_CLIENT_ID + _SECRET (sans JSON) → envoi et boîte actifs, config « ok », diagnostic vert", async () =>
+    ({ ok: !!sIdS.h && sIdS.h.mail === 'actif' && sIdS.h.boite === 'actif' && sIdS.h.config === 'ok' && dgS.ok === true,
+       info: sIdS.h ? [sIdS.h.mail, sIdS.h.mailMotif, sIdS.h.boite, sIdS.h.config, dgS.ok].join(' ') : 'démarrage' }));
+  const sMal = await cote({ ...MAIL_ENV, JARVIS_GMAIL_CLIENT_ID: CLIENT_ID, JARVIS_GMAIL_CLIENT_SECRET: 'secret avec espaces ?!' });
+  const etM = sMal.h ? await sMal.req('GET', '/api/mail?sessionId=' + sMal.sid) : {};
+  const dgM = sMal.h ? await sMal.req('GET', '/api/mail/diagnostic?sessionId=' + sMal.sid) : {};
+  await t('C5', "secret mal collé : motif CLIENT_SECRET_ILLISIBLE expliqué en français (état et diagnostic), jamais la valeur", async () =>
+    ({ ok: sMal.h && sMal.h.mailMotif === 'CLIENT_SECRET_ILLISIBLE' && /code secret du client est illisible/.test(etM.envoiExplication || '')
+        && ((dgM.etapes || [])[0] || {}).explication === etM.envoiExplication && !/espaces \?!/.test(JSON.stringify([sMal.h, etM, dgM])),
+       info: (sMal.h ? sMal.h.mailMotif : 'démarrage') + ' ; ' + String(etM.envoiExplication || '').slice(0, 60) }));
+  sIdS.arreter(); sMal.arreter();
+
+  /* ============================ LA PAGE (jsdom) ============================ */
+  let J = null; try { J = require(process.env.JSDOM || 'jsdom'); } catch { J = null; }
+  const HTML = pageHtml;
+  const page = async ({ routes = null } = {}) => {
+    const vcj = new J.VirtualConsole(); const err = []; vcj.on('jsdomError', (e) => err.push(e.message));
+    const envois = [];
+    const dom = new J.JSDOM(HTML, { url: 'http://localhost:1/', runScripts: 'dangerously', virtualConsole: vcj, pretendToBeVisual: true,
+      beforeParse(w) {
+        w.localStorage.setItem('jarvis_cle', CLE);
+        w.fetch = async (url, o) => {
+          const u = String(url), b = o && o.body ? JSON.parse(o.body) : null;
+          envois.push({ u, ...(b || {}) });
+          const perso = routes ? await routes(u, b, w) : undefined;
+          const j = perso !== undefined ? perso : u.includes('/api/session') ? { sessionId: 's1' } : u.includes('/api/chat') ? { decide: 'SANS_OBJET', etape: 'CONVERSATION', reponse: 'ok', plan: { action: 'AUCUNE' } } : {};
+          if (j && j.__brut) return { ok: true, status: j.status || 200, headers: new w.Headers({ 'content-type': 'text/html' }), json: async () => { throw new SyntaxError('Unexpected token <'); }, text: async () => j.__brut, clone() { return this; } };
+          return { ok: true, status: 200, headers: new w.Headers({ 'content-type': 'application/json' }), json: async () => j, text: async () => JSON.stringify(j), clone() { return this; } };
+        };
+        w.scrollTo = () => {}; w.HTMLElement.prototype.scrollIntoView = () => {};
+      } });
+    await dort(300);
+    const w = dom.window, d = w.document, $ = (id) => d.getElementById(id);
+    const clic = (el) => el.dispatchEvent(new w.MouseEvent('click', { bubbles: true }));
+    return { w, d, $, clic, err, envois };
+  };
+  const pages = [];
+  if (J) {
+    /* B [S78] apres l'envoi : « Annuler » et le bouton grise disparaissent */
+    const retenue = (action, cible, reel) => ({ decide: 'EN_ATTENTE', etape: 'G2_FENETRE', plan: { action, target: cible }, jetonAnnulation: 'tx_00000000-0000-4000-8000-00000000000' + (reel ? '1' : action === 'PAY' ? '2' : '3'),
+      executableApres: 0, message: 'Action irreversible retenue 10 s. Annulable.', note: { signaux: [] }, ...(reel ? { outil: 'mail', mail: { a: cible, objet: 'o', texte: 't', reel: true } } : {}) });
+    const P1 = await page({ routes: (u, b) => u.includes('/api/finaliser') ? (b.jeton.endsWith('1') ? { etat: 'EXECUTE', reel: true, envoye: true, code: 'ENVOYE', preuve: '18cabc', reponse: 'Envoyé pour de vrai.' }
+      : { etat: 'EXECUTE', reponse: "En simulation : aucun paiement n'a réellement eu lieu." }) : u.includes('/api/annuler') ? { etat: 'ANNULE', message: 'Annulée.' } : undefined });
+    pages.push(P1);
+    const rendre = (x) => P1.w.eval('rendreDecision')(x);
+    const boiteDe = (j) => P1.d.querySelector('button[data-finaliser="' + j + '"]').closest('.retenue');
+    const cachee = (boite) => [...boite.querySelectorAll('button')].every(x => x.hidden || x.closest('[hidden]'));
+    const rR = retenue('SEND', 'luc@exemple.fr', true); rendre(rR);
+    await P1.w.eval('finaliserJeton')(rR.jetonAnnulation); await dort(100);
+    const bR = boiteDe(rR.jetonAnnulation);
+    await t('B1', "page : après « Envoyé pour de vrai », « Annuler » et « Confirmer l'envoi » (grisé) sont MASQUÉS", async () =>
+      ({ ok: /Envoyé pour de vrai/.test(bR.querySelector('.compte').textContent) && cachee(bR), info: [...bR.querySelectorAll('button')].map(x => x.textContent + (x.hidden ? ' (masqué)' : ' (visible)')).join(', ') }));
+    const rP = retenue('PAY', 'luc@exemple.fr', false); rendre(rP);
+    const bP = boiteDe(rP.jetonAnnulation), libP = bP.querySelector('[data-finaliser]').textContent;
+    await P1.w.eval('finaliserJeton')(rP.jetonAnnulation); await dort(100);
+    const bulleP = [...P1.d.querySelectorAll('#fil .tour')].map(x => x.textContent).filter(x => /Payé|Envoyé\./.test(x)).pop() || '';
+    await t('Y2', "page : un paiement se confirme par « Confirmer » et finit en « Payé (simulation) » (plus « Confirmer l'envoi » / « Envoyé. ») ; boutons masqués", async () =>
+      ({ ok: libP === 'Confirmer' && bP.querySelector('.compte').textContent === 'Payé (simulation)' && /Payé \(simulation\)/.test(bulleP) && !/Envoyé\./.test(bulleP) && cachee(bP),
+         info: '« ' + libP + ' » → « ' + bP.querySelector('.compte').textContent + ' »' }));
+    const rS = retenue('SEND', 'luc@exemple.fr', false); rendre(rS);
+    const bS = boiteDe(rS.jetonAnnulation), libS = bS.querySelector('[data-finaliser]').textContent;
+    await t('Y3', "garde : un envoi garde « Confirmer l'envoi »", async () => ({ ok: libS === "Confirmer l'envoi", info: libS }));
+    P1.clic(bS.querySelector('[data-annuler]')); await dort(150);
+    await t('B2', "garde : une action ANNULÉE garde ses boutons, grisés (seule une action faite les masque)", async () =>
+      ({ ok: /Annulée/.test(bS.querySelector('.compte').textContent) && [...bS.querySelectorAll('button')].every(x => x.disabled && !x.hidden), info: bS.querySelector('.compte').textContent }));
+  }
+
   /* ============================ RESULTATS ============================ */
+  if (J) await t('P0', "garde : aucune erreur JavaScript dans les pages", async () =>
+    ({ ok: pages.every(x => x.err.length === 0), info: pages.map(x => x.err[0]).filter(Boolean).join(' | ').slice(0, 120) || 'aucune' }));
+  for (const x of cotes) x.arreter();
+  try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* rien */ }
   log('JARVIS v4.9.1 (' + DIR + ')\n');
   for (const x of R) log((x.ok ? 'OK    ' : 'ECHEC ') + x.id.padEnd(5) + x.nom + (x.info !== undefined ? '  [' + x.info + ']' : ''));
   const ko = R.filter(x => !x.ok).length;
