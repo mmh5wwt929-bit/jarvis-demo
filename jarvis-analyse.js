@@ -42,7 +42,7 @@
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const V = require('./jarvis-verite.js');
 
-const VERSION = '1.1';
+const VERSION = '1.2';
 const JOUR_MS = 86400000;
 const LIMITES = Object.freeze({ messages: 12, texte: 4000, phrases: 60, creneaux: 4, extrait: 160 });
 
@@ -247,13 +247,13 @@ function analyser(fil, o = {}) {
   /* montants differents entre messages differents : a verifier (acompte + solde, ou erreur ?) */
   const parMsg = new Map(); for (const x of valeurs) { if (!parMsg.has(x.v)) parMsg.set(x.v, x); }
   if (parMsg.size >= 2 && new Set(valeurs.map(x => x.i)).size >= 2)
-    r.contradictions.push({ type: 'montant', texte: 'Montants différents dans la conversation : ' + [...parMsg.values()].slice(0, 4).map(x => euros(x.v) + ' (message ' + (x.i + 1) + ')').join(', ') + ' — à vérifier.',
+    r.contradictions.push({ type: 'montant', message: Math.max(...valeurs.map(x => x.i)), texte: 'Montants différents dans la conversation : ' + [...parMsg.values()].slice(0, 4).map(x => euros(x.v) + ' (message ' + (x.i + 1) + ')').join(', ') + ' — à vérifier.',
       extraits: [...parMsg.values()].slice(0, 4).map(x => court(x.s)), certitude: 'deduction' });
   /* horaires differents annonces pour un evenement, par des messages differents */
   const cles = new Map(); for (const x of horaires) { const k = (x.jour == null ? '?' : x.jour) + '|' + (x.h ? hhmm(x.h) : '?'); if (!cles.has(k)) cles.set(k, x); }
   const distinctsJ = new Set(horaires.filter(x => x.jour != null).map(x => x.jour)), distinctsH = new Set(horaires.filter(x => x.h).map(x => hhmm(x.h)));
   if (new Set(horaires.map(x => x.i)).size >= 2 && (distinctsJ.size >= 2 || distinctsH.size >= 2))
-    r.contradictions.push({ type: 'horaire', texte: 'Horaires différents annoncés : ' + [...cles.values()].slice(0, 4).map(x => (x.jour != null ? V.libelle(x.jour, false) : '') + (x.h ? ' ' + hhmm(x.h) : '') + ' (message ' + (x.i + 1) + ')').join(', ') + ' — lequel est le bon ?',
+    r.contradictions.push({ type: 'horaire', message: Math.max(...horaires.map(x => x.i)), texte: 'Horaires différents annoncés : ' + [...cles.values()].slice(0, 4).map(x => (x.jour != null ? V.libelle(x.jour, false) : '') + (x.h ? ' ' + hhmm(x.h) : '') + ' (message ' + (x.i + 1) + ')').join(', ') + ' — lequel est le bon ?',
       extraits: [...cles.values()].slice(0, 4).map(x => court(x.s)), certitude: 'deduction' });
   /* reponse attendue : la derniere parole est d'un autre, avec une question ou une demande */
   if (!dernier.moi) {
@@ -283,19 +283,31 @@ function analyser(fil, o = {}) {
   }
   r.suspect = r.alertes.some(x => x.poids === 'fort');
 
-  /* ce qui demande ton attention, avec la preuve et les actions PREPARABLES (aucune n'est faite) */
-  const item = (type, priorite, titre, extrait, certitude, actions) => r.aGerer.push({ type, priorite, titre, extrait: extrait || null, certitude, actions, filId: r.id, objet: r.objet });
-  if (r.suspect) item('suspect', 1, 'Mail suspect — « ' + r.objet + ' » : ne réponds pas, ne paie rien, ne clique pas.', (r.alertes.find(x => x.poids === 'fort') || {}).texte, 'deduction', ['mail']);
+  /* ce qui demande ton attention, avec la preuve et les actions PREPARABLES (aucune n'est faite) ;
+   * [1.2] v4.11 chaque point porte une REFERENCE stable (type + message source, jamais un texte qui
+   * change avec les jours) : la page peut le marquer « Fait » / « Plus tard » */
+  const idDe = (i) => { const m = msgs.find(x => x.i === i); return m && m.id ? String(m.id).slice(0, 40) : 'i' + i; };
+  const item = (type, priorite, titre, extrait, certitude, actions, ref) => r.aGerer.push({ type, priorite, titre, extrait: extrait || null, certitude, actions, filId: r.id, objet: r.objet, ref: type + ':' + ref });
+  /* [1.2] v4.11 vu en ligne (28 sept) : « les points ne descendent pas ». Une fois que TU as
+   * repondu dans la conversation, ce qu'un message ANTERIEUR proposait ou annoncait (rendez-vous,
+   * montants ou horaires differents, piece jointe absente) n'est plus a gerer ici (il reste dans
+   * « Voir la conversation ») ; un nouveau message de l'autre le fait revenir. */
+  const monDernier = msgs.reduce((k, m) => m.moi ? Math.max(k, m.i) : k, -1);
+  const repondu = (i) => Number.isInteger(i) && i < monDernier;
+  if (r.suspect) item('suspect', 1, 'Mail suspect — « ' + r.objet + ' » : ne réponds pas, ne paie rien, ne clique pas.', (r.alertes.find(x => x.poids === 'fort') || {}).texte, 'deduction', ['mail'],
+    idDe((r.alertes.find(x => x.poids === 'fort') || {}).message));
   if (r.reponseAttendue && !r.suspect) item('reponse', 2, 'Répondre à ' + (r.reponseAttendue.nom || r.reponseAttendue.de) + ' — « ' + r.objet + ' »' + (r.reponseAttendue.depuis ? ' (depuis ' + r.reponseAttendue.depuis + ' j)' : ''),
-    r.reponseAttendue.extrait, 'deduction', ['repondre', 'mail', 'rappel']);
+    r.reponseAttendue.extrait, 'deduction', ['repondre', 'mail', 'rappel'], idDe(r.reponseAttendue.message));
   for (const e of r.engagements) if (e.etat !== 'plus-tard')
-    item('engagement', e.etat === 'en-retard' ? 1 : 2, (e.etat === 'en-retard' ? 'En retard : ' : e.etat === 'aujourdhui' ? "Aujourd'hui : " : 'Bientôt : ') + 'tu as promis (' + e.libelle + ')', e.extrait, 'deduction', ['repondre', 'rappel']);
+    item('engagement', e.etat === 'en-retard' ? 1 : 2, (e.etat === 'en-retard' ? 'En retard : ' : e.etat === 'aujourdhui' ? "Aujourd'hui : " : 'Bientôt : ') + 'tu as promis (' + e.libelle + ')', e.extrait, 'deduction', ['repondre', 'rappel'],
+      idDe(e.message) + ':' + e.iso);
   for (const e of r.echeances) if (e.jour >= auj - 1 && e.jour <= auj + 3)
-    item('echeance', e.jour <= auj ? 1 : 2, 'Échéance ' + (e.jour < auj ? 'passée' : e.jour === auj ? "aujourd'hui" : e.libelle) + ' — « ' + r.objet + ' »', e.extrait, 'deduction', ['rappel', 'repondre']);
-  if (r.relance) item('relance', 3, 'Sans réponse depuis ' + r.relance.jours + ' jours — « ' + r.objet + ' » : relancer ?', r.relance.extrait, 'deduction', ['repondre', 'rappel']);
-  for (const x of r.pjManquantes) if (x.de === 'autre') item('pj', 3, 'Pièce jointe annoncée mais absente — « ' + r.objet + ' »', x.extrait, 'fait', ['repondre']);
-  for (const c of r.contradictions) item('contradiction', 2, 'À vérifier — « ' + r.objet + ' » : ' + c.texte, (c.extraits || [])[0], 'deduction', ['repondre']);
-  for (const c of r.creneaux) item('creneau', 2, 'Rendez-vous proposé : ' + c.libelle + ' — « ' + r.objet + ' »', c.extrait, 'deduction', ['creneau', 'repondre']);
+    item('echeance', e.jour <= auj ? 1 : 2, 'Échéance ' + (e.jour < auj ? 'passée' : e.jour === auj ? "aujourd'hui" : e.libelle) + ' — « ' + r.objet + ' »', e.extrait, 'deduction', ['rappel', 'repondre'],
+      idDe(e.message) + ':' + e.iso);
+  if (r.relance) item('relance', 3, 'Sans réponse depuis ' + r.relance.jours + ' jours — « ' + r.objet + ' » : relancer ?', r.relance.extrait, 'deduction', ['repondre', 'rappel'], idDe(r.relance.message));
+  for (const x of r.pjManquantes) if (x.de === 'autre' && !repondu(x.message)) item('pj', 3, 'Pièce jointe annoncée mais absente — « ' + r.objet + ' »', x.extrait, 'fait', ['repondre'], idDe(x.message));
+  for (const c of r.contradictions) if (!repondu(c.message)) item('contradiction', 2, 'À vérifier — « ' + r.objet + ' » : ' + c.texte, (c.extraits || [])[0], 'deduction', ['repondre'], c.type + ':' + idDe(c.message));
+  for (const c of r.creneaux) if (!repondu(c.message)) item('creneau', 2, 'Rendez-vous proposé : ' + c.libelle + ' — « ' + r.objet + ' »', c.extrait, 'deduction', ['creneau', 'repondre'], idDe(c.message) + ':' + c.iso + 'T' + hhmm(c.debut));
   r.aGerer.sort((a, b) => a.priorite - b.priorite);
   return r;
 }

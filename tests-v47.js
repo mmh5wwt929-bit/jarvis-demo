@@ -298,7 +298,7 @@ const PAGE = (() => { try { return fs.readFileSync(path.join(DIR, 'index.html'),
     const blocs = [...d.querySelectorAll('#defense details.bloc')];
     /* [v4.10.1] + « Affichage » (réglage « Tout afficher », instance privée seulement) : 10 */
     await t('P2', "les 9 sections de défense sont repliées sous un « + » (v4.9 : + Gmail ; v4.10.1 : + Affichage), et tous les identifiants d'avant existent encore", async () =>
-      ({ ok: blocs.length === (d.getElementById('blocAffichage') ? 10 : 9) && !!d.getElementById('blocGmail') && blocs.every(b => !b.open && b.querySelector('summary h2')) && manquants.length === 0,
+      ({ ok: blocs.length === (d.getElementById('blocAffichage') ? 10 : 9) + (d.getElementById('blocTraites') ? 1 : 0) /* [v4.11] + « Points marqués » (privée) */ && !!d.getElementById('blocGmail') && blocs.every(b => !b.open && b.querySelector('summary h2')) && manquants.length === 0,
          info: blocs.length + ' blocs, ' + blocs.filter(b => b.open).length + ' ouverts, manquants : ' + (manquants.join(',') || 'aucun') }));
     const conv = d.getElementById('fil').closest('.colonne');
     await t('P3', "l'écran commence par la conversation : fil et saisie dans la 1re colonne, l'accueil porte le parcours guidé", async () =>

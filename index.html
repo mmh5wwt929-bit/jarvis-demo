@@ -133,6 +133,7 @@ button.lien{background:none;border:none;color:var(--sourd);font-size:12px;
 .retenue .rang{display:flex;gap:7px}
 /* [S30-S32] carte de creation, Face ID, micro */
 .creation .evenement{margin:8px 0 4px;font-size:15px;font-weight:600;color:var(--texte,#e6edf3)}
+.creation .titre-evt{margin:8px 0 0;font-size:21px;font-weight:700;color:var(--texte,#e6edf3);overflow-wrap:anywhere}
 .creation .rang{display:flex;gap:7px;margin-top:10px}
 .elevation{margin-top:8px;padding:11px 13px;background:#101a2b;border:1px solid #1f3a5f;border-radius:8px}
 .elevation p{font-size:13px;margin-bottom:8px}
@@ -376,13 +377,57 @@ button.lire-tout{background:none;border:none;color:var(--signal);font-size:12.5p
 .bouton-vert{border-radius:999px;padding:5px 11px;font-size:12px;border-color:var(--sur);color:var(--sur);white-space:nowrap;margin-left:auto}
 /* [S92] la pastille garde son mot entier : faute de place, le bouton passe a la ligne */
 .bandeau:has(#repartirVert:not([hidden])){flex-wrap:wrap;row-gap:6px}
+/* [S102] v4.11 INSTANCE PRIVEE : une vue a la fois (Aujourd'hui / Discuter / Reglages), onglets en bas.
+ * La demo publique garde ses deux colonnes. */
+.onglets{display:none}
+body.prive{--haut-onglets:calc(54px + env(safe-area-inset-bottom,0px))}
+body.prive .onglets{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:50;background:var(--ardoise);border-top:1px solid var(--regle);
+  padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px));gap:6px}
+body.prive .onglets button{flex:1;border:none;background:none;color:var(--sourd);font-size:13.5px;padding:9px 4px;border-radius:8px}
+body.prive .onglets button[aria-current="page"]{color:var(--lumiere);background:var(--encre);font-weight:600}
+body.prive{padding-bottom:var(--haut-onglets)}
+body.prive main{grid-template-columns:minmax(0,1fr)}
+body.prive main>.colonne{display:none}
+body.prive[data-onglet="aujourdhui"] #aujourdhui,body.prive[data-onglet="discuter"] #conversation,body.prive[data-onglet="reglages"] #defense{display:flex}
+body.prive:not([data-onglet="reglages"]) footer{display:none}
+body.prive #basculeManuel{display:none}
+body.prive #conversation{height:calc(100vh - var(--haut-entete,0px) - var(--haut-onglets));height:calc(100svh - var(--haut-entete,0px) - var(--haut-onglets))}
+#aujourdhui{padding:6px 20px 24px;gap:10px}
+.auj-tete{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding-top:8px}
+.auj-tete h2{font-size:17px;font-weight:600;color:var(--lumiere)}
+#aujourdhui .point-du-jour{border:none;padding:0;background:none}
+/* le point du jour, en tete d'Aujourd'hui : l'agenda seul (le titre de la page et « À traiter » disent le reste) */
+#aujourdhui .pdj-mails,#aujourdhui .tour>.qui,#aujourdhui .point-du-jour>summary,#aujourdhui .pdj-corps>.pdj-note{display:none}
+#aujourdhui .tour{max-width:none}
+.auj-texte{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;text-align:left;background:none;border:none;border-radius:0;
+  padding:0;color:var(--texte);font-size:14.5px;line-height:1.4;width:100%}
+.auj-point.fort .auj-texte{color:var(--refus)}
+.auj-actions{gap:6px;margin-top:7px;flex-wrap:wrap}
+.auj-actions button{font-size:12.5px;padding:4px 10px}
+.auj-titre2{font-size:13px;color:var(--sourd);margin:6px 0 2px;text-transform:uppercase;letter-spacing:.06em}
+.auj-point{border-left:3px solid var(--regle);padding:6px 0 6px 12px;margin:6px 0}
+.auj-point.fort{border-left-color:var(--refus)}
+.auj-point>p{font-size:14px}
+.auj-erreur{color:var(--retenu);font-size:13.5px}
+.auj-annuler{font-size:13px;color:var(--sourd)}
+.gerer-item.traite{opacity:.75}
+.traite-ligne{font-size:13px;color:var(--sourd)}
+button.traite{font-size:12px;padding:4px 9px;color:var(--sourd)}
+/* [S102] un flux termine (reponse envoyee, evenement cree, ancienne liste) : une ligne, le detail au toucher */
+.replie>:not(.ligne-repliee){display:none!important}
+button.ligne-repliee{display:block;width:100%;text-align:left;background:none;border:none;padding:2px 0;color:var(--sourd);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+:not(.replie)>button.ligne-repliee{color:var(--texte);margin-bottom:6px;white-space:normal}
+@media(max-width:900px){
+  #aujourdhui{padding-left:16px;padding-right:16px}
+  body.prive .colonne:first-child{height:calc(100vh - var(--haut-entete,0px) - var(--haut-onglets));height:calc(100svh - var(--haut-entete,0px) - var(--haut-onglets))}
+}
 @media(max-width:900px){
   .corps,.titre-defense,.entete-detail .mesures,.marque-detail{padding-left:16px;padding-right:16px}
   details.bloc>summary::after{padding:0 16px}
 }
 </style>
 </head>
-<body>
+<body data-onglet="aujourdhui">
 
 <header>
   <div class="bandeau">
@@ -405,13 +450,13 @@ button.lire-tout{background:none;border:none;color:var(--signal);font-size:12.5p
       <div class="mesure">ancres publiées <b id="mAncres" class="mono">0</b></div>
       <div class="mesure">contexte déclaré <b id="mCouv" class="mono">—</b></div>
     </div>
-    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.10.2</div>
+    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.11.0</div>
   </div>
 </header>
 
 <main>
   <!-- ─────────── conversation ─────────── -->
-  <section class="colonne">
+  <section class="colonne" id="conversation">
     <div id="fil">
       <div class="tour" id="accueil">
         <div class="qui">JARVIS</div>
@@ -450,7 +495,16 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
       <summary><h2>Affichage <span class="mono" id="etatAffichage"></span></h2></summary>
       <div class="corps">
         <p><label><input type="checkbox" id="toutAfficher"> Tout afficher</label></p>
+        <p><button type="button" id="basculeManuelReglages">Imposer l'action à la main (démonstration)</button></p>
         <p class="pdj-note">Sur ton instance, JARVIS n'affiche d'abord que l'essentiel : le verdict, les alertes fortes, l'e-mail à relire, l'adresse à retaper, Face ID et les boutons. Codes, risque, signaux d'information et preuves restent à un toucher (« + détail »). Coché : tout est déplié, comme sur la démo publique (ce navigateur seulement).</p>
+      </div>
+    </details>
+    <!-- [S102] v4.11 les points marqués « fait » / « plus tard » (sur ce téléphone seulement) -->
+    <details class="bloc prive-seul" id="blocTraites">
+      <summary><h2>Points marqués « fait » <span class="mono" id="nbTraites"></span></h2></summary>
+      <div class="corps">
+        <p class="pdj-note">Gardés sur ce téléphone seulement. Un point marqué est masqué d'« Aujourd'hui » et d'« à gérer » : « Fait » pendant 30 jours, « Plus tard » jusqu'à demain matin. Ça ne donne aucune permission : JARVIS ne fait rien de plus.</p>
+        <div class="rang"><button type="button" id="traitesTout">Tout réafficher</button></div>
       </div>
     </details>
     <details class="bloc" id="blocMemoire">
@@ -538,7 +592,21 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
       <div class="registre" id="resTests"><div class="vide">Aucun test lancé.</div></div>
     </details>
   </section>
+
+  <!-- ─────────── [S102] v4.11 AUJOURD'HUI (instance privée) ─────────── -->
+  <section class="colonne prive-seul" id="aujourdhui" aria-labelledby="aujTitre">
+    <div class="auj-tete"><h2 id="aujTitre">Aujourd'hui</h2><button type="button" class="lien" id="aujActualiser">Actualiser</button></div>
+    <div class="auj-titre2">Agenda</div>
+    <div id="aujPoint"></div>
+    <div id="aujTraiter"><p class="pdj-vide">Je lis ta boîte et ton agenda…</p></div>
+    <p class="pdj-note auj-note">Écrit par le serveur, sans IA, en lecture seule. « Fait » et « Plus tard » masquent un point sur ce téléphone ; rien n'est envoyé ni écrit sans ton geste.</p>
+  </section>
 </main>
+<nav class="onglets prive-seul" id="onglets" aria-label="Vues">
+  <button type="button" data-onglet="aujourdhui" aria-current="page">Aujourd'hui</button>
+  <button type="button" data-onglet="discuter">Discuter</button>
+  <button type="button" data-onglet="reglages">Réglages</button>
+</nav>
 
 <div class="porte" id="porteCle" hidden role="dialog" aria-modal="true" aria-labelledby="titreCle">
   <div class="porte-boite">
@@ -623,6 +691,51 @@ function appliquerAffichage(prive) {
 /* le detail replie (instance allegee) ; ailleurs, tel quel */
 const plie = (h) => !h ? '' : allege() ? '<details class="plie"><summary>détail</summary>' + h + '</details>' : h;
 const pluriel = (n, un, plusieurs) => n + ' ' + (n > 1 ? plusieurs : un);
+/* [S102] v4.11 « LES POINTS NE DESCENDENT PAS » : ce que TU as marqué « Fait » ou « Plus tard »,
+ * gardé sur CE téléphone (clé → état, échéance), renvoyé au serveur qui masque ces points.
+ * Une liste de clés (20 hex), rien d'autre : elle ne donne ni permission, ni cible. */
+const Traites = (() => {
+  const CLE = 'jarvis_traites', MAX = 300, JOUR = 86400000;
+  let memo = {};
+  const valide = (k) => typeof k === 'string' && /^[0-9a-f]{20}$/.test(k);
+  const lire = () => { try { const x = JSON.parse(localStorage.getItem(CLE) || '{}'); return x && typeof x === 'object' && !Array.isArray(x) ? x : {}; } catch (e) { return memo; } };
+  const ecrire = (x) => { memo = x; try { localStorage.setItem(CLE, JSON.stringify(x)); } catch (e) { /* navigation privée : cette page seulement */ } };
+  const propre = (x) => { const now = Date.now(), r = {};
+    for (const [k, v] of Object.entries(x)) if (valide(k) && v && typeof v === 'object' && Number(v.j) > now) r[k] = { e: String(v.e || 'fait').slice(0, 10), j: Number(v.j), x: String(v.x || '').slice(0, 120) };
+    return Object.fromEntries(Object.entries(r).sort((a, b) => b[1].j - a[1].j).slice(0, MAX)); };
+  const maj = () => { const e = $('nbTraites'); if (e) e.textContent = String(Object.keys(propre(lire())).length || ''); };
+  return {
+    valide,
+    actifs() { return Object.keys(propre(lire())); },
+    etat(k) { return propre(lire())[k] || null; },
+    marquer(k, e, x) {
+      if (!valide(k)) return false;
+      const t = propre(lire()), d = new Date(); d.setHours(24 + 6, 0, 0, 0);   /* « plus tard » : demain, 6 h */
+      t[k] = { e, j: e === 'plustard' ? d.getTime() : Date.now() + 30 * JOUR, x: String(x || '').slice(0, 120) };
+      ecrire(t); maj(); return true;
+    },
+    annuler(k) { const t = propre(lire()); delete t[k]; ecrire(t); maj(); },
+    tout() { ecrire({}); maj(); },
+    maj
+  };
+})();
+/* [S102] une vue a la fois sur l'instance privee : Aujourd'hui / Discuter / Reglages */
+function montrer(onglet) {
+  if (!['aujourdhui', 'discuter', 'reglages'].includes(onglet)) return;
+  document.body.dataset.onglet = onglet;
+  for (const b of document.querySelectorAll('#onglets [data-onglet]')) { if (b.dataset.onglet === onglet) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
+  if (onglet === 'discuter') { const f = $('fil'); if (f) f.scrollTop = f.scrollHeight; }
+  if (onglet === 'aujourdhui' && document.body.classList.contains('prive') && Date.now() - Auj.charge > 120000) Auj.charger(false);
+  try { window.scrollTo(0, 0); } catch (e) {}
+}
+/* [S102] un flux termine (reponse envoyee, evenement cree, ancienne liste « à gérer ») : UNE ligne,
+ * le detail au toucher. Seulement en affichage allege ; jamais avant l'envoi ou la creation. */
+function replier(el, ligne) {
+  if (!el || !allege() || el.classList.contains('replie')) return;
+  const b = document.createElement('button');
+  b.type = 'button'; b.className = 'ligne-repliee'; b.dataset.deplier = '1'; b.textContent = ligne;
+  el.insertBefore(b, el.firstChild); el.classList.add('replie');
+}
 /* [S90] un refus en une phrase simple ; le code, le risque et l'origine restent dans « + détail » */
 function origineLue(d) {
   const s = ((d && d.influences) || []).map(x => String((x && x.source) || '')).find(x => x && !/^clavier/.test(x)) || '';
@@ -781,8 +894,9 @@ const Reveil = (() => {
 async function api(chemin, corps, dejaRenouvele, dejaReveille) {
   await assurerSession();
   const utilise = sid;
+  const masque = /^\/api\/(gerer|point-du-jour|chat)$/.test(chemin) ? { masquer: Traites.actifs() } : {};   /* [S102] */
   const o = corps ? { method:'POST', headers:{'Content-Type':'application/json'},
-                      body: JSON.stringify({ ...corps, sessionId: utilise }) } : {};
+                      body: JSON.stringify({ ...corps, ...masque, sessionId: utilise }) } : {};
   const r = await Reveil.suivre(versServeur(API + chemin + (corps ? '' : (chemin.includes('?') ? '&' : '?')
                         + 'sessionId=' + encodeURIComponent(utilise)), o));   /* [S76] */
   if (Reveil.pageDAttente(r)) {   /* [S76] rien n'a ete traite : on attend le reveil, puis on renvoie UNE fois */
@@ -1052,7 +1166,9 @@ function rendreDecision(d) {
   if (d.decide === 'CONFIRMATION_REQUISE' && d.aConfirmer) {
     const a = d.aConfirmer;
     const hC = '<div class="decision attente creation"><div class="plan">' + (a.serie ? 'Créer une série dans ton agenda JARVIS' : 'Créer dans ton agenda JARVIS') + '</div>'
-      + '<div class="evenement">' + esc(a.lisible) + '</div>'
+      /* [S99] v4.11 le titre en gros (c'est lui qu'on vérifie d'abord), puis le jour et l'heure */
+      + (a.titre ? '<div class="titre-evt">' + esc(a.titre) + '</div>' : '')
+      + '<div class="evenement">' + esc(a.titre ? String(a.lisible || '').replace(' · ' + a.titre, '') : a.lisible) + '</div>'
       + '<div class="verdict"><b>À confirmer</b><span class="code">annulable ensuite</span></div>'
       + (allege()   /* [S90] l'info sous « + détail » ; les points à vérifier restent visibles */
         ? ((a.avertissements || []).length ? '<div class="signaux">' + a.avertissements.map(x => '<div class="signal fort ligne1">⚠ ' + esc(x) + '</div>').join('') + '</div>' : '')
@@ -1063,6 +1179,8 @@ function rendreDecision(d) {
       + '<button class="primaire" data-creer="' + esc(a.cible) + '">' + (a.serie ? 'Créer les ' + esc(String(a.serie)) + ' séances' : 'Créer') + '</button></div></div>';   /* [v4.8] */
     const bC = tour('JARVIS', '', false);
     bC.querySelector('.quoi').outerHTML = hC;
+    const cC = bC.querySelector('.creation');   /* [S102] le point qui a demandé ce rappel / ce rendez-vous */
+    if (cC && pointEnCours) { cC.dataset.point = pointEnCours.k; cC.dataset.pointEtat = pointEnCours.e; cC._pointTexte = pointEnCours.x; pointEnCours = null; }
     $('fil').scrollTop = $('fil').scrollHeight;
     return;
   }
@@ -1189,7 +1307,7 @@ function rendreDecision(d) {
       +  '<button class="primaire" data-reformuler="1">Confirmer</button></div><p class="etat-carte"></p></div>';
   }
   if (d.decide === 'EN_ATTENTE' && d.mail) {   /* [S68] ce qui partira, encore en entier */
-    h += '<div class="mail-carte"><p class="mail-entete"><b>À</b> <span class="mono">' + esc(d.mail.a) + '</span></p><p class="mail-entete"><b>Objet</b> ' + esc(d.mail.objet)
+    h += '<div class="mail-carte" data-a="' + esc(d.mail.a) + '" data-objet-mail="' + esc(d.mail.objet) + '"><p class="mail-entete"><b>À</b> <span class="mono">' + esc(d.mail.a) + '</span></p><p class="mail-entete"><b>Objet</b> ' + esc(d.mail.objet)
       + '</p><div class="mail-texte">' + esc(d.mail.texte) + '</div><p class="mail-entete">Vrai e-mail : Face ID sera demandé (pas le code de secours).</p></div>';
   }
   if (d.decide === 'EN_ATTENTE') {
@@ -1369,6 +1487,13 @@ async function finaliserJeton(jeton) {
   if (r.etat === 'PERIME') return clore(jeton, r.message || TEXTE_PERIMEE);   /* [S40] */
   if (r.etat === 'EXECUTE' && r.reel) {   /* [S68] vrai e-mail : le SERVEUR dit s'il est parti, preuve de Google */
     clore(jeton, r.envoye ? 'Envoyé pour de vrai.' : r.code === 'RESULTAT_INCERTAIN' ? 'Résultat incertain : vérifie les envoyés.' : "Pas parti : rien n'a été envoyé.", true);   /* [S78] */
+    if (r.envoye && allege()) {   /* [S102] APRES l'envoi seulement : une ligne (à qui, quel objet) ; le mail, la preuve et la vérification au toucher */
+      const boite = retenueDe(jeton), carte = boite && boite.closest('.tour'), m = carte && carte.querySelector('.mail-carte');
+      replier(carte, '✓ Envoyé' + (m ? ' à ' + m.dataset.a + ' — « ' + m.dataset.objetMail + ' »' : ''));
+      const el = [...document.querySelectorAll('#fil .elevation')].find(x => x.dataset.jeton === jeton); if (el) replier(el.closest('.tour') || el, '✓ Face ID validé');
+      const b = tour('JARVIS', 'Envoyé pour de vrai' + (/Vérifié chez Google/.test(r.reponse || '') && !/✗/.test(r.reponse || '') ? ', vérifié chez Google.' : '.'), false);
+      b.querySelector('.quoi').insertAdjacentHTML('beforeend', plie('<div>' + esc(r.reponse || '') + '</div>'));
+    } else
     tour('JARVIS', r.reponse || (r.envoye ? 'Envoyé.' : 'Pas parti.'), false);
     if (r.trace) ajouterTrace(r.trace);
     return;
@@ -1566,17 +1691,23 @@ const CERTITUDE = { fait: 'fait lu', deduction: 'déduit par une règle : vérif
 const ACTIONS_GERER = { voir: 'Voir la conversation', repondre: 'Préparer une réponse', rappel: 'Me le rappeler', creneau: 'Vérifier dans mon agenda' };
 const jetonFil = (x) => typeof x === 'string' && /^fl_[0-9a-f-]{36}$/.test(x) ? x : '';
 const carteJarvis = (h) => { const b = tour('JARVIS', '', false); b.querySelector('.quoi').outerHTML = h; $('fil').scrollTop = $('fil').scrollHeight; return b.lastElementChild || b; };
-function boutonsGerer(it) {
+function boutonsGerer(it, compact) {
   const j = jetonFil(it.fil); if (!j) return '';
   /* [S89] v4.10.1 un mail suspect : ni réponse, ni rappel, ni créneau (le serveur les refuse aussi) */
   const suspect = it.suspect === true || it.type === 'suspect';
-  const acts = [...new Set(['voir'].concat((it.actions || []).filter(a => ACTIONS_GERER[a] && !(suspect && a !== 'voir') && (a !== 'creneau' || (Number.isInteger(it.creneau) && it.creneau >= 0)))))];
+  let acts = [...new Set(['voir'].concat((it.actions || []).filter(a => ACTIONS_GERER[a] && !(suspect && a !== 'voir') && (a !== 'creneau' || (Number.isInteger(it.creneau) && it.creneau >= 0)))))];
+  /* [S102] Aujourd'hui : « Voir » + l'action principale seulement (le reste dans « à gérer ») */
+  if (compact) acts = acts.slice(0, 1).concat(['creneau', 'repondre', 'rappel'].filter(a => acts.includes(a)).slice(0, 1));
+  const k = Traites.valide(it.cle) ? it.cle : '';
   return '<div class="rang gerer-actions">' + acts.map(a => '<button type="button" data-gerer="' + a + '" data-fil="' + esc(j) + '"'
-    + (a === 'creneau' ? ' data-index="' + it.creneau + '"' : '') + '>' + ACTIONS_GERER[a] + '</button>').join('') + '</div>';
+    + (a === 'creneau' ? ' data-index="' + it.creneau + '"' : '') + '>' + ACTIONS_GERER[a] + '</button>').join('')
+    + (k ? '<button type="button" class="traite" data-traite="fait" data-point="' + k + '">Fait</button><button type="button" class="traite" data-traite="plustard" data-point="' + k + '">Plus tard</button>' : '')   /* [S102] */
+    + '</div>';
 }
 function afficherGerer(r) {
   if (!r || !Array.isArray(r.sections)) return tour('JARVIS', (r && (r.message || r.resume)) || "« À gérer » indisponible.", false);
   if (!r.sections.length) return tour('JARVIS', r.resume || 'Rien à lire ici.', false);
+  for (const v of document.querySelectorAll('#fil .decision.gerer')) replier(v, (v.querySelector('.plan') || v).textContent + ' (liste précédente)');   /* [S102] */
   const source = (it) => it.type === 'agenda' || it.type === 'note' || it.type === 'conflit';
   const preuveH = (it) => (it.preuve ? '<p class="preuve">' + (source(it) ? 'Source : ' + esc(it.preuve) : it.type === 'suspect' ? 'Pourquoi : ' + esc(it.preuve) : 'Preuve : « ' + esc(it.preuve) + ' »') + '</p>' : '')
     + (it.certitude && it.type !== 'erreur' ? '<p class="certitude">' + esc(CERTITUDE[it.certitude] || '') + '</p>' : '');
@@ -1586,7 +1717,8 @@ function afficherGerer(r) {
   const couleur = r.incomplet ? 'attente' : 'autorise';
   const compte = (tous) => { const n = tous.filter(it => !it.vide && it.type !== 'erreur').length;
     return tous.some(it => it.type === 'erreur') ? (n ? n + ', lecture incomplète' : 'non lu') : String(n); };
-  const cle = (it) => ' data-cle="' + esc(String(it.texte || '').slice(0, 200)) + '" data-objet="' + esc(String(it.objet || '').slice(0, 200)) + '"';   /* [S93] relire si la session a expiré */
+  const cle = (it) => ' data-cle="' + esc(String(it.texte || '').slice(0, 200)) + '" data-objet="' + esc(String(it.objet || '').slice(0, 200)) + '"'   /* [S93] relire si la session a expiré */
+    + (Traites.valide(it.cle) ? ' data-point="' + it.cle + '"' : '');   /* [S102] */
   let h;
   if (allege()) {
     /* [S90] sections repliables (avec le nombre) ; un point = une ligne + ses boutons ; la preuve au toucher ;
@@ -1739,7 +1871,9 @@ async function geste(act, j, o = {}) {
   if (act === 'creneau') {
     const r = await api('/api/gerer/creneau', { jeton: j, index: Number(o.index) });
     if (perime(r) && !o.deja) return relire(o.source, act, o);
-    if (!limiteAtteinte(r || {})) { majEtat(r || {}); avec(afficherCreneau(r)); }
+    if (!limiteAtteinte(r || {})) { majEtat(r || {}); const c = avec(afficherCreneau(r));
+      if (c && c.dataset && pointEnCours) { c.dataset.point = pointEnCours.k; c._point = pointEnCours; } }   /* [S102] */
+    pointEnCours = null;
   }
 }
 /* [S84] sauvegarde : le partage d'iOS (« Enregistrer dans Fichiers »), sinon un telechargement */
@@ -1789,8 +1923,45 @@ const LECTURES = {
           resume:'résultat de recherche interprété par le modèle' }
 };
 
+/* [S102] le point d'origine d'un rappel ou d'un créneau : marqué quand l'événement est créé */
+let pointEnCours = null;
+function marquerLignes(k, e, texte) {
+  for (const el of document.querySelectorAll('.gerer-item[data-point="' + k + '"]')) {
+    if (el.classList.contains('traite')) continue;
+    el._avant = el.innerHTML; el.classList.add('traite');
+    el.innerHTML = '<p class="traite-ligne">✓ ' + ({ plustard: 'Remis à demain', rappel: 'Rappel créé', ajoute: 'Ajouté à ton agenda' }[e] || 'Fait') + ' — ' + esc(String(texte || '').slice(0, 70))
+      + ' <button type="button" class="lien" data-detraite="' + k + '">Annuler</button></p>';
+  }
+}
+function demarquerLignes(k) {
+  for (const el of document.querySelectorAll('.gerer-item.traite[data-point="' + k + '"]')) { if (el._avant != null) el.innerHTML = el._avant; el.classList.remove('traite'); }
+}
+
 document.addEventListener('click', async (ev) => {
   const t = ev.target.closest('button'); if (!t) return;
+
+  /* [S102] v4.11 onglets, « Fait » / « Plus tard », lignes repliées */
+  if (t.dataset.onglet && t.closest('#onglets')) { montrer(t.dataset.onglet); return; }
+  if (t.dataset.deplier) { t.parentElement.classList.toggle('replie'); return; }
+  if (t.dataset.traite) {
+    const k = t.dataset.point, ligne = t.closest('.gerer-item'), dansAuj = !!t.closest('#aujourdhui');   /* avant que la ligne ne change */
+    const texte = ligne ? ((ligne.querySelector('summary, .auj-texte, p') || ligne).textContent || '') : '';
+    if (!Traites.marquer(k, t.dataset.traite === 'plustard' ? 'plustard' : 'fait', texte)) return;
+    marquerLignes(k, t.dataset.traite, texte);
+    if (dansAuj) { Auj.dernier = { k, e: t.dataset.traite, x: texte }; await Auj.charger(false); }
+    return;
+  }
+  if (t.dataset.detraite) {
+    const dansAuj = !!t.closest('#aujourdhui'), k = t.dataset.detraite;
+    Traites.annuler(k); demarquerLignes(k);
+    if (dansAuj) await Auj.charger(false);
+    return;
+  }
+  if (t.id === 'traitesTout') { Traites.tout(); for (const el of document.querySelectorAll('.gerer-item.traite')) demarquerLignes(el.dataset.point); await Auj.charger(false); return; }
+  if (t.id === 'aujActualiser') { t.disabled = true; try { await Auj.charger(true); } finally { t.disabled = false; } return; }
+  if (t.id === 'basculeManuelReglages') { montrer('discuter'); const b = $('basculeManuel'); if (b) b.click(); return; }
+  /* une action lancée depuis « Aujourd'hui » s'affiche dans la conversation */
+  if (t.closest('#aujourdhui') && (t.dataset.gerer || t.dataset.voirGerer)) montrer('discuter');
 
   /* [S37] le detail de /health : /api/health, avec la cle (instance perso) */
   if (t.dataset.sante) {
@@ -1830,8 +2001,11 @@ document.addEventListener('click', async (ev) => {
     const act = t.dataset.gerer, k = cleDe(t);
     if (act === 'repondre') { const c = t.closest('.conversation'); const f = ouvrirReponse(j, '', c ? c.dataset.objet : ''); if (f && k.objet) f.dataset.objet = k.objet; return; }
     t.disabled = true;
+    const pt = t.closest('[data-point]');   /* [S102] */
+    pointEnCours = pt && (act === 'rappel' || act === 'creneau') ? { k: pt.dataset.point, e: act === 'rappel' ? 'rappel' : 'ajoute', x: (pt.querySelector('summary, .auj-texte, p') || pt).textContent } : null;
     try { await geste(act, j, { index: t.dataset.index, source: t, objet: k.objet }); }   /* [S93] relu tout seul si la carte est périmée */
     catch (e) { tour('JARVIS', 'La passerelle est injoignable : ' + e.message, false); }
+    finally { if (act === 'rappel') pointEnCours = null; }
     t.disabled = false;
     return;
   }
@@ -1846,11 +2020,13 @@ document.addEventListener('click', async (ev) => {
     const c = t.closest('.creneau'); if (!c) return;
     const j = jetonFil(c.dataset.fil); if (!j) return;
     t.disabled = true;
+    pointEnCours = c._point ? { ...c._point, e: 'ajoute' } : null;   /* [S102] */
     try {
       const r = await api('/api/gerer/evenement', { jeton: j, index: Number(c.dataset.index), autre: t.dataset.creneauAjouter === '1' });
       /* [S93] la vérification du créneau est perdue avec la session : on la refait (le serveur garde ce qu'il propose) */
       if (perime(r)) await relire(t, 'creneau'); else rendreOuDire(r);
     } catch (e) { tour('JARVIS', 'La passerelle est injoignable : ' + e.message, false); }
+    pointEnCours = null;
     t.disabled = false;
     return;
   }
@@ -1864,7 +2040,8 @@ document.addEventListener('click', async (ev) => {
     try { r = await api('/api/mail/repondre', { jeton: j, consigne }); } catch (e) { r = null; }
     /* [S93] conversation sortie de la session : relue, le formulaire se rouvre avec TA consigne (rien n'est rédigé sans ton toucher) */
     if (perime(r)) { if (etatR) etatR.textContent = 'Conversation relue ci-dessous : touche à nouveau « Préparer la réponse ».'; t.disabled = false; return relire(t, 'repondre', { consigne }); }
-    if (rendreOuDire(r, etatR)) { if (etatR) etatR.textContent = 'Préparée ci-dessous : relis-la.'; }
+    if (rendreOuDire(r, etatR)) { if (etatR) etatR.textContent = 'Préparée ci-dessous : relis-la.';
+      replier(f.closest('.decision') || f, '✎ Réponse demandée : « ' + consigne.slice(0, 60) + ' »'); }   /* [S102] */
     t.disabled = false;
     return;
   }
@@ -1960,7 +2137,12 @@ document.addEventListener('click', async (ev) => {
     const r = await api('/api/confirmer', { action: 'CREATE', resource: 'AGENDA_JARVIS', cible: t.dataset.creer });
     if (limiteAtteinte(r)) { for (const b of carte.querySelectorAll('button')) b.disabled = false; return; }
     if (r && r.decision) { majEtat(r.decision); rendreDecision(r.decision);
-      if (r.decision.etape !== 'COMPLET') for (const b of carte.querySelectorAll('button')) b.disabled = false; }
+      if (r.decision.etape !== 'COMPLET') for (const b of carte.querySelectorAll('button')) b.disabled = false;
+      else {   /* [S102] créé : le point d'origine est traité ; la proposition devient une ligne */
+        if (carte.dataset.point && Traites.marquer(carte.dataset.point, carte.dataset.pointEtat || 'fait', carte._pointTexte || '')) marquerLignes(carte.dataset.point, carte.dataset.pointEtat, carte._pointTexte || '');
+        replier(carte, '✓ Créé : ' + ((carte.querySelector('.titre-evt') || {}).textContent || '') + ' ' + ((carte.querySelector('.evenement') || {}).textContent || ''));
+        if (Date.now() - Auj.charge > 0) Auj.charge = 0;   /* Aujourd'hui relira à la prochaine visite */
+      } }
     else tour('JARVIS', r && r.erreur === 'DEJA_CONFIRMEE' ? 'Déjà confirmé : un seul événement.' : r && r.erreur === 'CARTE_INCONNUE_OU_EXPIREE'
       ? 'Cette proposition n\'est plus valable (un autre message est parti, 10 min ont passé, ou autre session) : redemande-la.' : 'Création impossible : ' + ((r && r.erreur) || 'erreur'), false);
   }
@@ -2224,11 +2406,64 @@ function afficherPointDuJour(r) {
   const t = document.createElement('div');
   t.className = 'tour'; t.innerHTML = '<div class="qui">JARVIS</div>';
   t.appendChild(d);
+  /* [S102] instance privée : le point du jour est en tête d'« Aujourd'hui », plus dans la conversation */
+  if (document.body.classList.contains('prive') && $('aujPoint')) { d.open = true; $('aujPoint').innerHTML = ''; $('aujPoint').appendChild(t); return; }
   const acc = $('accueil');
   if (acc && acc.parentNode === $('fil')) acc.insertAdjacentElement('afterend', t); else $('fil').appendChild(t);
 }
+/* [S102] v4.11 AUJOURD'HUI : l'agenda d'aujourd'hui et de demain (le point du jour), puis 5 points
+ * « à traiter » au plus, chacun avec son action principale, « Fait » et « Plus tard ». Écrit par le
+ * serveur (règles), la même lecture que « à gérer » (une seule lecture de la boîte à l'ouverture). */
+const ACTIONS_COURTES = { repondre: 'Répondre', rappel: 'Rappel', creneau: "Vérifier l'agenda" };
+const Auj = {
+  charge: 0, dernier: null,
+  async charger(frais) {
+    if (!document.body.classList.contains('prive') || !$('aujTraiter')) return;
+    Auj.charge = Date.now();
+    if (frais) { $('aujTraiter').innerHTML = '<p class="pdj-vide">' + esc(TEXTE_LECTURE) + '</p>'; }
+    let r = null;
+    try { r = await api('/api/gerer', { souvenirs: Memoire.liste(), frais: !!frais }); } catch (e) { r = { message: 'La passerelle est injoignable : ' + e.message }; }
+    if (r && limiteAtteinte(r)) return;
+    if (r) majEtat(r);
+    Auj.rendre(r);
+    if (frais) {   /* le point du jour aussi (l'agenda a pu changer) */
+      try { const p = await api('/api/point-du-jour', { souvenirs: Memoire.liste() }); const v = $('pointDuJour'); if (v) v.closest('.tour').remove(); afficherPointDuJour(p); } catch (e) { /* rien */ }
+    }
+  },
+  rendre(r) {
+    const zone = $('aujTraiter'); if (!zone) return;
+    if (!r || !Array.isArray(r.sections)) { zone.innerHTML = '<p class="pdj-vide">' + esc((r && (r.message || r.resume)) || 'Lecture impossible.') + '</p>'; return; }
+    if (r.date) $('aujTitre').textContent = "Aujourd'hui — " + r.date;
+    const tous = r.sections.reduce((l, x) => l.concat(x.items || []), []);
+    const erreurs = tous.filter(x => x.type === 'erreur');
+    const points = tous.filter(x => !x.vide && !['agenda', 'erreur', 'mail', 'note'].includes(x.type));
+    const h = [];
+    if (Auj.dernier) h.push('<p class="auj-annuler">✓ ' + (Auj.dernier.e === 'plustard' ? 'Remis à demain' : 'Fait') + ' : « ' + esc(Auj.dernier.x.slice(0, 60)) + ' » '
+      + '<button type="button" class="lien" data-detraite="' + Auj.dernier.k + '">Annuler</button></p>');
+    Auj.dernier = null;
+    if (erreurs.length) h.push('<p class="auj-erreur">⚠ ' + esc(erreurs.map(x => x.texte).join(' ')) + '</p>');
+    h.push('<div class="auj-titre2">À traiter · ' + (points.length ? points.length : r.incomplet ? '?' : '0') + '</div>');
+    if (!points.length) h.push('<p class="pdj-vide">' + esc(r.incomplet ? "Lecture incomplète : rien n'est garanti." : 'Rien à traiter.')
+      + (r.masques ? ' ' + esc(pluriel(r.masques, 'point marqué', 'points marqués')) + ' « fait » ou « plus tard ».' : '') + '</p>');
+    for (const it of points.slice(0, 5)) {
+      const j = jetonFil(it.fil), k = Traites.valide(it.cle) ? it.cle : '';
+      const suspect = it.suspect === true || it.type === 'suspect';
+      const act = suspect ? null : ['creneau', 'repondre', 'rappel'].find(a => (it.actions || []).includes(a) && (a !== 'creneau' || (Number.isInteger(it.creneau) && it.creneau >= 0)));
+      h.push('<div class="gerer-item auj-point' + (suspect || it.type === 'conflit' ? ' fort' : '') + '" data-cle="' + esc(String(it.texte || '').slice(0, 200))
+        + '" data-objet="' + esc(String(it.objet || '').slice(0, 200)) + '"' + (k ? ' data-point="' + k + '"' : '') + '>'
+        + (j ? '<button type="button" class="auj-texte" data-gerer="voir" data-fil="' + esc(j) + '" title="Voir la conversation">' + esc(it.texte) + '</button>' : '<p>' + esc(it.texte) + '</p>')
+        + '<div class="rang auj-actions">'
+        + (act && j ? '<button type="button" data-gerer="' + act + '" data-fil="' + esc(j) + '"' + (act === 'creneau' ? ' data-index="' + it.creneau + '"' : '') + '>' + ACTIONS_COURTES[act] + '</button>' : '')
+        + (k ? '<button type="button" class="traite" data-traite="fait" data-point="' + k + '">Fait</button><button type="button" class="traite" data-traite="plustard" data-point="' + k + '">Plus tard</button>' : '')
+        + '</div></div>');
+    }
+    if (points.length > 5) h.push('<button type="button" class="lien" data-voir-gerer="1">Tout voir (' + points.length + ')</button>');
+    zone.innerHTML = h.join('');
+  }
+};
 (async () => {
   try { afficherPointDuJour(await api('/api/point-du-jour', { souvenirs: Memoire.liste() })); } catch (x) { /* instance publique ou hors ligne : rien */ }   /* [S94] avec tes souvenirs (délai de relance) */
+  if (document.body.classList.contains('prive')) { Traites.maj(); montrer('aujourdhui'); await Auj.charger(false); }   /* [S102] après : la même lecture de la boîte */
 })();
 
 /* [S31] bloc Face ID : seulement sur une instance ou l'elevation existe */

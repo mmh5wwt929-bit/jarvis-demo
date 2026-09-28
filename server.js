@@ -328,6 +328,16 @@
  *   [S97] une des deux sources d'agenda non lue n'est plus ignoree en silence :
  *         « a gerer » la nomme, « Verifier dans mon agenda » ne dit plus « libre ».
  *   [S98] compteurs : « Rien… » ne compte pas, une erreur affiche « non lu ».
+ *
+ * v4.11 — vu en ligne le 28 sept (0 h 25 – 1 h 03) : « les points ne descendent
+ *   pas », « la page reste trop encombrante », un titre « hand » non tape.
+ *   [S99] titre d'un evenement : seulement dans tes mots (sinon « Quel titre ? ») ;
+ *         « meme chose » = titre de ta creation precedente, dit sur la carte.
+ *   [S100] redaction echouee : JARVIS dit quoi ecrire.
+ *   [S101] cle stable par point ; ta reponse retire les points qu'elle suit ;
+ *          « Fait » / « Plus tard » (liste de cles venue de la page) : masques ;
+ *          apres un envoi, une creation, une suppression : relecture.
+ *   [S102] (page) Aujourd'hui / Discuter / Reglages ; flux termines replies.
  * ========================================================================== */
 
 const http = require('http');
@@ -1436,9 +1446,10 @@ const plurielEvt = (n) => n === 0 ? 'rien' : n === 1 ? '1 événement' : n + ' �
 const COMPTES_MAILS = [['reponse', 'réponse attendue', 'réponses attendues'], ['engagement', 'promesse à tenir', 'promesses à tenir'], ['echeance', 'échéance', 'échéances'],
   ['relance', 'relance', 'relances'], ['creneau', 'rendez-vous proposé', 'rendez-vous proposés'], ['contradiction', 'point à vérifier', 'points à vérifier'],
   ['pj', 'pièce jointe absente', 'pièces jointes absentes'], ['suspect', 'suspect', 'suspects']];
-function ligneMails(ml) {
+function ligneMails(ml, masque) {
   if (!ml) return null;
   if (!ml.ok) return { ok: false, nb: 0, ligne: 'Mails : boîte non lue (' + erreurLecture(ml.code) + ')' };
+  if (masque && masque.size) ml = { ...ml, items: ml.items.filter(x => !(x.cle && masque.has(x.cle))) };   /* [S101] */
   const parties = [];
   let nb = 0;
   for (const [type, un, plusieurs] of COMPTES_MAILS) {
@@ -1449,11 +1460,12 @@ function ligneMails(ml) {
 }
 async function pointDuJour(s) {
   if (!AGENDA && !ECRITURE && !MAIL_LECTURE) return { actif: false };
-  if (s.pointDuJour && Date.now() - s.pointDuJour.ts < 5 * 60 * 1000) return s.pointDuJour.r;
+  const masque = s.masque || new Set(), sig = [...masque].sort().join(',');   /* [S101] */
+  if (s.pointDuJour && Date.now() - s.pointDuJour.ts < 5 * 60 * 1000 && s.pointDuJour.sig === sig) return s.pointDuJour.r;
   const g = s.g, now = Date.now(), auj = V.local(now, FUSEAU).jour;
   /* la boite part EN MEME TEMPS que l'agenda ([S91]) ; son resultat accompagne toute reponse */
-  const mailsP = MAIL_LECTURE ? mailsAGerer(s, reglagesSouvenirs(s.souvenirs)).then(ligneMails, () => ({ ok: false, nb: 0, ligne: 'Mails : boîte non lue' })) : Promise.resolve(null);
-  const garder = async (r) => { const mails = await mailsP; const x = mails ? { ...r, mails } : r; s.pointDuJour = { ts: Date.now(), r: x }; return x; };
+  const mailsP = MAIL_LECTURE ? mailsAGerer(s, reglagesSouvenirs(s.souvenirs)).then(ml => ligneMails(ml, masque), () => ({ ok: false, nb: 0, ligne: 'Mails : boîte non lue' })) : Promise.resolve(null);
+  const garder = async (r) => { const mails = await mailsP; const x = mails ? { ...r, mails } : r; s.pointDuJour = { ts: Date.now(), r: x, sig }; return x; };
   if (!AGENDA && !ECRITURE) return garder({ actif: true, ok: true, jours: [], nonLus: [], resume: '' });
   const periode = AG.periodeDe(V.iso(auj) + '..' + V.iso(auj + 1), now, FUSEAU);
   if (!periode) return garder({ actif: true, ok: false, code: 'PERIODE_INVALIDE', message: 'Point du jour indisponible.' });
@@ -1637,9 +1649,22 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
   const avertissements = [];
   if (!plan.confirme) {
     const serie = plan.serie === true;   /* [S63] */
-    /* [S56] le titre du modele, sinon celui des mots tapes (« hand ») */
-    const titre = titreDe(plan.target) || (serie ? V.titreSerie(precedent || '', Date.now(), FUSEAU) || V.titreSerie(texte, Date.now(), FUSEAU)
-      : V.titreTape(precedent || '') || V.titreTape(texte));
+    /* [S56] le titre du modele, sinon celui des mots tapes (« hand ») ;
+     * [S99] v4.11 vu en ligne (28 sept) : « Ajoute l'evenement a mon agenda pour
+     * mercredi 30 » (aucun titre tape) -> « hand », pris par le modele dans les
+     * souvenirs ; « Ajoute meme choses tout les vendredis… » -> « Meme choses
+     * tout ». Le titre du modele n'est garde que s'il est dans TES mots ;
+     * « meme chose » reprend le titre de ta creation precedente (dit sur la
+     * carte) ; sinon « Quel titre ? ». Jamais un titre que tu n'as pas ecrit. */
+    const tape = serie ? V.titreSerie(precedent || '', Date.now(), FUSEAU) || V.titreSerie(texte, Date.now(), FUSEAU)
+      : V.titreTape(precedent || '') || V.titreTape(texte);
+    const propose = titreDe(plan.target);
+    let titre = propose && V.titreDansMots(propose, (precedent ? precedent + ' ' : '') + texte) ? propose : tape;
+    if (titre && V.titreRepris(titre)) {
+      const prec = [...s.creations.values()].filter(c => !c.supprime && c.titre).pop();
+      if (prec) { avertissements.push('« ' + titre + ' » : même titre que ta création précédente (« ' + prec.titre + ' »).'); titre = prec.titre; }
+      else titre = '';
+    }
     const q = serie ? quandSerie(texte, precedent) : quandTape(texte, precedent);
     const retenir = (attendTitre) => { s.questionCreation = { texte: String((precedent ? precedent + ' ' : '') + texte).slice(-300), titre: titre.slice(0, 100), attendTitre, serie, tour: tour || 0, ts: Date.now() }; };
     if (q.question) {
@@ -1647,12 +1672,14 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
        * seulement si le modele avait donne un titre -> « 18h » repartait de zero) */
       if (q.motif !== 'DATE_CONTRADICTOIRE' && !q.abandon) retenir(false);
       noterVerdict(s, { decide: 'SANS_OBJET', action: 'CREATE', target: propre(titre || '?', 60), motif: q.motif });
-      return dire(q.question + astuceMail(serie, precedent, q.motif), { decide: 'SANS_OBJET', etape: 'SERVEUR', motif: q.motif });
+      /* [S99] le titre manque aussi : demande en une fois (« 14h RDV Luc » suffit) */
+      const aussiTitre = !titre && !q.abandon && q.motif !== 'DATE_CONTRADICTOIRE' ? ' Et quel titre ? Je ne mets jamais un titre que tu n\'as pas écrit.' : '';
+      return dire(q.question + aussiTitre + astuceMail(serie, precedent, q.motif), { decide: 'SANS_OBJET', etape: 'SERVEUR', motif: q.motif });
     }
     if (!titre) {
       retenir(true);
       noterVerdict(s, { decide: 'SANS_OBJET', action: 'CREATE', target: '?', motif: 'TITRE_ABSENT' });
-      return dire('Quel titre pour ' + (serie ? 'cette série' : 'cet événement') + ' ? Réponds par exemple « entraînement U18 ».' + astuceMail(serie, precedent, 'TITRE_ABSENT'),
+      return dire('Quel titre pour ' + (serie ? 'cette série' : 'cet événement') + ' ? Je ne mets jamais un titre que tu n\'as pas écrit : réponds par exemple « entraînement U18 ».' + astuceMail(serie, precedent, 'TITRE_ABSENT'),   /* [S99] */
         { decide: 'SANS_OBJET', etape: 'SERVEUR', motif: 'TITRE_ABSENT' });
     }
     v = titre ? ECRITURE.validerCible(V.iso(q.jour) + 'T' + hhmm(q.debut.h, q.debut.mi) + '|' + q.duree + '|' + titre + (serie ? '|HEBDO:' + V.iso(q.derniere) : '')) : null;
@@ -1687,7 +1714,7 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
       : "Je te propose de créer dans l'agenda JARVIS : " + v.lisible + ". Vérifie la date et l'heure, puis touche « Créer ».")
       + (avertissements.length ? ' ' + avertissements.join(' ') : ''),
       { decide: 'CONFIRMATION_REQUISE', etape: 'G1_GESTE', motif: null, classe: 'COMPENSABLE', corrige,
-        aConfirmer: { action: 'CREATE', resource: 'AGENDA_JARVIS', cible: v.cle, lisible: v.lisible, avertissements, serie: v.serie ? v.serie.nb : 0 } });
+        aConfirmer: { action: 'CREATE', resource: 'AGENDA_JARVIS', cible: v.cle, lisible: v.lisible, titre: v.titre, avertissements, serie: v.serie ? v.serie.nb : 0 } });   /* [S99] le titre, en gros sur la carte */
   }
   const demande = g.demander({ action: 'CREATE', resource: 'AGENDA_JARVIS', target: v.cle },
     { manuel: true, compensation: v.serie ? "supprimer la série créée dans l'agenda JARVIS (toutes ses séances)" : "supprimer l'événement créé dans l'agenda JARVIS" });
@@ -1713,6 +1740,7 @@ async function creerEvenement(s, sessionId, texte, plan, avant, precedent, tour)
       { decide: 'AUTORISE', etape: 'OUTIL_ECHEC', motif: cree.code, transactionId: exe.transactionId, trace });
   }
   s.creations.set(exe.transactionId, { lisible: v.lisible, titre: v.titre, serie: v.serie ? v.serie.nb : 0 });
+  s.gerer = null; s.pointDuJour = null;   /* [S101] l'agenda a change : relire */
   if (s.creations.size > 50) s.creations.delete(s.creations.keys().next().value);
   noterVerdict(s, { decide: 'AUTORISE', action: 'CREATE', target: v.cle, motif: null });
   return sortie((cree.code === 'DEJA_CREE' ? "Cet événement existait déjà pour cette transaction : aucun doublon. " : "C'est fait : ")
@@ -1771,7 +1799,7 @@ async function compenserCreation(s, id, tx) {
   if (d.etat !== 'COMPENSATING') return { etat: d.etat, motif: d.motif || null };
   const r = await ECRITURE.supprimer(d.cible);
   const f = s.g.compensationFin(tx, d.jeton, { verifie: r.verifie === true, resultat: { code: r.code } });
-  if (f.etat === 'COMPENSE') c0.supprime = true;   /* [S49] plus propose par « Supprimer » tape */
+  if (f.etat === 'COMPENSE') { c0.supprime = true; s.gerer = null; s.pointDuJour = null; }   /* [S49] plus propose par « Supprimer » tape ; [S101] relire */
   const message = f.etat === 'COMPENSE' ? (c0.serie ? 'Série supprimée : ' + c0.lisible + " — toutes les séances ont disparu de l'agenda JARVIS (disparition vérifiée)."
       : 'Supprimé : ' + c0.lisible + " n'est plus dans l'agenda JARVIS (disparition vérifiée).")
     : "La suppression n'est pas vérifiée : " + erreurEcriture(r.code) + '. Tu peux réessayer.';
@@ -2078,6 +2106,7 @@ async function terminerEnvoiReel(s, id, jeton, att, r) {
   else if (!tr0 || !tr0.confirmation || tr0.confirmation.elevation !== 'FACE_ID') env = { ok: false, code: 'FACE_ID_ABSENT' };   /* double controle */
   else env = att.mail && att.mail.filId ? await MAIL_ENVOI.envoyerReponse(att.permis, att.mail) : await MAIL_ENVOI.envoyer(att.permis, att.mail);   /* [S81] */
   g.constaterEffet(tx, r.jetonEffet, { ok: env.ok, code: env.code, preuve: env.preuve || null });   /* [F1] (la verification [S81] est dans la reponse et l'historique) */
+  if (env.ok) { s.gerer = null; s.mailsGerer = null; s.pointDuJour = null; }   /* [S101] ta reponse retire ses points : relire */
   noterVerdict(s, { decide: env.ok ? 'EXECUTE' : 'REFUSE', action: 'SEND', target: att.target, motif: env.ok ? 'ENVOYE' : env.code });
   const b = att.mail;
   /* [S81] une reponse : le resultat VERIFIE chez Google (Envoyes, meme conversation, destinataire) */
@@ -2306,6 +2335,7 @@ async function mailsAGerer(s, rg) {
       const jeton = retenirFil(s, f, an);
       /* conversation suspecte : seulement l'alerte (ni echeance ni montant tires d'un mail piege) ; [S89] ni repondre ni rappel */
       for (const x of an.aGerer.filter(x => !an.suspect || x.type === 'suspect')) items.push({ type: x.type, priorite: x.priorite, texte: x.titre, preuve: x.extrait, certitude: x.certitude,
+        cle: clePoint(f.cle || 'fil|' + ((f.ids || [f.id])[0]), x.ref),   /* [S101] */
         fil: jeton, objet: an.objet, suspect: an.suspect, actions: x.actions.filter(a => !an.suspect || (a !== 'repondre' && a !== 'rappel')),
         creneau: x.type === 'creneau' ? an.creneaux.findIndex(c => x.titre.includes(c.libelle)) : undefined });
     }
@@ -2319,8 +2349,34 @@ async function mailsAGerer(s, rg) {
   s.mailsGerer = lu.ok && !lu.illisibles ? { ts: Date.now(), cle, r } : null;
   return r;
 }
+/* [S101] v4.11 « LES POINTS NE DESCENDENT PAS » (vu en ligne le 28 sept). Chaque point
+ * porte une cle (20 hex) : empreinte de sa conversation et de sa reference stable
+ * (type + message source), jamais un texte. La page garde, sur TON telephone, les
+ * cles que tu as marquees « Fait » ou « Plus tard » et les renvoie ; le serveur
+ * masque ces points. Une liste de cles, rien d'autre : elle ne donne ni une
+ * permission, ni une cible, ni une action ; une cle inconnue ne fait rien. */
+const clePoint = (groupe, ref) => crypto.createHash('sha256').update('jarvis-point|' + String(groupe) + '|' + String(ref)).digest('hex').slice(0, 20);
+const masqueDe = (liste) => new Set((Array.isArray(liste) ? liste : []).slice(0, 300).filter(x => typeof x === 'string' && /^[0-9a-f]{20}$/.test(x)));
+/* la page envoie la liste avec « à gérer », le point du jour et chaque message : gardee pour la session */
+const noterMasque = (s, b) => { if (b && Array.isArray(b.masquer)) s.masque = masqueDe(b.masquer); };
+function presenterGerer(b, masque) {
+  let masques = 0;
+  const sections = b.sections.map(sec => {
+    const items = sec.items.filter(it => !(it.cle && masque.has(it.cle) && ++masques));
+    const retires = sec.items.length - items.length;
+    if (retires && !items.some(it => !it.vide && it.type !== 'erreur'))
+      items.push({ type: 'mail', vide: true, certitude: 'fait', texte: "Rien d'autre à gérer ici (" + retires + ' point' + (retires > 1 ? 's marqués' : ' marqué') + ' « fait » ou « plus tard »).' });
+    return { ...sec, items };
+  });
+  const nb = sections.reduce((n, x) => n + x.items.filter(i => !['agenda', 'erreur', 'note', 'mail'].includes(i.type) || i.type === 'conflit').length, 0);
+  return { ...b, sections, aTraiter: nb, masques,
+    resume: !sections.length ? (CLE_ACCES ? "Ni agenda ni boîte mail ne sont branchés sur cette instance." : "C'est la démo publique : ni agenda ni boîte mail.")
+      : b.incomplet ? (nb ? nb + " point(s) à traiter, lecture incomplète" : "lecture incomplète : rien n'est garanti")
+      : (nb ? nb + ' point(s) à traiter' : 'rien d\'urgent') };
+}
 async function aGerer(s, souvenirs) {
-  if (s.gerer && Date.now() - s.gerer.ts < LIMITES_GERER.cacheMs) return s.gerer.r;
+  const masque = s.masque || new Set();
+  if (s.gerer && Date.now() - s.gerer.ts < LIMITES_GERER.cacheMs) return presenterGerer(s.gerer.r, masque);
   const now = Date.now(), auj = V.local(now, FUSEAU).jour, sections = [], sources = [];
   const rg = reglagesSouvenirs(souvenirs);
   /* 1. l'agenda (aujourd'hui, demain, chevauchements) et 2. les conversations des 14 derniers jours : ENSEMBLE */
@@ -2329,17 +2385,13 @@ async function aGerer(s, souvenirs) {
   if (ml) { if (ml.ok) sources.push('mails'); sections.push({ titre: 'Mails', items: ml.items }); }
   /* 3. tes notes (souvenirs) : tes propres mots, jamais une permission */
   if (rg.taches.length) sections.push({ titre: 'Tes notes', items: rg.taches.map(t => ({ type: 'note', texte: t, certitude: 'fait', preuve: 'dans « Ce que JARVIS retient de toi »' })) });
-  const nb = sections.reduce((n, x) => n + x.items.filter(i => !['agenda', 'erreur', 'note', 'mail'].includes(i.type) || i.type === 'conflit').length, 0);
   /* [S96] v4.10.2 vu en ligne : agenda ET boite en echec → « rien d'urgent ». Une lecture
    * incomplete ne dit JAMAIS « rien » : elle le signale (la carte passe a l'orange). */
   const incomplet = (ag && !ag.ok) || (ml && !ml.ok) || sections.some(x => x.items.some(i => i.type === 'erreur'));
-  const r = { actif: !!(AGENDA || ECRITURE || MAIL_LECTURE), sections, sources, aTraiter: nb, date: V.libelle(auj, false), incomplet: !!incomplet,
-    resume: !sections.length ? (CLE_ACCES ? "Ni agenda ni boîte mail ne sont branchés sur cette instance." : "C'est la démo publique : ni agenda ni boîte mail.")
-      : incomplet ? (nb ? nb + " point(s) à traiter, lecture incomplète" : "lecture incomplète : rien n'est garanti")
-      : (nb ? nb + ' point(s) à traiter' : 'rien d\'urgent'),
+  const r = { actif: !!(AGENDA || ECRITURE || MAIL_LECTURE), sections, sources, date: V.libelle(auj, false), incomplet: !!incomplet,
     regle: "Écrit par le serveur, sans IA : chaque point vient d'une règle, avec la phrase qui le prouve. Rien n'est envoyé ni écrit sans ton geste." };
   s.gerer = incomplet ? null : { ts: Date.now(), r };   /* [S96] un echec n'est pas garde en cache */
-  return r;
+  return presenterGerer(r, masque);   /* [S101] */
 }
 
 /* ---------------- UNE CONVERSATION, EN ENTIER [S80] ---------------- */
@@ -2398,7 +2450,9 @@ async function preparerReponse(s, sessionId, jeton, consigne, o = {}) {
   if (depasse(s, o)) return refus('MESSAGE_DEPASSE', TEXTE_DEPASSE);
   let texte = '';
   if (r.ok) { try { const b = r.texte.replace(/```(?:json)?/g, '').trim(); const x = JSON.parse(b.slice(b.indexOf('{'), b.lastIndexOf('}') + 1)); texte = String(x.texte == null ? '' : x.texte); } catch { texte = ''; } }
-  if (!texte.trim()) return refus('REDACTION_IMPOSSIBLE', "Je n'ai pas pu rédiger la réponse" + (r.ok ? '' : ' (' + propre(r.erreur, 30) + ')') + ". Rien n'est préparé.");
+  /* [S100] v4.11 vu en ligne : « Dacc » -> « Je n'ai pas pu rédiger la réponse. » sans dire quoi faire */
+  if (!texte.trim()) return refus('REDACTION_IMPOSSIBLE', "Je n'ai pas pu rédiger la réponse" + (r.ok ? ' à partir de « ' + lisible(c, 60) + ' »' : ' (' + propre(r.erreur, 30) + ')') + ". Rien n'est préparé."
+    + (r.ok ? " Écris ce que tu veux dire en une phrase, par exemple « d'accord pour samedi 11h » ou « je ne suis pas disponible mercredi »." : ' Réessaie dans un instant.'));
   const liensPermis = GM.liensDe(c);
   const lienMail = GM.mailto({ a, objet, texte });
   const avertissements = alertes.concat(V.registreDe(texte) === 'mixte' ? ["La réponse mélange « tu » et « vous » : relis-la."] : []);
@@ -2970,11 +3024,11 @@ const serveur = http.createServer((req, res) => {
       detail = true;
     }
     if (!detail)
-      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.10.2',
+      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.11.0',
         acces: CLE_ACCES ? 'protege' : 'public', ...(CLE_ACCES ? { config: verdict } : {}),
         manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
         node: String(process.versions.node).split('.')[0] });
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.10.2', verite: V.VERSION,
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: '5.29.4', memoire: '5.30', passerelle: 'v4.11.0', verite: V.VERSION,
       agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : ECRITURE_MOTIF ? 'erreur-config' : 'inactif',   /* [S30] [S48] */
       ecritureMotif: ECRITURE_MOTIF,
       mail: MAIL_ENVOI ? 'actif' : MAIL_ENVOI_MOTIF ? 'erreur-config' : 'inactif', mailMotif: MAIL_ENVOI_MOTIF,   /* [S68] */
@@ -3398,6 +3452,7 @@ const serveur = http.createServer((req, res) => {
       const s = sessionDe(b.sessionId);
       if (!s) return inconnue();
       s.souvenirs = M.nettoyerSouvenirs(b.souvenirs);
+      noterMasque(s, b);   /* [S101] */
       if (b.frais === true) { s.gerer = null; s.mailsGerer = null; }   /* [S94] relire vraiment */
       const r = await aGerer(s, s.souvenirs);
       return json(200, { ...r, ...etatDe(s) });
@@ -3458,6 +3513,7 @@ const serveur = http.createServer((req, res) => {
       const s = sessionDe(b.sessionId);
       if (!s) return inconnue();
       s.souvenirs = M.nettoyerSouvenirs(b.souvenirs);
+      noterMasque(s, b);   /* [S101] */
       try { return json(200, { ...(await pointDuJour(s)), ...etatDe(s) }); }
       catch { return json(500, { actif: true, ok: false, code: 'ERREUR_INTERNE', message: 'Point du jour indisponible.' }); }
     });
@@ -3520,6 +3576,7 @@ const serveur = http.createServer((req, res) => {
       /* [S7] session verifiee AVANT le debit : une session expiree ne coute rien */
       const sc = sessionDe(b.sessionId);
       if (!sc) return inconnue();
+      noterMasque(sc, b);   /* [S101] « qu'est-ce que j'ai à gérer ? » tapé : les points marqués restent masqués */
       const avaitProposition = [...sc.propositions.values()].some(p => p && p.etat === 'PROPOSEE');   /* [S49] « annule » juste apres une carte */
       const enCours = [...sc.enAttente.values()].filter(a => a && !a.annule);
       perimerCartes(sc);   /* [S40] un nouveau message : les anciennes cartes ne valent plus */
