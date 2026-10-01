@@ -41,6 +41,7 @@ const parisAuj = () => { const p = {}; for (const x of new Intl.DateTimeFormat('
 const jour = (plus) => new Date(parisAuj() + plus * 86400000);                       /* minuit UTC du jour civil */
 const iso = (d) => d.toISOString().slice(0, 10);
 const nomJour = (d) => JOURS[d.getUTCDay()];
+const jourAff = (d) => (d.getUTCDate() === 1 ? '1er' : String(d.getUTCDate()));   /* comme le serveur : « 1er octobre » (cassait chaque 1er du mois) */
 const prochain = (w) => { const a = jour(0).getUTCDay(); return jour(((w - a + 7) % 7) || 7); };   /* strictement apres aujourd'hui */
 const MERCREDI = prochain(3);
 
@@ -275,7 +276,7 @@ const PAGE = (() => { try { return fs.readFileSync(path.join(DIR, 'index.html'),
   const b1 = await srvB.req('GET', '/api/point-du-jour?sessionId=' + srvB.sid);
   const j0 = ((b1.jours || [])[0] || {}).evenements || [], j1 = ((b1.jours || [])[1] || {}).evenements || [];
   await t('B1', "point du jour : aujourd'hui (agenda principal) et demain (agenda JARVIS), heures de Paris, triés, résumé « 1 événement · 2 événements »", async () =>
-    ({ ok: b1.ok === true && ((b1.jours || [])[0] || {}).libelle === "Aujourd'hui, " + nomJour(T0) + ' ' + T0.getUTCDate() + ' ' + MOIS[T0.getUTCMonth()]
+    ({ ok: b1.ok === true && ((b1.jours || [])[0] || {}).libelle === "Aujourd'hui, " + nomJour(T0) + ' ' + jourAff(T0) + ' ' + MOIS[T0.getUTCMonth()]
         && j0.length === 1 && j0[0].titre === 'Réunion parents' && j0[0].heure === hm(at(T0, '19:00')) + ' → ' + hm(at(T0, '20:00')) && j0[0].agenda === 'principal'
         && j1.length === 2 && j1[0].titre === PIEGE.replace(/[<>]/g, ' ').replace(/\s+/g, ' ').trim() && j1[1].titre === 'Hand' && j1[1].agenda === 'JARVIS'
         && b1.resume === "aujourd'hui : 1 événement · demain : 2 événements", info: (b1.resume || b1.message || b1.code || b1.erreur || '') + ' ; ' + j0.map(e => e.heure + ' ' + e.titre).join(', ') }));
