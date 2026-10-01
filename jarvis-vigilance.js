@@ -38,6 +38,20 @@
  *     "---- Message transfere ----", "Le ... a ecrit :").
  *  Les deux ne font que durcir (V1) : un faux positif coute une cible a
  *  retaper, jamais une action.
+ *
+ * 5.29.5 — N3 NEGATION PORTEE PAR LA PROPOSITION. N1 ne regardait que les
+ *  3 mots avant le verbe : "je ne veux pas que tu l'envoies a marc@x.fr",
+ *  "hors de question d'envoyer", "je t'interdis d'envoyer", "refuse
+ *  d'envoyer" comptaient comme une intention PRESENTE — et le serveur
+ *  ([S47] actionEcrite) proposait alors lui-meme l'envoi refuse. Meme
+ *  defaut que le "oui" de sosoj92/jarvis-assistant-vocal (sous-chaines sans
+ *  negation). Desormais, une negation ou un mot d'interdiction dans la meme
+ *  proposition, avant le verbe (jusqu'a la ponctuation ou "et / mais /
+ *  puis / donc / alors / ou"), nie le verbe. "ne ... que" sans autre
+ *  negation reste une restriction ("il ne reste qu'a l'envoyer"), et un
+ *  rappel ("n'oublie pas d'envoyer") n'est pas une negation. Durcit
+ *  seulement (V1) : "si tu n'as pas de reponse renvoie a marc" (sans
+ *  virgule) demande maintenant de retaper la cible.
  * ======================================================================== */
 
 /* Racines de verbes, sans accents, en minuscules. Chaque racine doit
@@ -117,7 +131,36 @@ function occurrenceNiee(t, debut, fin) {
   if (ne && apres.some(m => NEG_APRES_AVEC_NE.has(m))) return true;
   if (ne && apres.some(m => m === 'que' || m === 'qu')) return false; /* "n'envoie que le rapport" */
   if (ne) return true;
-  return !rappel && avant.some(m => NEG_AVANT.has(m));
+  if (!rappel && avant.some(m => NEG_AVANT.has(m))) return true;
+  return negationDansProposition(t, debut);
+}
+
+/* ---------------- N3 : negation portee par la proposition ---------------- */
+const BORNES = new Set(['et', 'mais', 'puis', 'donc', 'alors', 'ou', 'ensuite', 'sinon', 'car']);
+/* "rien" et "sans" restent dans la fenetre courte de N1 : sur toute la
+ * proposition ils nieraient a tort ("sans attendre envoie"). */
+const NEG_PROPOSITION = new Set(['ne', 'n', 'pas', 'jamais', 'aucun', 'aucune', 'not', 'never', 'dont', 'don']);
+const NEG_NE_SEUL = new Set(['ne', 'n']);
+const INTERDIRE = /^(interdi|refus|defend|defense|empech|oppos|evit|arret|inutile)/;
+const PROPOSITION_MAX = 10;
+
+function negationDansProposition(t, debut) {
+  /* la proposition s'arrete a la ponctuation, puis au dernier mot de liaison */
+  const segment = t.slice(0, debut).split(/[,;:.!?()\[\]\n]/).pop();
+  let m = mots(segment);
+  const borne = m.reduce((b, x, i) => BORNES.has(x) ? i : b, -1);
+  m = m.slice(borne + 1).slice(-PROPOSITION_MAX);
+  if (m.some(x => RAPPEL.has(x))) return false;                 /* "ne m'oublie pas : envoie" reste */
+  const hors = m.some((x, i) => x === 'question' && i > 0 && (m[i - 1] === 'de' || m[i - 1] === 'pas'));
+  if (hors || m.some(x => INTERDIRE.test(x))) return true;
+  const neg = m.filter(x => NEG_PROPOSITION.has(x));
+  if (!neg.length) return false;
+  /* "ne ... que" sans autre negation = restriction, pas negation */
+  if (neg.every(x => NEG_NE_SEUL.has(x))) {
+    const i = m.findIndex(x => NEG_NE_SEUL.has(x));
+    if (m.slice(i + 1).some(x => x === 'que' || x === 'qu')) return false;
+  }
+  return true;
 }
 
 function occurrences(racines, t) {
@@ -194,4 +237,4 @@ class Vigilance {
   }
 }
 
-module.exports = { Vigilance, intentionPresente, analyserIntention, separer, normaliser, VERBES, VERSION: '5.29.4' };
+module.exports = { Vigilance, intentionPresente, analyserIntention, separer, normaliser, VERBES, VERSION: '5.29.5' };
