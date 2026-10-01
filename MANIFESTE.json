@@ -1,14 +1,14 @@
 {
   "format": 1,
   "passerelle": "v4.11.0",
-  "empreinte": "325112b1cf76",
+  "empreinte": "3c5d7f9a9aef",
   "fichiers": {
-    "server.js": "660b827b895c05f87bd51858cff00c32d3f3b07683f5b9c54b40b15ce114be97",
+    "server.js": "63adef5be6bdc5ea0aef9b2152f70cfbea1921c2961cbeec60be22fe262a34d7",
     "index.html": "7ad3cab39b03b515d96b7b5f35e8b9dc929926cfa825cc8d2a17cf56b655e627",
     "package.json": "570aeab2c5dd22edfcaab8f1c8e97c273d60a3d813fd5cc9c2d8adc35964845d",
     "jarvis-5.28.3.js": "0eb75bec3cdfab34fbc44f7c0360f6c2357451489702fc14c347890b35c58350",
     "jarvis-plus-5.29.js": "5d5a15289b5c120f13ddf8f2c6c076f4a20d03058d584f399cfb34a53aedb331",
-    "jarvis-vigilance.js": "e03e944f0ab0f1791e1e04a1f1b69605d513ecbf19f098153b6981b7029c7536",
+    "jarvis-vigilance.js": "9fe5dd05f3703319f3703b8e7bfb04a2ed83c20cdafb2ee8528448f830996dd1",
     "jarvis-memoire.js": "03aa5392110721528fa082ece86a0612d1f45ba19c1930af78c061627c1f8e88",
     "jarvis-agenda.js": "93e48c4efe19779e56fbdd2bff15068852985bd9c501966b3f1c48162d6d4d85",
     "jarvis-ecriture.js": "9cc1591623ba92c96e0d7c0a0c9e70a239bb852780c4d3b51781665cde296406",
