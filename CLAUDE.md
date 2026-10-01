@@ -60,6 +60,7 @@
 - **Contrôle de fin de tour** (hook « Stop », `.claude/settings.json` → `.claude/verifier-tests.js`) : si le code diffère de `origin/Racine` et du dernier état vert, il lance le manifeste et TOUTES les suites, une par une (≈ 5 min, ports fixes partagés : jamais en parallèle). Rouge, ou une suite de Racine supprimée → tu continues ; après 3 essais il te laisse finir avec « Ne pas fusionner ».
 - Donc **ne lance pas toi-même la boucle complète** : pendant le travail, seulement la suite concernée (`node tests-vXY.js | grep -E "ECHEC|PERCE|EXCEPTION|>>>"`, et le code de sortie fait foi). À la main si besoin : `node .claude/verifier-tests.js --forcer`.
 - Ne jamais supprimer, sauter ou affaiblir un test existant. Un test inversé par la version est adapté ET signalé dans PROGRESSION.
+- **Tests et dates** : quand le code lit l'horloge réelle, jamais de date fixe (elle finit dans le passé) ni de jour du mois brut (le serveur écrit « 1er »). Vérifier une suite à une autre date : `JARVIS_DECALAGE_MS=$((7*86400000)) NODE_OPTIONS="--require $PWD/.github/decalage-horloge.js" node tests-vXY.js`. Veille chaque matin (`.github/workflows/veille-dates.yml`, J / J+1 / J+7) ; si elle est rouge, un ticket « Veille des dates » est ouvert.
 - Ne jamais modifier `.claude/` ni `.github/` sans demande explicite d'Alsid.
 - Le noyau plafonne 20 décisions par seconde et par session (DRY_RUN_RATE_LIMITED) : dans un test, espacer les touchers (`avance += 1100`).
 - Livrer `PROGRESSION-vX.md` : tests à faire en ligne (iPhone, Safari) et réglages Render.

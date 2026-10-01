@@ -1,0 +1,70 @@
+name: veille-dates
+# Chaque matin, toutes les suites de Racine à J (aujourd'hui), J+1 et J+7.
+# But : repérer un test piégé par la date (« 1er » du mois, date fixe
+# dépassée, changement d'heure, nouvel an…) jusqu'à 7 jours AVANT qu'il ne
+# casse la CI de Racine et bloque le déploiement Render.
+# N'intervient pas dans la barrière de déploiement (tests.yml inchangé).
+# En cas d'échec : un ticket « Veille des dates » est ouvert (ou complété).
+on:
+  schedule:
+    - cron: '17 4 * * *'   # 6h17 à Paris en été, 5h17 en hiver (UTC)
+  workflow_dispatch:        # à la main : onglet Actions → veille-dates → Run workflow
+  push:                     # se vérifie lui-même quand on le modifie (sans ticket)
+    paths:
+      - '.github/workflows/veille-dates.yml'
+      - '.github/decalage-horloge.js'
+
+permissions:
+  contents: read
+
+jobs:
+  suites:
+    name: J+${{ matrix.jours }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        jours: [0, 1, 7]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Manifeste
+        run: node jarvis-manifeste.js --verifier
+      - name: jsdom pour les tests de la page (jamais en production)
+        run: npm install --no-save --no-audit --no-fund jsdom
+      - name: Toutes les suites, horloge à J+${{ matrix.jours }}
+        env:
+          JOURS: ${{ matrix.jours }}
+        run: |
+          export JARVIS_DECALAGE_MS=$(( JOURS * 86400000 ))
+          export NODE_OPTIONS="--require $GITHUB_WORKSPACE/.github/decalage-horloge.js"
+          node -e "console.log('Horloge des tests :', new Date().toISOString())"
+          echec=0
+          for f in tests-*.js; do
+            echo "::group::$f"
+            if ! timeout 300 node "$f"; then echo "::error::$f en échec à J+$JOURS"; echec=1; fi
+            echo "::endgroup::"
+          done
+          exit $echec
+
+  alerte:
+    needs: suites
+    if: failure() && github.event_name != 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Ouvrir ou compléter le ticket
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          titre="Veille des dates : des tests vont casser"
+          corps="Suites rouges avec l'horloge avancée (J, J+1 ou J+7) : $RUN
+          Le job J+N en échec donne le délai avant que la CI de Racine casse. Ne pas fusionner de PR sur Racine tant que ce n'est pas corrigé si J+0 est rouge."
+          n=$(gh issue list --state open --search "\"$titre\" in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then gh issue comment "$n" --body "$corps"; else gh issue create --title "$titre" --body "$corps"; fi
