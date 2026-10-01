@@ -57,9 +57,28 @@
 - Chaque nouveau test doit **échouer sur la version précédente** (`JARVIS_DIR=../vPREC node tests-vNEW.js`), sauf les « garde » ; les suites existantes restent vertes.
 - Tests de mutation : casser chaque correctif à la main → au moins un test doit tomber.
 - `node jarvis-manifeste.js --ecrire` après toute modification d'un fichier du manifeste, puis `--verifier`.
-- Lancer les suites : `npm install --no-save jsdom` puis `for f in tests-*.js; do node "$f" || echo "ECHEC $f"; done`.
+- **Contrôle de fin de tour** (hook « Stop », `.claude/settings.json` → `.claude/verifier-tests.js`) : si le code diffère de `origin/Racine` et du dernier état vert, il lance le manifeste et TOUTES les suites, une par une (≈ 5 min, ports fixes partagés : jamais en parallèle). Rouge, ou une suite de Racine supprimée → tu continues ; après 3 essais il te laisse finir avec « Ne pas fusionner ».
+- Donc **ne lance pas toi-même la boucle complète** : pendant le travail, seulement la suite concernée (`node tests-vXY.js | grep -E "ECHEC|PERCE|EXCEPTION|>>>"`, et le code de sortie fait foi). À la main si besoin : `node .claude/verifier-tests.js --forcer`.
+- Ne jamais supprimer, sauter ou affaiblir un test existant. Un test inversé par la version est adapté ET signalé dans PROGRESSION.
+- Ne jamais modifier `.claude/` ni `.github/` sans demande explicite d'Alsid.
 - Le noyau plafonne 20 décisions par seconde et par session (DRY_RUN_RATE_LIMITED) : dans un test, espacer les touchers (`avance += 1100`).
 - Livrer `PROGRESSION-vX.md` : tests à faire en ligne (iPhone, Safari) et réglages Render.
+
+## Relecture offensive : failles déjà trouvées ici (à chercher à chaque version)
+- Comparaison avec `undefined` qui passe en silence (champ absent = accepté).
+- Champ public modifiable après construction (objet non gelé).
+- Contrôle fait sur un instantané pris à la construction, pas sur l'état vivant.
+- Autorité vérifiée saut par saut au lieu du cumul sur tous les enfants (délégation en éventail).
+- Course entre deux messages : un message dépassé ne crée ni carte ni action.
+- Preuve (frappe, Face ID, code) qui survit à son tour ou sert à une autre transaction.
+- Cible, ressource, titre ou permission venus du modèle, d'un contenu lu ou d'un souvenir au lieu de la frappe ou du serveur.
+- Repli silencieux : échec affiché comme « rien », simulation au lieu d'erreur.
+- Unicode : sosies, caractères invisibles, adresse déformée par la dictée.
+
+## Économie de quota (Alsid est sur Claude Pro)
+- Ne jamais lire en entier `server.js` (~270 Ko), `jarvis-5.28.3.js` (~185 Ko), `index.html` (~175 Ko), `jarvis-plus-5.29.js` (~90 Ko) : `grep -n`, puis lecture par plages de lignes.
+- Ne pas relancer une suite déjà verte ni relire deux fois sans raison ; relire à fond seulement ce qui touche la sécurité.
+- Sorties de tests : seulement les lignes d'échec (`ECHEC`, `PERCE`, `EXCEPTION`) et le résumé `>>>`.
 
 ## Style de réponse attendu
 - Ultra-concis, critique, sans formules de politesse ni transitions.
