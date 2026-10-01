@@ -43,6 +43,7 @@ const parisAuj = () => { const p = {}; for (const x of new Intl.DateTimeFormat('
 const jour = (plus) => new Date(parisAuj() + plus * 86400000);                       /* minuit UTC du jour civil */
 const iso = (d) => d.toISOString().slice(0, 10);
 const nomJour = (d) => JOURS[d.getUTCDay()];
+const jourAff = (d) => (d.getUTCDate() === 1 ? '1er' : String(d.getUTCDate()));   /* comme le serveur : « 1er octobre » (cassait chaque 1er du mois) */
 const prochain = (w) => { const a = jour(0).getUTCDay(); return jour(((w - a + 7) % 7) || 7); };   /* strictement apres aujourd'hui */
 const MERCREDI = prochain(3);
 
@@ -224,7 +225,7 @@ const plansJ = () => journal().filter(x => x.type === 'plan');
   viderJournal();
   const f1 = await srv.chat('Quel jour sommes-nous ?');
   await t('S1', "F : « Quel jour sommes-nous ? » → le serveur répond la date du jour, sans appeler le modèle", async () =>
-    ({ ok: f1.etape === 'SERVEUR' && f1.reponse && f1.reponse.includes(' ' + jour(0).getUTCDate() + ' ') && f1.reponse.includes(nomJour(jour(0))) && conv().length === 0 && plansJ().length === 0,
+    ({ ok: f1.etape === 'SERVEUR' && f1.reponse && f1.reponse.includes(' ' + jourAff(jour(0)) + ' ') && f1.reponse.includes(nomJour(jour(0))) && conv().length === 0 && plansJ().length === 0,
        info: (f1.reponse || f1.etape) + ' ; appels ' + journal().length }));
   scenario({ reponse: 'Bonjour !' }); viderJournal();
   await srv.chat('bonjour');

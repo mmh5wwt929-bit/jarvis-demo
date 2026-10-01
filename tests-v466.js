@@ -80,7 +80,10 @@ const transport = async (methode, url) => { const [status, json] = reponseGoogle
     ({ ok: d3.code === 'AGENDA_INTROUVABLE' && d4.code === 'API_AGENDA_NON_ACTIVEE' && d5.code === 'COMPTE_GOOGLE_INTROUVABLE'
          && d6.code === 'CLE_GOOGLE_REVOQUEE' && d7.code === 'HORLOGE_SERVEUR',
        info: [d3, d4, d5, d6, d7].map(x => x.code).join(' ') }));
-  const permisDe = (m) => m.permis({ action: 'CREATE', resource: 'AGENDA_JARVIS', target: m.validerCible('2026-12-01T18:30|60|Test').cle, transactionId: 'tx_' + crypto.randomUUID() });
+  /* Date de la carte toujours dans la fenêtre de validerCible (veille → +366 j) : l'ancienne date
+   * fixe « 2026-12-01 » rendait null (crash « reading 'cle' ») dès le 2 décembre 2026 au soir. */
+  const cibleTest = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) + 'T18:30|60|Test';
+  const permisDe = (m) => m.permis({ action: 'CREATE', resource: 'AGENDA_JARVIS', target: m.validerCible(cibleTest).cle, transactionId: 'tx_' + crypto.randomUUID() });
   const mL = mod('lecture'); const cL = await mL.creer(permisDe(mL));
   await t('E4', "création sur un agenda en lecture seule → AGENDA_LECTURE_SEULE (plus un « inaccessible » vague)", async () =>
     ({ ok: !cL.ok && cL.code === 'AGENDA_LECTURE_SEULE', info: cL.code }));
