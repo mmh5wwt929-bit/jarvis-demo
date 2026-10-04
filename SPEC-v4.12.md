@@ -12,7 +12,10 @@ JARVIS lit les SMS reçus de 4-5 proches adultes et construit « Ta semaine » :
 Hors champ : WhatsApp, envoi de SMS, extraction par IA, connecteur MCP.
 
 ## 1. Contrat du journal (écrit par le raccourci iOS)
-- Une ligne par SMS reçu : `AAAA-MM-JJ HH:MM | Nom | texte` (heure de Paris ; texte sur une ligne, retours à la ligne remplacés par une espace).
+- Raccourci MINIMAL côté iPhone (Alsid n'arrive pas à monter plus) : une seule action « Ajouter à la suite » avec `[Date actuelle] | Nom | [Entrée du raccourci]`, nouvelle ligne activée, dans `Jarvis/journal.txt`. Aucun formatage de date, aucun retrait des retours à la ligne côté iPhone : **le serveur s'adapte**.
+- Une entrée commence par une date reconnue suivie de ` | Nom | `. Dates acceptées (heure de Paris, secondes facultatives) : `AAAA-MM-JJ HH:MM`, `JJ/MM/AAAA HH:MM`, `JJ/MM/AAAA à HH:MM`, `J mois AAAA à HH:MM` avec mois abrégé ou complet (« 4 oct. 2026 à 21:46 », « 4 octobre 2026 à 21:46 »). Le format exact produit par l'iPhone d'Alsid (capture à venir) doit figurer dans les tests.
+- Toute autre ligne = suite du SMS précédent (SMS sur plusieurs lignes) : au plus 20 lignes et 1 000 car. par SMS, au-delà tronqué et marqué ; une ligne de suite sans entrée avant elle est ignorée et comptée.
+- Limite assumée (à écrire dans PROGRESSION) : un SMS sur plusieurs lignes peut contenir une fausse ligne « date | AutreNom | … » et se faire passer pour un autre proche configuré. Conséquence bornée : étiquette fausse sur une proposition, jamais une action (tout SMS est `CONTENT_DERIVED`, rien sans toucher). Parade : une entrée dont la date est antérieure à celle de l'entrée précédente est marquée « ordre suspect » sur sa carte.
 - Le fichier est envoyé ENTIER à chaque SMS (automatisation « Message », une par contact, nom écrit à la main dans l'automatisation, jamais tiré du message) et par un raccourci manuel « JARVIS journal ».
 
 ## 2. Route `POST /api/journal`
@@ -56,7 +59,7 @@ Hors champ : WhatsApp, envoi de SMS, extraction par IA, connecteur MCP.
 - Détail (avec la clé) : `sms: { contacts: n, journal: { lignes, jusqua, recuIlYa } }` — jamais un nom, jamais un texte.
 
 ## 8. Tests (`tests-v412.js`, doit échouer sur v4.11)
-- Parsing : format, 14 jours, 2 000 lignes, 1 Mo / 413, date future, contrôles/invisibles, nom hors liste, sosie cyrillique, casse.
+- Parsing : formats de date de l'iPhone (dont celui de la capture), lignes de suite, fausse ligne « date | AutreNom » dans un SMS multi-lignes (aucune action ; « ordre suspect » si date antérieure), 14 jours, 2 000 lignes, 1 Mo / 413, date future, contrôles/invisibles, nom hors liste, sosie cyrillique, casse.
 - Clé : absente, courte, égale à la clé d'accès, fausse ×10 → blocage, temps constant (pas de court-circuit), démo publique → 404.
 - Instantanés : envois croisés (l'ancien ne remplace pas le récent), carte périmée après changement de ligne.
 - Dates relatives à la date du SMS, 25 oct (changement d'heure), 31 → 1er, « samedi » dit un samedi.
@@ -68,6 +71,6 @@ Hors champ : WhatsApp, envoi de SMS, extraction par IA, connecteur MCP.
 
 ## 9. Livrables
 - `jarvis-sms.js`, `server.js`, `index.html`, `MANIFESTE.json`, `tests-v412.js`, `CLAUDE.md` (état + règles SMS), `PROGRESSION-v4.12.md` :
-  - pas à pas iPhone : dossier `JARVIS` dans iCloud Drive ; une automatisation « Message » par contact (Exécuter immédiatement) : texte sur une ligne → ligne datée → « Ajouter au fichier » → « Obtenir le fichier » → POST avec la clé ; raccourci manuel « JARVIS journal » ;
+  - pas à pas iPhone : dossier `JARVIS` dans iCloud Drive ; une automatisation « Message » par contact (Exécuter immédiatement, « Le message contient » vide) : « Ajouter à la suite » `[Date actuelle] | Nom | [Entrée du raccourci]` → « Obtenir le fichier » → « Obtenir le contenu de l'URL » (POST, en-tête Authorization) ; captures ou pas à pas tapé par tapé, Alsid n'est pas développeur ; raccourci manuel « JARVIS journal » ;
   - Render (instance privée) : `JARVIS_CLE_JOURNAL`, `JARVIS_SMS_CONTACTS`, `JARVIS_CONFIG_ATTENDUE` += `sms` ;
   - tests en ligne, dont 2 SMS piégés envoyés par un proche.
