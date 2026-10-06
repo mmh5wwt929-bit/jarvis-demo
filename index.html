@@ -1495,6 +1495,8 @@ const carteElevation = (jeton) => [...document.querySelectorAll('#fil .elevation
 function rappelerCarte(boite) {
   const champ = boite.querySelector('input.code'), etat = boite.querySelector('.etat-elev');
   if (etat && !etat.textContent) etat.textContent = 'Confirme ici que c\'est toi : l\'envoi partira ensuite tout seul.';
+  /* [v4.12] la carte vit dans « Discuter » : y revenir d'abord (un champ masqué ne prend pas le focus ; jsdom 30.1.2 l'applique aussi) */
+  if (document.body.classList.contains('prive') && boite.closest('#conversation')) montrer('discuter');
   boite.scrollIntoView({ block: 'center' });
   if (champ) champ.focus();
 }

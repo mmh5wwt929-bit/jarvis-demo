@@ -5,7 +5,7 @@ Connecteur Claude (A), alerte « adresse vue dans un mail » (B), démo publique
 
 ## 1. Mise en ligne
 1. Appli GitHub → PR « v4.12 » → attendre la coche verte (tests 22 et 24) → **Fusionner**.
-2. Safari → `/health` des deux services : `passerelle` = `v4.12.0`, `manifeste` = `conforme`, `empreinte` = **`5b622c2c8d4e`**.
+2. Safari → `/health` des deux services : `passerelle` = `v4.12.0`, `manifeste` = `conforme`, `empreinte` = **`11d130c41cb5`**.
 
 ## 2. Prérequis
 - Jetons Gmail valides : l'appli Google doit être **en Production** (en « Test », les jetons expirent tous les 7 jours et `lire_mails` échouera).
@@ -57,3 +57,6 @@ Choix technique : pas de SDK MCP, aucune dépendance nouvelle (protocole « Stre
 - `tests-v461.js` : `jarvis-mcp.js` ajouté aux fichiers copiés (nouveau fichier du manifeste).
 - `tests-v47.js` P2 : + le bloc « Connecteur Claude » (instance privée) dans le compte des sections ; P8 : la démo dit « mail piégé » (la promesse) au lieu d'« e-mail piégé », et le texte de l'accueil privé est lu dans sa bulle (le bouton de la démo, masqué, reste dans la page).
 - `tests-preuves.js` E1 : inventaire des points d'effet 12 → 13 (la lecture de la boîte par le connecteur Claude, même permis de lecture que les deux autres).
+
+## 9. CI rouge avant cette version (corrigé ici)
+- Depuis le 4 oct, `tests-v462.js` P1 tombait en CI sur `Racine` aussi (même code) : la CI installe jsdom sans version, et jsdom 30.1.2 (4 oct) ne donne plus le focus à un champ masqué. Sur l'instance privée, la carte Face ID / code est dans « Discuter » ; re-toucher « Confirmer l'envoi » y ramène maintenant d'abord (même défaut sur iPhone : le champ ne prenait pas le focus depuis un autre onglet).
