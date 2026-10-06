@@ -1404,7 +1404,7 @@ function noterAdressesLues(s, texte) {
  * publique : un par session (jamais l'extrait d'un visiteur chez un autre).
  * ======================================================================== */
 const TEXTE_ALERTE = "Cette adresse vient d'un contenu que tu as reçu, pas de toi. Vérifie par téléphone, à un numéro que tu connais déjà, avant de l'utiliser.";
-const LIMITES_VUES = Object.freeze({ max: 500, dureeMs: 14 * 86400000, extrait: 160 });
+const LIMITES_VUES = Object.freeze({ max: 500, maxDemo: 50, dureeMs: 14 * 86400000, extrait: 160 });   /* demo : 50 par session (200 sessions) */
 const VUES_INSTANCE = new Map();
 const magasinVues = (s) => CLE_ACCES ? VUES_INSTANCE : s ? (s.vues || (s.vues = new Map())) : null;
 const normeAdresse = (a) => String(a || '').normalize('NFC').toLowerCase();
@@ -1413,7 +1413,7 @@ const RE_INVISIBLES = /[\u0000-\u001f\u007f-\u009f\u00ad\u200b-\u200f\u2028-\u20
 function purgerVues(m) {
   const t = Date.now();
   for (const [k, v] of m) if (t - v.vu > LIMITES_VUES.dureeMs) m.delete(k);
-  while (m.size > LIMITES_VUES.max) m.delete(m.keys().next().value);
+  while (m.size > (CLE_ACCES ? LIMITES_VUES.max : LIMITES_VUES.maxDemo)) m.delete(m.keys().next().value);
 }
 /* toutes les adresses d'un texte externe : { source, libelle, dateMs, suspect } */
 function noterVues(s, texte, o) {

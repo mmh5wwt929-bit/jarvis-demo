@@ -5,7 +5,7 @@ Connecteur Claude (A), alerte « adresse vue dans un mail » (B), démo publique
 
 ## 1. Mise en ligne
 1. Appli GitHub → PR « v4.12 » → attendre la coche verte (tests 22 et 24) → **Fusionner**.
-2. Safari → `/health` des deux services : `passerelle` = `v4.12.0`, `manifeste` = `conforme`, `empreinte` = **`2796933698e9`**.
+2. Safari → `/health` des deux services : `passerelle` = `v4.12.0`, `manifeste` = `conforme`, `empreinte` = **`5b622c2c8d4e`**.
 
 ## 2. Prérequis
 - Jetons Gmail valides : l'appli Google doit être **en Production** (en « Test », les jetons expirent tous les 7 jours et `lire_mails` échouera).
