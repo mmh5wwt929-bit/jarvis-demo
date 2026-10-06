@@ -1,6 +1,6 @@
 # JARVIS — consignes pour Claude (dépôt public : aucun secret, aucune adresse privée)
 
-## État (branche `claude/v412`, PR v4.12 à fusionner)
+## État (branche `Racine`, après fusion de la PR v4.12)
 - Passerelle **v4.12.0** (avant : v4.11.0) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
 - Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.4, `jarvis-mcp.js` 1.0, `jarvis-verite.js` 1.6, `jarvis-analyse.js` 1.2.
 - v4.9.1 : « Ouvrir dans Mail » (mailto:), demande double dite, historique 12 échanges, pages `/confidentialite` et `/conditions`.
@@ -10,9 +10,10 @@
 - v4.11 : titre d'événement seulement dans les mots tapés (sinon « Quel titre ? » ; « même chose » = titre de la création précédente, dit) ; clé stable par point « à gérer » ; ta réponse retire les points qu'elle suit ; « Fait » / « Plus tard » gardés sur le téléphone et masqués par le serveur ; instance privée : onglets Aujourd'hui / Discuter / Réglages, flux terminés repliés en une ligne.
 - v4.12 A : connecteur MCP pour l'appli Claude (`POST /mcp`, instance privée) : `lire_mails`, `proposer_mail`, `proposer_evenement` ; propositions confirmées dans « Aujourd'hui » ; état dans Réglages.
 - v4.12 B : alerte « adresse vue dans un mail » : adresse retapée par la personne mais vue dans un contenu reçu → carte qui cite l'extrait d'origine, avant toute suite.
+- v4.12 C : démo publique lisible en 10 s : promesse, bouton « Voir un mail piégé bloqué », parcours en 3 écrans (vraie tentative, « Essaie toi-même »), jargon dans « Détails techniques » (replié), lien vidéo si `JARVIS_DEMO_VIDEO` (https, démo seulement). SMS (SPEC D) non codé.
 - Render déploie `Racine` seulement « After CI Checks Pass ».
 - Deux services, même code :
-  - démo publique (sans `JARVIS_CLE_ACCES`) : **jamais** de variable Gmail, agenda ou élévation ;
+  - démo publique (sans `JARVIS_CLE_ACCES`) : **jamais** de variable Gmail, agenda, élévation ni connecteur (`JARVIS_DEMO_VIDEO` seulement) ;
   - instance privée d'Alsid (protégée par `JARVIS_CLE_ACCES`) : agenda, écriture Google, Face ID + code, Gmail.
 
 ## Rôle des fichiers
@@ -53,6 +54,7 @@
 - Une action par message : ce qui n'est pas fait est dit par le serveur ; le modèle ne propose jamais d'agir à la place de la personne.
 - Option `manuel` de la couche : seulement pour un geste du serveur (carte « Créer », envoi retapé, lectures déclenchées par un toucher avec une cible fixée par le serveur). Jamais pour un plan du modèle : il garde son sceau de contexte.
 - Une lecture en échec ou incomplète ne s'affiche jamais comme « rien » : elle le dit, et n'est pas gardée en cache.
+- Démo publique : aucun mot de jargon (plancher, sceau, ancre, rayon, G1…G5, noyau, CONTENT_DERIVED) dans le texte visible hors « Détails techniques » ; son modèle reçoit la promesse, jamais « inviolable » (phrase retirée par le serveur, et c'est dit).
 - Fermé par défaut : une variable mal réglée désactive l'outil et `/health` le dit ; jamais de repli silencieux vers la simulation.
 - Aucun secret (clé, jeton, client OAuth, code) dans un commit, un journal, une capture, un message ou une réponse d'API.
 
