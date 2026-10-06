@@ -1,10 +1,10 @@
 {
   "format": 1,
-  "passerelle": "v4.11.0",
-  "empreinte": "3c5d7f9a9aef",
+  "passerelle": "v4.12.0",
+  "empreinte": "11d130c41cb5",
   "fichiers": {
-    "server.js": "63adef5be6bdc5ea0aef9b2152f70cfbea1921c2961cbeec60be22fe262a34d7",
-    "index.html": "7ad3cab39b03b515d96b7b5f35e8b9dc929926cfa825cc8d2a17cf56b655e627",
+    "server.js": "0aac1d1b42eb967adefeb9d04b0025968e6f08c66b26e56dc9ef3c9f7a46369d",
+    "index.html": "ed5e966ff43a80b41eea85f55dfbdf14ad88517cf5daace5e231a7c949831c44",
     "package.json": "570aeab2c5dd22edfcaab8f1c8e97c273d60a3d813fd5cc9c2d8adc35964845d",
     "jarvis-5.28.3.js": "0eb75bec3cdfab34fbc44f7c0360f6c2357451489702fc14c347890b35c58350",
     "jarvis-plus-5.29.js": "5d5a15289b5c120f13ddf8f2c6c076f4a20d03058d584f399cfb34a53aedb331",
@@ -13,12 +13,13 @@
     "jarvis-agenda.js": "93e48c4efe19779e56fbdd2bff15068852985bd9c501966b3f1c48162d6d4d85",
     "jarvis-ecriture.js": "9cc1591623ba92c96e0d7c0a0c9e70a239bb852780c4d3b51781665cde296406",
     "jarvis-elevation.js": "75a3a05bee0071f7a6df73727acc98f3bd3b506eca1a8d598207ac2350637f94",
-    "jarvis-manifeste.js": "eadd466591e8bdfebf79cf40dedc5cb200e734c44d5af9fa89b96495fad3fc05",
+    "jarvis-manifeste.js": "7ed980c7fea680a7f3f83ba86c6b3a61766700ccab96d13f1aebb8bcc0225d03",
     "jarvis-verite.js": "2d849b6772fcc534b8bdfb606a0cdab2e0f42c43f65e0e357879b88fb48534f3",
     "jarvis-appli.js": "18718984c02930bc6b328e2b8f2ea86b0b9f4166f6af373d8b67fb822679bd59",
-    "jarvis-gmail.js": "37fa4b2f4318c5283443ae58f4d3afee5ed47128fdaea53499820362bd813c12",
+    "jarvis-gmail.js": "6f4f13005c958fc0cf397583675c01ec196a0f506a927d5d63fb048641df8913",
     "confidentialite.html": "d18c00908fa80082aa0783f9a9f4f944201c86c8ad12a845415add81e327dbf6",
     "conditions.html": "123615b2d2774c44f68cbb8a86a63cc4f77b72906b1990fda6e0ee0401a37afc",
-    "jarvis-analyse.js": "064c338d8aa7321b234fd5f45ec45d72effd642b17c9b502349527236b396c6a"
+    "jarvis-analyse.js": "064c338d8aa7321b234fd5f45ec45d72effd642b17c9b502349527236b396c6a",
+    "jarvis-mcp.js": "d295531b2b492dcc471fea616da1d7c3754fa0cfdf6564ca0169c6310cde6c16"
   }
 }

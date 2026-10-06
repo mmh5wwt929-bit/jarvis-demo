@@ -1,16 +1,19 @@
 # JARVIS — consignes pour Claude (dépôt public : aucun secret, aucune adresse privée)
 
-## État (branche `Racine`, après fusion de la PR v4.11)
-- Passerelle **v4.11.0** (avant : v4.10.2) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
-- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.3, `jarvis-verite.js` 1.6, `jarvis-analyse.js` 1.2.
+## État (branche `Racine`, après fusion de la PR v4.12)
+- Passerelle **v4.12.0** (avant : v4.11.0) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
+- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.4, `jarvis-mcp.js` 1.0, `jarvis-verite.js` 1.6, `jarvis-analyse.js` 1.2.
 - v4.9.1 : « Ouvrir dans Mail » (mailto:), demande double dite, historique 12 échanges, pages `/confidentialite` et `/conditions`.
 - v4.10 : « qu'est-ce que j'ai à gérer ? » (agenda + conversations + notes, sans IA), conversations entières, réponse dans la conversation, créneau vérifié contre l'agenda, rappels, sauvegarde des souvenirs (fichier).
 - v4.10.1 : fils Gmail regroupés (objet normalisé + même correspondant, 4 au plus), DMARC (1er en-tête Authentication-Results), offres d'agenda retirées, interface allégée sur l'instance privée (« Tout afficher »), lecture 4 par 4, « Repartir au vert », carte périmée relue, « à gérer » dans le point du jour.
 - v4.10.2 : lectures du serveur déclenchées par un toucher passent après une réponse + un message tapé (option `manuel`, READ seulement) ; lecture incomplète jamais « rien d'urgent » (carte orange, pas de cache d'échec) ; source d'agenda non lue nommée, créneau jamais « libre » dans ce cas ; compteurs honnêtes.
 - v4.11 : titre d'événement seulement dans les mots tapés (sinon « Quel titre ? » ; « même chose » = titre de la création précédente, dit) ; clé stable par point « à gérer » ; ta réponse retire les points qu'elle suit ; « Fait » / « Plus tard » gardés sur le téléphone et masqués par le serveur ; instance privée : onglets Aujourd'hui / Discuter / Réglages, flux terminés repliés en une ligne.
+- v4.12 A : connecteur MCP pour l'appli Claude (`POST /mcp`, instance privée) : `lire_mails`, `proposer_mail`, `proposer_evenement` ; propositions confirmées dans « Aujourd'hui » ; état dans Réglages.
+- v4.12 B : alerte « adresse vue dans un mail » : adresse retapée par la personne mais vue dans un contenu reçu → carte qui cite l'extrait d'origine, avant toute suite.
+- v4.12 C : démo publique lisible en 10 s : promesse, bouton « Voir un mail piégé bloqué », parcours en 3 écrans (vraie tentative, « Essaie toi-même »), jargon dans « Détails techniques » (replié), lien vidéo si `JARVIS_DEMO_VIDEO` (https, démo seulement). SMS (SPEC D) non codé.
 - Render déploie `Racine` seulement « After CI Checks Pass ».
 - Deux services, même code :
-  - démo publique (sans `JARVIS_CLE_ACCES`) : **jamais** de variable Gmail, agenda ou élévation ;
+  - démo publique (sans `JARVIS_CLE_ACCES`) : **jamais** de variable Gmail, agenda, élévation ni connecteur (`JARVIS_DEMO_VIDEO` seulement) ;
   - instance privée d'Alsid (protégée par `JARVIS_CLE_ACCES`) : agenda, écriture Google, Face ID + code, Gmail.
 
 ## Rôle des fichiers
@@ -27,6 +30,7 @@
 | `jarvis-elevation.js` | Face ID (WebAuthn) et code de secours, liés à UNE transaction. |
 | `jarvis-gmail.js` | Gmail du compte d'essai : envoi (liste fermée), réponse dans une conversation (fil revérifié), lecture des e-mails et des conversations ; deux jetons séparés. |
 | `jarvis-analyse.js` | Analyse des conversations par règles, sans IA : réponse attendue, échéances, engagements, relances, PJ manquante, versions différentes, créneaux, mail suspect ; chaque résultat avec sa preuve et sa certitude. |
+| `jarvis-mcp.js` | Connecteur Claude (MCP), module pur : JSON-RPC, schémas des 3 outils, contrôles d'entrée, clé, origine, compteurs globaux. |
 | `jarvis-appli.js` | Manifeste web et icônes (écran d'accueil). |
 | `confidentialite.html`, `conditions.html` | Pages publiques exigées par Google (appli OAuth en Production). |
 | `jarvis-manifeste.js` + `MANIFESTE.json` | Empreintes SHA-256 des fichiers qui tournent ; CI refuse un dépôt non conforme. |
@@ -40,14 +44,17 @@
 - Destinataire d'un envoi : adresse tapée par la personne dans la demande (C3), jamais tirée d'un contenu lu ou d'un souvenir. Vrai pour « Ouvrir dans Mail » aussi (pas de liste, pas de Face ID : c'est la personne qui envoie ; trace « préparé », jamais « envoyé »).
 - Seule exception (v4.10) : la **réponse dans une conversation** va à l'expéditeur lu par le serveur dans l'en-tête « De » du dernier message d'un autre (jamais « Répondre à », jamais choisi par le modèle) ; depuis v4.10.1 une conversation peut réunir plusieurs fils Gmail (même objet normalisé ET même correspondant) : chaque fil est relu par sa propre lecture gouvernée, la réponse part dans le fil du message visé, et rien n'est préparé si un fil ne se relit pas ; hors liste fermée, mais retapé + 10 s + Face ID ; le module revérifie le fil chez Google avant d'envoyer, puis vérifie Envoyés / même fil / destinataire. Conversation **suspecte** : JARVIS n'envoie rien (« Ouvrir dans Mail » seul).
 - « À gérer », conversations, créneaux : écrits par le serveur (règles), sans IA ; une conversation n'entre dans le contexte du modèle que pour rédiger une réponse demandée (déclarée `CONTENT_DERIVED` avant). La page ne renvoie que des jetons serveur (`fl_…`) et un index, jamais une adresse, une date ou un identifiant Gmail.
+- Alerte « adresse vue » (v4.12) : toute adresse d'un contenu externe (mail lu — De, Répondre à, Cc, corps —, agenda, passage collé/cité, connecteur, `/api/ingest`) est gardée en mémoire seulement (empreinte SHA-256 minuscules NFC, source, date, verdict, extrait ≤ 160 car. sans invisibles), 14 jours, 500 au plus ; un magasin par instance privée, un par session sur la démo (50 au plus) (jamais l'extrait d'un visiteur chez un autre). Retapée (hors liste, « Ouvrir dans Mail », proposition de Claude) → carte d'alerte avant toute suite ; « Ouvrir dans Mail » : le lien n'est donné qu'après « J'ai vérifié autrement » (trace « alerte vue », empreinte seule). Jamais d'alerte pour une adresse de la liste ni pour la réponse à l'expéditeur lu dans « De ». L'extrait n'apparaît jamais dans une console, `/health`, une erreur, une trace, l'historique du modèle ni la réponse à Claude.
 - Un souvenir (y compris restauré d'un fichier) peut ajuster une proposition (délai de relance, notes), jamais donner une permission ni une cible.
 - Authentification d'un e-mail : seul le PREMIER en-tête `Authentication-Results` (signé `mx.google.com`) compte ; DMARC ne rabaisse une alerte « sensible » que pour un grand service (jamais une messagerie ouverte à tous), sans urgence ni autre alerte forte. Un mail suspect n'offre ni réponse, ni rappel, ni créneau.
 - Interface allégée (instance privée) : jamais replié AVANT l'action — le verdict, le mot « suspect », un vrai e-mail (destinataire, objet, texte), Face ID, l'adresse à retaper, Annuler / Confirmer. APRÈS l'envoi ou la création seulement, le flux devient une ligne qui garde destinataire et objet (ou titre et date), le détail au toucher.
-- Titre d'un événement : jamais un titre que la personne n'a pas tapé (le titre du modèle n'est gardé que si ses mots sont dans la demande).
+- Titre d'un événement : jamais un titre que la personne n'a pas tapé (le titre du modèle n'est gardé que si ses mots sont dans la demande). **Sans exception**, connecteur compris (v4.12) : une proposition de Claude porte le titre fait par le serveur (« Proposé par Claude »), modifiable au clavier ; la suggestion de Claude est seulement affichée (« texte de Claude », jamais pré-remplie) et n'entre ni dans l'événement, ni dans la clé, ni dans la trace, ni dans l'audit.
+- Connecteur Claude (`/mcp`) : 404 sans `JARVIS_CLE_ACCES` ET `JARVIS_CLE_MCP` (≥ 32 car., différente des autres clés, sinon « erreur-config ») ; `Authorization: Bearer`, comparaison en temps constant ; clés fausses comptées globalement (20/h → fermé 1 h), 60 appels/h ; `Origin` hors claude.ai/claude.com → 403 ; un message par requête, ≤ 256 Ko, arguments exactement ceux du schéma. Chaque appel a sa session au plancher `CONTENT_DERIVED`, ses arguments sont `MODEL_INFERRED` ; une lecture demandée par Claude garde le sceau de contexte (jamais `manuel`). Aucun outil n'envoie ni n'écrit : `proposer_mail` → adresse retapée dans JARVIS + 10 s + Face ID ; `proposer_evenement` → un toucher. Trace : outil, verdict, raison, heure, jamais un contenu.
 - « Fait » / « Plus tard » : une liste de clés (20 hex) venue de la page ; elle masque des points, ne donne ni permission, ni cible, ni action.
 - Une action par message : ce qui n'est pas fait est dit par le serveur ; le modèle ne propose jamais d'agir à la place de la personne.
 - Option `manuel` de la couche : seulement pour un geste du serveur (carte « Créer », envoi retapé, lectures déclenchées par un toucher avec une cible fixée par le serveur). Jamais pour un plan du modèle : il garde son sceau de contexte.
 - Une lecture en échec ou incomplète ne s'affiche jamais comme « rien » : elle le dit, et n'est pas gardée en cache.
+- Démo publique : aucun mot de jargon (plancher, sceau, ancre, rayon, G1…G5, noyau, CONTENT_DERIVED) dans le texte visible hors « Détails techniques » ; son modèle reçoit la promesse, jamais « inviolable » (phrase retirée par le serveur, et c'est dit).
 - Fermé par défaut : une variable mal réglée désactive l'outil et `/health` le dit ; jamais de repli silencieux vers la simulation.
 - Aucun secret (clé, jeton, client OAuth, code) dans un commit, un journal, une capture, un message ou une réponse d'API.
 
@@ -61,6 +68,7 @@
 - Donc **ne lance pas toi-même la boucle complète** : pendant le travail, seulement la suite concernée (`node tests-vXY.js | grep -E "ECHEC|PERCE|EXCEPTION|>>>"`, et le code de sortie fait foi). À la main si besoin : `node .claude/verifier-tests.js --forcer`.
 - Ne jamais supprimer, sauter ou affaiblir un test existant. Un test inversé par la version est adapté ET signalé dans PROGRESSION.
 - Ne jamais modifier `.claude/` ni `.github/` sans demande explicite d'Alsid.
+- CI : versions fixées (jsdom 30.1.2, `ubuntu-24.04`, depuis le 7 oct, après une panne due à jsdom 30.1.2 installé sans version). Ne jamais revenir à « la dernière version » ; monter une version = une PR à part, avec l'accord d'Alsid.
 - Le noyau plafonne 20 décisions par seconde et par session (DRY_RUN_RATE_LIMITED) : dans un test, espacer les touchers (`avance += 1100`).
 - Livrer `PROGRESSION-vX.md` : tests à faire en ligne (iPhone, Safari) et réglages Render.
 

@@ -101,7 +101,8 @@ const ESSENTIELS = ['server.js', 'index.html', 'package.json', 'MANIFESTE.json',
   'jarvis-vigilance.js', 'jarvis-memoire.js', 'jarvis-agenda.js', 'jarvis-ecriture.js', 'jarvis-elevation.js', 'jarvis-manifeste.js',
   'jarvis-verite.js', 'jarvis-appli.js', 'jarvis-gmail.js',   /* v4.6.7 : le module verite ; v4.7 : l'appli ; v4.9 : gmail */
   'confidentialite.html', 'conditions.html',   /* v4.9.1 : pages exigees par Google */
-  'jarvis-analyse.js'];   /* v4.10 : l'analyse des conversations */
+  'jarvis-analyse.js',   /* v4.10 : l'analyse des conversations */
+  'jarvis-mcp.js'];   /* v4.12 : le connecteur Claude */
 const copie = () => {
   const d = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-v461-'));
   for (const f of ESSENTIELS) if (fs.existsSync(path.join(DIR, f))) fs.copyFileSync(path.join(DIR, f), path.join(d, f));

@@ -4,7 +4,8 @@ on:
   pull_request:
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    # versions FIXEES (7 oct) : une mise a jour exterieure ne doit plus casser la CI ; monter de version = une PR a part
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -18,7 +19,7 @@ jobs:
       - name: Manifeste (les fichiers deposes sont ceux livres)
         run: node jarvis-manifeste.js --verifier
       - name: jsdom pour les tests de la page (jamais en production)
-        run: npm install --no-save --no-audit --no-fund jsdom
+        run: npm install --no-save --no-audit --no-fund jsdom@30.1.2
       - name: Toutes les suites
         run: |
           echec=0

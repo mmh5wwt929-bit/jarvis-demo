@@ -298,7 +298,7 @@ const PAGE = (() => { try { return fs.readFileSync(path.join(DIR, 'index.html'),
     const blocs = [...d.querySelectorAll('#defense details.bloc')];
     /* [v4.10.1] + « Affichage » (réglage « Tout afficher », instance privée seulement) : 10 */
     await t('P2', "les 9 sections de défense sont repliées sous un « + » (v4.9 : + Gmail ; v4.10.1 : + Affichage), et tous les identifiants d'avant existent encore", async () =>
-      ({ ok: blocs.length === (d.getElementById('blocAffichage') ? 10 : 9) + (d.getElementById('blocTraites') ? 1 : 0) /* [v4.11] + « Points marqués » (privée) */ && !!d.getElementById('blocGmail') && blocs.every(b => !b.open && b.querySelector('summary h2')) && manquants.length === 0,
+      ({ ok: blocs.length === (d.getElementById('blocAffichage') ? 10 : 9) + (d.getElementById('blocTraites') ? 1 : 0) /* [v4.11] + « Points marqués » (privée) */ + (d.getElementById('blocClaude') ? 1 : 0) /* [v4.12] + « Connecteur Claude » (privée) */ && !!d.getElementById('blocGmail') && blocs.every(b => !b.open && b.querySelector('summary h2')) && manquants.length === 0,
          info: blocs.length + ' blocs, ' + blocs.filter(b => b.open).length + ' ouverts, manquants : ' + (manquants.join(',') || 'aucun') }));
     const conv = d.getElementById('fil').closest('.colonne');
     await t('P3', "l'écran commence par la conversation : fil et saisie dans la 1re colonne, l'accueil porte le parcours guidé", async () =>
@@ -334,8 +334,9 @@ const PAGE = (() => { try { return fs.readFileSync(path.join(DIR, 'index.html'),
          info: postTest.length + ' appel(s) ; ' + G.d.getElementById('googleMessage').textContent.slice(0, 40) }));
     const accueil = G.d.getElementById('accueil');
     await t('P8', "ton instance (agenda relié) : l'accueil parle de ton agenda, la démo et son parcours guidé sont masqués", async () =>
-      ({ ok: G.d.body.classList.contains('perso') && !!accueil && /ton agenda/.test(accueil.textContent) && !/e-mail piégé/.test(accueil.textContent)
-          && !d.body.classList.contains('perso') && /e-mail piégé/.test(d.getElementById('accueil').textContent) && G.d.getElementById('blocGoogle').hidden === false,
+      /* [v4.12] la démo dit sa promesse : « Un mail piégé ne peut pas faire agir ton assistant… » (avant : « e-mail piégé ») */
+      ({ ok: G.d.body.classList.contains('perso') && !!accueil && /ton agenda/.test(accueil.querySelector('.quoi').textContent) && !/mail piégé/.test(accueil.querySelector('.quoi').textContent)
+          && !d.body.classList.contains('perso') && /mail piégé/.test(d.getElementById('accueil').textContent) && G.d.getElementById('blocGoogle').hidden === false,
          info: accueil ? accueil.textContent.slice(5, 60) : 'pas d\'accueil' }));
     pastille && pastille.click();
     const ouvert = detail && detail.hidden === false && pastille.getAttribute('aria-expanded') === 'true';

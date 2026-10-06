@@ -51,7 +51,7 @@ const https = require('https');
 const crypto = require('crypto');
 const { URL } = require('url');
 
-const VERSION = '1.3';
+const VERSION = '1.4';
 const LIMITES_MAIL = Object.freeze({ delaiMs: 12000, maxOctets: 1024 * 1024, permisMs: 30 * 1000,
   objetMax: 150, texteMax: 3000, autorisesMax: 10, plafondDefaut: 5, plafondMax: 20,
   lusMax: 5, extraitMax: 1200, diagnosticMs: 20000, lectureTotaleMs: 20000,
@@ -469,17 +469,19 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
       permisEmis.set(p, { expire: maintenant() + L.permisMs, utilise: false });
       return p;
     },
-    async lire(permis) {
+    /* [1.4] v4.12 o.nombre (1 a 10, le connecteur Claude) ; Cc et Repondre a, pour l'alerte « adresse vue dans un mail » */
+    async lire(permis, o = {}) {
+      const nb = Number.isInteger(o && o.nombre) && o.nombre >= 1 && o.nombre <= 10 ? o.nombre : L.lusMax;
       const e = (permis && typeof permis === 'object') ? permisEmis.get(permis) : undefined;
       if (!e || !Object.prototype.hasOwnProperty.call(FILTRES, permis.filtre)) return { ok: false, code: 'PERMIS_INCONNU' };
       if (e.utilise) return { ok: false, code: 'PERMIS_DEJA_UTILISE' };
       e.utilise = true;
       if (maintenant() > e.expire) return { ok: false, code: 'PERMIS_EXPIRE' };
       const j = await jeton('lecture'); if (!j.ok) return { ok: false, code: j.code };
-      const l = await appeler('GET', API + '/messages?maxResults=' + L.lusMax + '&' + FILTRES[permis.filtre], null, j.jeton);
+      const l = await appeler('GET', API + '/messages?maxResults=' + nb + '&' + FILTRES[permis.filtre], null, j.jeton);
       if (!l.ok) return { ok: false, code: l.code };
       if (l.status !== 200 || !l.json) return { ok: false, code: erreurGmail(l.status, l.json) };
-      const ids = (Array.isArray(l.json.messages) ? l.json.messages : []).map(m => m && m.id).filter(id => typeof id === 'string' && /^[0-9a-fA-F]{6,40}$/.test(id)).slice(0, L.lusMax);
+      const ids = (Array.isArray(l.json.messages) ? l.json.messages : []).map(m => m && m.id).filter(id => typeof id === 'string' && /^[0-9a-fA-F]{6,40}$/.test(id)).slice(0, nb);
       const mails = [], debut = maintenant();
       for (const id of ids) {
         /* un budget TOTAL : 1 liste + 5 messages ne tiennent jamais la page plus de 20 s */
@@ -490,7 +492,8 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
         const brut = nettoyer(t.texte, L.extraitMax + 1);
         mails.push(Object.freeze({ id, de: nettoyer(entete(m.json, 'from'), 150), objet: nettoyer(entete(m.json, 'subject'), 200), date: nettoyer(entete(m.json, 'date'), 60),
           texte: brut.slice(0, L.extraitMax), coupe: brut.length > L.extraitMax, piecesJointes: t.piecesJointes,
-          nonLu: Array.isArray(m.json.labelIds) && m.json.labelIds.includes('UNREAD') }));
+          nonLu: Array.isArray(m.json.labelIds) && m.json.labelIds.includes('UNREAD'),
+          repondreA: (adressesDe(entete(m.json, 'reply-to'))[0] || {}).adresse || null, cc: adressesDe(entete(m.json, 'cc')).map(x => x.adresse).slice(0, 20) }));
       }
       return { ok: true, filtre: permis.filtre, mails: Object.freeze(mails), tronque: typeof l.json.nextPageToken === 'string' };
     },
