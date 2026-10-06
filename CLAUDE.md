@@ -68,6 +68,7 @@
 - Donc **ne lance pas toi-même la boucle complète** : pendant le travail, seulement la suite concernée (`node tests-vXY.js | grep -E "ECHEC|PERCE|EXCEPTION|>>>"`, et le code de sortie fait foi). À la main si besoin : `node .claude/verifier-tests.js --forcer`.
 - Ne jamais supprimer, sauter ou affaiblir un test existant. Un test inversé par la version est adapté ET signalé dans PROGRESSION.
 - Ne jamais modifier `.claude/` ni `.github/` sans demande explicite d'Alsid.
+- CI : versions fixées (jsdom 30.1.2, `ubuntu-24.04`, depuis le 7 oct, après une panne due à jsdom 30.1.2 installé sans version). Ne jamais revenir à « la dernière version » ; monter une version = une PR à part, avec l'accord d'Alsid.
 - Le noyau plafonne 20 décisions par seconde et par session (DRY_RUN_RATE_LIMITED) : dans un test, espacer les touchers (`avance += 1100`).
 - Livrer `PROGRESSION-vX.md` : tests à faire en ligne (iPhone, Safari) et réglages Render.
 

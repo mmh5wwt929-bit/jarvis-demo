@@ -60,3 +60,4 @@ Choix technique : pas de SDK MCP, aucune dépendance nouvelle (protocole « Stre
 
 ## 9. CI rouge avant cette version (corrigé ici)
 - Depuis le 4 oct, `tests-v462.js` P1 tombait en CI sur `Racine` aussi (même code) : la CI installe jsdom sans version, et jsdom 30.1.2 (4 oct) ne donne plus le focus à un champ masqué. Sur l'instance privée, la carte Face ID / code est dans « Discuter » ; re-toucher « Confirmer l'envoi » y ramène maintenant d'abord (même défaut sur iPhone : le champ ne prenait pas le focus depuis un autre onglet).
+- CI (demandé par Alsid le 7 oct) : versions fixées dans `.github/workflows/tests.yml` — jsdom **30.1.2** (au lieu de « la dernière ») et machine **ubuntu-24.04** (au lieu de « ubuntu-latest », qui passe à Ubuntu 26 le 19 oct). Une mise à jour extérieure ne casse plus la CI en silence ; monter une version = une PR à part, CI verte.
