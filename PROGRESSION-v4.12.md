@@ -56,3 +56,4 @@ Choix technique : pas de SDK MCP, aucune dépendance nouvelle (protocole « Stre
 - `tests-v411.js` H1 : « passerelle v4.11 » → « v4.11 ou plus » (la version passe à v4.12.0).
 - `tests-v461.js` : `jarvis-mcp.js` ajouté aux fichiers copiés (nouveau fichier du manifeste).
 - `tests-v47.js` P2 : + le bloc « Connecteur Claude » (instance privée) dans le compte des sections ; P8 : la démo dit « mail piégé » (la promesse) au lieu d'« e-mail piégé », et le texte de l'accueil privé est lu dans sa bulle (le bouton de la démo, masqué, reste dans la page).
+- `tests-preuves.js` E1 : inventaire des points d'effet 12 → 13 (la lecture de la boîte par le connecteur Claude, même permis de lecture que les deux autres).

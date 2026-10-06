@@ -284,7 +284,7 @@ const pasDEffet = (r) => r.decide !== 'EN_ATTENTE' && r.decide !== 'AUTORISE' &&
 
   /* ============================== P5 ============================== */
   /* [v4.8 - S64] 8 points : la lecture d'agenda existe deux fois (question tapee, point du jour a l'ouverture), meme permis */
-  await t('E1', 'P5', "inventaire : exactement 12 points d'effet (dont la creation d'evenement, 3 lectures d'agenda, l'envoi d'un vrai e-mail ou d'une reponse, la lecture de la boite et des conversations [v4.10]), 1 compensation, 2 constats d'effet ; finaliser seulement dans /api/finaliser", async () => {
+  await t('E1', 'P5', "inventaire : exactement 13 points d'effet (dont la creation d'evenement, 3 lectures d'agenda, l'envoi d'un vrai e-mail ou d'une reponse, la lecture de la boite et des conversations [v4.10], la lecture du connecteur Claude [v4.12]), 1 compensation, 2 constats d'effet ; finaliser seulement dans /api/finaliser", async () => {
     const src = fs.readFileSync(path.join(DIR, 'server.js'), 'utf8');
     const lignes = src.split('\n');
     const effets = lignes.map((l, i) => ({ l, i })).filter(x => /\.executer\(|\.finaliser\(/.test(x.l) && !/^\s*(\*|\/\/|\/\*)/.test(x.l));
@@ -297,7 +297,9 @@ const pasDEffet = (r) => r.decide !== 'EN_ATTENTE' && r.decide !== 'AUTORISE' &&
     const nComp = (src.match(/\.compensationDebut\(/g) || []).length, nConst = (src.match(/\.constaterEffet\(/g) || []).length;
     const lectures = effets.filter(x => attendus[0].test(x.l)).length;
     /* [v4.10 S80] [S82] [S83] + lecture des conversations et lecture d'agenda pour « a gerer » / creneau : 12 points, 3 lectures d'agenda */
-    return { ok: effets.length === 12 && lectures === 3 && inconnus.length === 0 && isole && nComp === 1 && nConst === 2, info: effets.length + ' points, compensation x' + nComp + ', constat x' + nConst + (inconnus.length ? ' ; INCONNUS lignes ' + inconnus.map(x => x.i + 1).join(',') : '') + (isole ? ' ; demo isolee' : ' ; DEMO NON ISOLEE') };
+    /* [v4.12 S103] + la lecture de la boite par le connecteur Claude (lire_mails) : 13 points, 3 lectures de la boite (meme permis) */
+    const boites = effets.filter(x => attendus[8].test(x.l)).length;
+    return { ok: effets.length === 13 && lectures === 3 && boites === 3 && inconnus.length === 0 && isole && nComp === 1 && nConst === 2, info: effets.length + ' points, boite x' + boites + ', compensation x' + nComp + ', constat x' + nConst + (inconnus.length ? ' ; INCONNUS lignes ' + inconnus.map(x => x.i + 1).join(',') : '') + (isole ? ' ; demo isolee' : ' ; DEMO NON ISOLEE') };
   });
   nouvelleIp(); sid = await session();
   const bizarres = await Promise.all([
