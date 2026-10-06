@@ -150,6 +150,10 @@ button.lien{background:none;border:none;color:var(--sourd);font-size:12px;
 #blocGoogle p{font-size:13px}
 /* [S68] v4.9 : le vrai e-mail, montre EN ENTIER (texte, jamais du HTML) */
 .mail-carte{border:1px solid var(--retenu);border-radius:10px;padding:10px;margin-top:6px}
+/* [S104] v4.12 l'alerte « adresse vue dans un contenu reçu » */
+.alerte-adresse{border:2px solid var(--refus);border-radius:10px;padding:10px;margin:6px 0}
+.alerte-adresse .alerte-extrait{margin:6px 0;padding:6px 10px;border-left:3px solid var(--refus);white-space:pre-wrap;word-break:break-word}
+.alerte-adresse mark{background:#f8514955;color:inherit;border-radius:3px;padding:0 2px}
 .mail-entete{font-size:13px;margin:2px 0}.mail-entete b{display:inline-block;min-width:52px}
 .mail-entete.avert{color:var(--retenu)}
 .mail-texte{white-space:pre-wrap;word-break:break-word;font-size:13px;border-left:3px solid var(--retenu);padding:6px 9px;margin:8px 0;max-height:none}
@@ -1048,6 +1052,17 @@ function resumePrepare(t) {
 const REDIGE_REPONSE = "Rédigé par Claude à partir de ta consigne ; la conversation lui a été donnée comme données, jamais comme ordres : relis chaque mot.";
 /* un lien vers Mail : mailto: seulement, sans blanc ni guillemet (jamais javascript:) */
 const lienMail = (x) => typeof x === 'string' && /^mailto:[^\s"'<>`]+$/i.test(x) ? x : '';
+/* [S104] v4.12 la carte d'alerte : l'extrait d'origine ÉCHAPPÉ, l'adresse surlignée (échappée elle aussi), la source et sa date */
+function carteAlerte(al) {
+  if (!al || typeof al !== 'object') return '';
+  const ex = esc(al.extrait || ''), ad = esc(al.adresse || '');
+  let surligne = ex;
+  if (ad) { const i = ex.toLowerCase().indexOf(ad.toLowerCase()); if (i >= 0) surligne = ex.slice(0, i) + '<mark>' + ex.slice(i, i + ad.length) + '</mark>' + ex.slice(i + ad.length); }
+  return '<div class="alerte-adresse" role="alert"><div class="plan">⚠ Adresse vue dans un contenu reçu</div>'
+    + '<p class="alerte-origine">Vue dans : ' + esc(al.origine || al.source || '') + '</p>'
+    + '<blockquote class="alerte-extrait">' + surligne + '</blockquote>'
+    + '<p class="alerte-texte"><b>' + esc(al.texte || '') + '</b></p></div>';
+}
 function ajouterTrace(t) {
   const tours = document.querySelectorAll('#fil .tour:not(.moi)');
   const sous = tours[tours.length - 1] || tour('JARVIS', '', false);
@@ -1099,6 +1114,8 @@ function sansReponse(d) {
 }
 
 function rendreDecision(d) {
+  /* [S104] une adresse vue dans un contenu reçu : la carte d'alerte d'abord, avant toute suite */
+  if (d && d.alerte) { tour('JARVIS', '', false).querySelector('.quoi').outerHTML = carteAlerte(d.alerte); }
   /* [S49] « Supprimer » tape : le SERVEUR montre les vraies cartes ; rien
    * n'est supprime avant le toucher (le meme bouton que sous la creation) */
   if (Array.isArray(d.aSupprimer) && d.aSupprimer.length) {
@@ -1130,6 +1147,7 @@ function rendreDecision(d) {
   if (d.etape === 'MAIL_OUVRIR' && d.aOuvrir) {
     const m = d.aOuvrir, lien = lienMail(m.mailto);
     if (d.reponse) tour('JARVIS', d.reponse, false);
+    if (m.alerte) tour('JARVIS', '', false).querySelector('.quoi').outerHTML = carteAlerte(m.alerte);   /* [S104] avant toute suite */
     const hO = '<div class="decision autorise mail-ouvrir"><div class="plan">' + (m.reponse ? 'Réponse préparée — « ' + esc(m.objetFil || '') + ' » — relis-la, puis envoie-la toi-même' : 'E-mail préparé — relis-le, puis envoie-le toi-même') + '</div>'
       + '<div class="mail-carte"><p class="mail-entete"><b>À</b> <span class="mono">' + esc(m.a) + '</span></p>'
       + '<p class="mail-entete"><b>Objet</b> ' + esc(m.objet) + '</p><div class="mail-texte">' + esc(m.texte) + '</div>'
@@ -1137,7 +1155,9 @@ function rendreDecision(d) {
       + '<p class="mail-entete">' + (m.reponse ? REDIGE_REPONSE : m.redigePar === 'modele' ? 'Rédigé par Claude à partir de ta seule demande : relis chaque mot.' : 'Objet et texte : tes mots, tels quels.')
       + ' Aucun lien que tu n\'as pas tapé.</p></div>'
       + '<div class="verdict"><b>Préparé</b><span class="code">JARVIS n\'envoie rien</span></div>'
-      + (lien ? '<div class="rang"><a class="bouton primaire" data-ouvrir-mail="1" href="' + esc(lien) + '">Ouvrir dans Mail</a></div>' : '<p>Lien vers Mail indisponible.</p>')
+      + (lien ? '<div class="rang"><a class="bouton primaire" data-ouvrir-mail="1" href="' + esc(lien) + '">Ouvrir dans Mail</a></div>'
+        : m.alerte && m.jetonAlerte ? '<div class="rang"><button type="button" data-alerte-vue="' + esc(m.jetonAlerte) + '">J\'ai vérifié autrement</button></div>'   /* [S104] le lien seulement après */
+        : '<p>Lien vers Mail indisponible.</p>')
       + '<p class="etat-carte"></p></div>';
     tour('JARVIS', '', false).querySelector('.quoi').outerHTML = hO;
     if (d.trace) ajouterTrace(d.trace);
@@ -1949,6 +1969,18 @@ document.addEventListener('click', async (ev) => {
 
   /* [S102] v4.11 onglets, « Fait » / « Plus tard », lignes repliées */
   if (t.dataset.onglet && t.closest('#onglets')) { montrer(t.dataset.onglet); return; }
+  /* [S104] « J'ai vérifié autrement » : le serveur donne alors le lien vers Mail (trace « alerte vue ») */
+  if (t.dataset.alerteVue) {
+    const carte = t.closest('.mail-ouvrir'), etatC = carte && carte.querySelector('.etat-carte');
+    t.disabled = true;
+    const r = await api('/api/alerte/vue', { jeton: t.dataset.alerteVue });
+    const lien = r && lienMail(r.mailto);
+    if (!lien) { if (etatC) etatC.textContent = (r && r.message) || 'Carte périmée : rien n\'est préparé.'; return; }
+    const a = document.createElement('a'); a.className = 'bouton primaire'; a.dataset.ouvrirMail = '1'; a.href = lien; a.textContent = 'Ouvrir dans Mail';
+    t.replaceWith(a);
+    if (etatC) etatC.textContent = 'Alerte vue : tu as vérifié autrement. C\'est toi qui envoies, depuis ton application.';
+    return;
+  }
   /* [S103] v4.12 une proposition de Claude : refusée, ou confirmée par TON geste */
   if (t.dataset.claudeRefuser || t.dataset.claudeRetaper || t.dataset.claudeCreer) {
     const carte = t.closest('.claude-prop'), etatC = carte && carte.querySelector('.etat-carte');
@@ -2500,7 +2532,8 @@ const Claude = {
         + (perimee ? '<p class="etat-carte">Périmée : rien n\'est écrit.</p>' : '<div class="rang"><button class="danger" data-claude-refuser="' + esc(p.id) + '">Refuser</button><button class="primaire" data-claude-creer="' + esc(p.id) + '">Créer</button></div><p class="etat-carte"></p>')
         + '</div>');
     }
-    for (const x of non) h.push('<div class="gerer-item fort claude-non"><p>Claude a proposé un e-mail' + (x.a ? ' à <span class="mono">' + esc(x.a) + '</span>' : '') + ' : non retenu (' + esc(RAISONS_NON_RETENUE[x.code] || x.code) + '). Rien n\'est enregistré.</p></div>');
+    for (const x of non) h.push('<div class="gerer-item fort claude-non"><p>Claude a proposé un e-mail' + (x.a ? ' à <span class="mono">' + esc(x.a) + '</span>' : '') + ' : non retenu (' + esc(RAISONS_NON_RETENUE[x.code] || x.code) + '). Rien n\'est enregistré.</p>'
+      + carteAlerte(x.alerte) + '</div>');   /* [S104] */
     return h.join('');
   }
 };
