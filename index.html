@@ -450,7 +450,7 @@ button.ligne-repliee{display:block;width:100%;text-align:left;background:none;bo
       <div class="mesure">ancres publiées <b id="mAncres" class="mono">0</b></div>
       <div class="mesure">contexte déclaré <b id="mCouv" class="mono">—</b></div>
     </div>
-    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.11.0</div>
+    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.12.0</div>
   </div>
 </header>
 
@@ -500,6 +500,12 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
       </div>
     </details>
     <!-- [S102] v4.11 les points marqués « fait » / « plus tard » (sur ce téléphone seulement) -->
+    <details class="bloc prive-seul" id="blocClaude">
+      <summary><h2>Connecteur Claude <span class="mono" id="etatClaude"></span></h2></summary>
+      <div class="corps"><p id="claudeMessage">Lecture de l'état…</p>
+        <p class="pdj-note">L'appli Claude peut lire le compte d'essai et proposer un e-mail ou un événement. Rien ne part et rien ne s'écrit sans ton geste ici.</p></div>
+    </details>
+
     <details class="bloc prive-seul" id="blocTraites">
       <summary><h2>Points marqués « fait » <span class="mono" id="nbTraites"></span></h2></summary>
       <div class="corps">
@@ -596,6 +602,7 @@ Pour voir la défense travailler : fais-moi lire l'e-mail piégé, puis demande-
   <!-- ─────────── [S102] v4.11 AUJOURD'HUI (instance privée) ─────────── -->
   <section class="colonne prive-seul" id="aujourdhui" aria-labelledby="aujTitre">
     <div class="auj-tete"><h2 id="aujTitre">Aujourd'hui</h2><button type="button" class="lien" id="aujActualiser">Actualiser</button></div>
+    <div id="aujClaude" aria-live="polite"></div>
     <div class="auj-titre2">Agenda</div>
     <div id="aujPoint"></div>
     <div id="aujTraiter"><p class="pdj-vide">Je lis ta boîte et ton agenda…</p></div>
@@ -1942,6 +1949,42 @@ document.addEventListener('click', async (ev) => {
 
   /* [S102] v4.11 onglets, « Fait » / « Plus tard », lignes repliées */
   if (t.dataset.onglet && t.closest('#onglets')) { montrer(t.dataset.onglet); return; }
+  /* [S103] v4.12 une proposition de Claude : refusée, ou confirmée par TON geste */
+  if (t.dataset.claudeRefuser || t.dataset.claudeRetaper || t.dataset.claudeCreer) {
+    const carte = t.closest('.claude-prop'), etatC = carte && carte.querySelector('.etat-carte');
+    const dire = (x) => { if (etatC) etatC.textContent = x; };
+    for (const b of carte.querySelectorAll('button')) b.disabled = true;
+    const rouvrir = () => { for (const b of carte.querySelectorAll('button')) b.disabled = false; };
+    if (t.dataset.claudeRefuser) {
+      const r = await api('/api/claude/refuser', { id: t.dataset.claudeRefuser });
+      dire((r && r.message) || 'Refusée.');
+      return;
+    }
+    if (t.dataset.claudeRetaper) {
+      const champ = carte.querySelector('input.cible'), a = champ ? champ.value.trim() : '';
+      if (!a) { rouvrir(); if (champ) champ.focus(); return; }
+      const r = await api('/api/claude/retaper', { id: t.dataset.claudeRetaper, adresse: a });
+      if (limiteAtteinte(r)) { rouvrir(); return; }
+      if (r && r.erreur) { dire(r.message || ('Refusé : ' + r.erreur)); if (r.erreur === 'ADRESSE_DIFFERENTE' && !/fermée/.test(r.message || '')) rouvrir(); return; }
+      if (champ) champ.disabled = true;
+      dire('Adresse retapée : suite dans « Discuter » (10 s, puis Face ID).');
+      montrer('discuter');
+      tour('JARVIS', 'Proposition de Claude : adresse retapée au clavier : ' + a + '.', false);
+      if (r && r.decision) { majEtat(r.decision); rendreDecision(r.decision); }
+      return;
+    }
+    const champT = carte.querySelector('input.titre-claude');
+    const r = await api('/api/claude/evenement', { id: t.dataset.claudeCreer, titre: champT ? champT.value : '' });
+    if (limiteAtteinte(r)) { rouvrir(); return; }
+    if (!r || !r.aConfirmer) { dire((r && (r.message || r.reponse)) || 'Création impossible.'); return; }
+    const r2 = await api('/api/confirmer', { action: 'CREATE', resource: 'AGENDA_JARVIS', cible: r.aConfirmer.cible });
+    if (r2 && r2.decision) {
+      majEtat(r2.decision);
+      if (r2.decision.etape === 'COMPLET') { dire('✓ Créé : ' + r.aConfirmer.lisible); montrer('discuter'); rendreDecision(r2.decision); Auj.charge = 0; }
+      else { dire('Pas créé : ' + (r2.decision.reponse || r2.decision.motif || 'refus')); rouvrir(); }
+    } else { dire('Création impossible : ' + ((r2 && r2.erreur) || 'erreur')); rouvrir(); }
+    return;
+  }
   if (t.dataset.deplier) { t.parentElement.classList.toggle('replie'); return; }
   if (t.dataset.traite) {
     const k = t.dataset.point, ligne = t.closest('.gerer-item'), dansAuj = !!t.closest('#aujourdhui');   /* avant que la ligne ne change */
@@ -2415,6 +2458,52 @@ function afficherPointDuJour(r) {
  * « à traiter » au plus, chacun avec son action principale, « Fait » et « Plus tard ». Écrit par le
  * serveur (règles), la même lecture que « à gérer » (une seule lecture de la boîte à l'ouverture). */
 const ACTIONS_COURTES = { repondre: 'Répondre', rappel: 'Rappel', creneau: "Vérifier l'agenda" };
+/* [S103] v4.12 LES PROPOSITIONS DE CLAUDE (connecteur) : en tête d'« Aujourd'hui », jamais repliées
+ * avant l'action. Un e-mail : adresse à retaper, puis 10 s et Face ID. Un événement : « Créer ». */
+const ETATS_CONNECTEUR = { actif: 'actif', inactif: 'inactif', ferme: 'fermé 1 h', 'erreur-config': 'mal réglé' };
+const RAISONS_NON_RETENUE = { HORS_LISTE: 'adresse hors de ta liste', ADRESSE_INVALIDE: 'adresse invalide', ENVOI_INACTIF: 'envoi réel inactif' };
+const Claude = {
+  async charger() {
+    const zone = $('aujClaude');
+    if (!zone || !document.body.classList.contains('prive')) return;
+    let r = null; try { r = await api('/api/claude', {}); } catch (e) { r = null; }
+    if (!r || limiteAtteinte(r) || r.erreur) return;
+    const c = r.connecteur || {};
+    if ($('etatClaude')) $('etatClaude').textContent = ETATS_CONNECTEUR[c.etat] || c.etat || '';
+    if ($('claudeMessage')) $('claudeMessage').textContent = c.etat === 'inactif' ? 'Inactif sur cette instance (JARVIS_CLE_MCP absente).'
+      : c.etat === 'ferme' ? 'Fermé 1 h : trop de clés fausses reçues. Il rouvrira seul.' : c.etat === 'erreur-config' ? 'Mal réglé (' + (c.motif || '') + ') : le connecteur est fermé.'
+      : 'Actif · ' + (c.appelsHeure || 0) + ' appel(s) cette heure.';
+    zone.innerHTML = Claude.html(r);
+  },
+  html(r) {
+    const props = r.propositions || [], non = r.nonRetenues || [];
+    if (!props.length && !non.length) return '';
+    const h = ['<div class="auj-titre2">Propositions de Claude · ' + props.filter(p => p.etat === 'EN_ATTENTE').length + '</div>'];
+    for (const p of props) {
+      const perimee = p.etat !== 'EN_ATTENTE';
+      const remplace = p.remplace ? '<p class="mail-entete avert">⚠ Elle remplace une proposition précédente, désormais périmée.</p>' : '';
+      if (p.type === 'mail') h.push('<div class="decision attente claude-prop" data-claude-id="' + esc(p.id) + '"><div class="plan">Proposé par Claude — e-mail (rien n\'est parti)</div>' + remplace
+        + '<div class="mail-carte"><p class="mail-entete"><b>À</b> <span class="mono">' + esc(p.a) + '</span></p><p class="mail-entete"><b>Objet</b> ' + esc(p.objet) + '</p>'
+        + '<div class="mail-texte">' + esc(p.texte) + '</div><p class="mail-entete">Rédigé par Claude : relis chaque mot. Aucun lien, aucune pièce jointe.</p></div>'
+        + (perimee ? '<p class="etat-carte">Périmée : rien n\'est parti.</p>' : '<p>Pour l\'envoyer, retape l\'adresse toi-même : il sera retenu 10 s, puis envoyé seulement avec Face ID.</p>'
+          + '<div class="rang"><input class="cible" value="" placeholder="adresse du destinataire" aria-label="Adresse retapée" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="email">'
+          + '<button class="danger" data-claude-refuser="' + esc(p.id) + '">Refuser</button><button class="primaire" data-claude-retaper="' + esc(p.id) + '">Confirmer</button></div><p class="etat-carte"></p>')
+        + '</div>');
+      else h.push('<div class="decision attente claude-prop claude-evt" data-claude-id="' + esc(p.id) + '"><div class="plan">Proposé par Claude — créer dans ton agenda JARVIS</div>' + remplace
+        /* [S99] le titre est celui du serveur ; la suggestion de Claude est seulement affichée, jamais pré-remplie */
+        + '<div class="titre-evt">' + esc(p.titre) + '</div>'
+        + (p.suggestion ? '<p class="mail-entete">Suggestion de Claude : « ' + esc(p.suggestion) + ' » <i>(texte de Claude : il n\'entre pas dans l\'événement)</i></p>' : '')
+        + (perimee ? '' : '<div class="rang"><input class="titre-claude" value="" maxlength="60" placeholder="Ton titre (sinon « ' + esc(p.titre) + ' »)" aria-label="Titre de l\'événement" autocomplete="off"></div>')
+        + '<div class="evenement">' + esc(p.jour + ', ' + p.debut + ' → ' + p.fin) + '</div>'
+        + '<div class="signaux">' + (p.nonVerifies ? '<div class="signal fort ligne1">⚠ Conflits non vérifiés : ' + esc(p.nonVerifies) + '.</div>'
+          : (p.conflits || []).length ? p.conflits.map(x => '<div class="signal fort ligne1">⚠ ' + esc(x) + '</div>').join('') : '<div class="signal info ligne1">Aucun conflit dans tes deux agendas.</div>') + '</div>'
+        + (perimee ? '<p class="etat-carte">Périmée : rien n\'est écrit.</p>' : '<div class="rang"><button class="danger" data-claude-refuser="' + esc(p.id) + '">Refuser</button><button class="primaire" data-claude-creer="' + esc(p.id) + '">Créer</button></div><p class="etat-carte"></p>')
+        + '</div>');
+    }
+    for (const x of non) h.push('<div class="gerer-item fort claude-non"><p>Claude a proposé un e-mail' + (x.a ? ' à <span class="mono">' + esc(x.a) + '</span>' : '') + ' : non retenu (' + esc(RAISONS_NON_RETENUE[x.code] || x.code) + '). Rien n\'est enregistré.</p></div>');
+    return h.join('');
+  }
+};
 const Auj = {
   charge: 0, dernier: null,
   async charger(frais) {
@@ -2426,6 +2515,7 @@ const Auj = {
     if (r && limiteAtteinte(r)) return;
     if (r) majEtat(r);
     Auj.rendre(r);
+    await Claude.charger();   /* [S103] */
     if (frais) {   /* le point du jour aussi (l'agenda a pu changer) */
       try { const p = await api('/api/point-du-jour', { souvenirs: Memoire.liste() }); const v = $('pointDuJour'); if (v) v.closest('.tour').remove(); afficherPointDuJour(p); } catch (e) { /* rien */ }
     }

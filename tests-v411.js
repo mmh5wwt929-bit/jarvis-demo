@@ -431,7 +431,7 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
 
   /* ============================ H VERSION ============================ */
   const h = await appel('/health');
-  await t('H1', '/health : passerelle v4.11', async () => ({ ok: h.passerelle === 'v4.11.0', info: h.passerelle }));
+  await t('H1', '/health : passerelle v4.11 ou plus', async () => ({ ok: /^v4\.(1[1-9]|[2-9]\d)\.\d+$/.test(h.passerelle), info: h.passerelle }));   /* [v4.12] */
 
   /* ============================ RESULTATS ============================ */
   log('JARVIS v4.11 (' + DIR + ')\n');
