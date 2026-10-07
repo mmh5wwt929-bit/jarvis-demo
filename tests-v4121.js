@@ -431,9 +431,9 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
     const redac = JSON.stringify((W.conv[nConv] || {}).messages || []);
     const planif = W.plans.length === 1;   /* le planificateur n'a pas été appelé : la sentinelle est encore là */
     W.plans.length = 0; W.reponses.length = 0;
-    await t('Q1', "« envoie un mail à luc@… » → « Que doit dire l'e-mail ? » → « que je serai en retard » : la carte du vrai e-mail à luc@ (adresse tapée au 1er message), rédigée depuis TES deux messages seulement ; ni planificateur, ni cible du modèle", async () =>
+    await t('Q1', "« envoie un mail à luc@… » → « Que doit dire l'e-mail ? » → « que je serai en retard » : la carte du vrai e-mail à luc@ (adresse tapée au 1er message), rédigée à partir de ta réponse seulement ; ni planificateur, ni cible du modèle", async () =>
       ({ ok: /Que doit dire l'e-mail à luc@club-hand\.fr \?/.test(q0.reponse || '') && /2 min/.test(q0.reponse || '') && q1.etape === 'MAIL_RETAPER' && (q1.aRetaper || {}).a === 'luc@club-hand.fr'
-          && /en retard/.test((q1.aRetaper || {}).texte || '') && /envoie un mail à luc@club-hand\.fr\\nque je serai en retard/.test(redac) && planif && !q1.demandeAnnulee,
+          && /en retard/.test((q1.aRetaper || {}).texte || '') && /que je serai en retard/.test(redac) && !/envoie un mail/.test(redac) && planif && !q1.demandeAnnulee,
          info: JSON.stringify([q1.etape, (q1.aRetaper || {}).a, redac.slice(0, 120), planif]) }));
     /* 2. « Quel titre ? » complété (le mécanisme d'avant, gardé) */
     plusTard(1100);
@@ -547,6 +547,93 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
     await t('Q8', "garde : « Repartir au vert » : la session est fermée, sa demande en attente avec (SESSION_INCONNUE)", async () =>
       ({ ok: fermee.ferme === true && q8.erreur === 'SESSION_INCONNUE' && !q8.aRetaper, info: JSON.stringify([fermee.ferme, q8.erreur]) }));
     W.plans.length = 0; W.reponses.length = 0;
+  }
+
+  /* ============================ F [S110] PIÈCE JOINTE, « DIS-LUI QUE … » ============================ */
+  {
+    IP = '92.8.8.1'; const sid = await session();
+    const PJ = /^JARVIS n'envoie pas de pièce jointe\. Je peux écrire le message sans, ou tu l'envoies depuis Mail\./;
+    const essais = [];
+    for (const [i, q] of ['envoie un mail à luc@club-hand.fr avec les factures', 'envoie un mail à luc@club-hand.fr pour lui donner les factures',
+      'envoie un mail à luc@club-hand.fr avec le fichier', 'envoie un mail à luc@club-hand.fr en pièce jointe'].entries()) {
+      plusTard(1100);
+      W.reponses.length = 0; W.reponses.push(brouillonJ('Factures', ''));
+      const n = W.conv.length;
+      const r = await dire(sid, q, { action: 'SEND', resource: 'EMAIL', target: 'luc@club-hand.fr' });
+      essais.push({ i, r, redige: W.conv.length > n });
+    }
+    W.reponses.length = 0;
+    await t('F1', "« avec les factures », « pour lui donner les factures », « avec le fichier », « en pièce jointe » (adresse de la liste) : réponse directe « JARVIS n'envoie pas de pièce jointe… » + « Ouvrir dans Mail » ; ni « Que doit dire l'e-mail ? », ni rédaction", async () =>
+      ({ ok: essais.every(x => PJ.test(x.r.reponse || '') && /^mailto:luc@club-hand\.fr\?/.test(x.r.mailtoSeul || '') && !/Que doit dire/.test(x.r.reponse || '') && !x.redige && !x.r.aRetaper && x.r.motif === 'PIECE_JOINTE'),
+         info: essais.map(x => (x.r.motif || '?') + (x.redige ? '+rédigé' : '')).join(',') }));
+    /* puis « que je serai en retard » : le message sans pièce jointe, rédigé à partir de CES mots seulement */
+    plusTard(1100);
+    W.reponses.push(brouillonJ('Retard', 'Bonjour,\n\nJe serai en retard.\n\nÀ bientôt.'));
+    const n2 = W.conv.length;
+    const f2 = await dire(sid, 'que je serai en retard');
+    const redac2 = JSON.stringify((W.conv[n2] || {}).messages || []);
+    W.reponses.length = 0; W.plans.length = 0;
+    await t('F2', "après la réponse « pièce jointe », « que je serai en retard » : la carte du vrai e-mail ; la rédaction ne voit QUE ces mots (pas « les factures »)", async () =>
+      ({ ok: f2.etape === 'MAIL_RETAPER' && (f2.aRetaper || {}).a === 'luc@club-hand.fr' && /que je serai en retard/.test(redac2) && !/factures|envoie un mail/.test(redac2),
+         info: JSON.stringify([f2.etape, redac2.slice(0, 120)]) }));
+    /* hors liste : la liste d'abord, pas de lien (l'adresse ne passe pas la liste) */
+    plusTard(1100);
+    W.reponses.push(brouillonJ('Factures', ''));
+    const f3 = await dire(sid, 'envoie un mail à inconnu2@exemple.org pour lui donner les factures', { action: 'SEND', resource: 'EMAIL', target: 'inconnu2@exemple.org' });
+    W.reponses.length = 0;
+    await t('F3', "hors liste : « n'est pas dans ta liste » puis « JARVIS n'envoie pas de pièce jointe… », SANS lien « Ouvrir dans Mail »", async () =>
+      ({ ok: /^« inconnu2@exemple\.org » n'est pas dans ta liste/.test(f3.reponse || '') && /JARVIS n'envoie pas de pièce jointe/.test(f3.reponse || '') && !f3.mailtoSeul && !(f3.aOuvrir || {}).mailto,
+         info: String(f3.reponse || '').slice(0, 160) }));
+    /* « dis-lui que … » + une adresse tapée : une demande d'envoi (le planificateur n'a rien préparé) */
+    plusTard(1100);
+    W.reponses.push(brouillonJ('Retard', 'Bonjour,\n\nJe serai en retard.\n\nÀ bientôt.'));
+    const f4 = await dire(sid, 'dis-lui que je serai en retard : luc@club-hand.fr', { action: 'AUCUNE' });
+    W.reponses.length = 0;
+    await t('F4', "« dis-lui que je serai en retard : luc@club-hand.fr » (planificateur : rien) → reconnu comme un envoi : la carte du vrai e-mail", async () =>
+      ({ ok: f4.etape === 'MAIL_RETAPER' && (f4.aRetaper || {}).a === 'luc@club-hand.fr', info: JSON.stringify([f4.decide, f4.etape, f4.motif]) }));
+    const gardes = [];
+    for (const q of ["réponds-lui que c'est d'accord : luc@club-hand.fr", "transmets-lui que l'entraînement est maintenu : luc@club-hand.fr"]) {
+      plusTard(1100);
+      W.reponses.push(brouillonJ('Entraînement', 'Bonjour,\n\nC\'est noté.\n\nÀ bientôt.'));
+      gardes.push(await dire(sid, q, { action: 'AUCUNE' }));
+      W.reponses.length = 0;
+    }
+    await t('F5', "garde : « réponds-lui que … », « transmets-lui que … » + adresse tapée : un envoi (carte du vrai e-mail)", async () =>
+      ({ ok: gardes.every(r => r.etape === 'MAIL_RETAPER'), info: gardes.map(r => r.etape).join(',') }));
+    const VG = require(path.join(DIR, 'jarvis-vigilance.js'));
+    await t('F6', "vigilance : « dis-lui / dites-leur » est un verbe d'envoi dans TES mots ; cité ou nié, non", async () =>
+      ({ ok: VG.analyserIntention('SEND', 'dis-lui que je viens').presente && VG.analyserIntention('SEND', 'Dites leur que tout va bien').presente
+          && !VG.analyserIntention('SEND', '> dis-lui que je viens').presente && !VG.analyserIntention('SEND', 'ne lui dis rien').presente,
+         info: [VG.analyserIntention('SEND', 'dis-lui que je viens').raison, VG.analyserIntention('SEND', '> dis-lui que je viens').raison].join(',') }));
+  }
+  /* la démo publique (pas de liste, pas d'envoi réel) : « Ouvrir dans Mail » */
+  {
+    const os = require('os'), TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-v4121-')), PRE = path.join(TMP, 'precharge.js'), JOU = path.join(TMP, 'redaction.jsonl');
+    fs.writeFileSync(PRE, `'use strict';
+const https = require('https'); const fs = require('fs'); const { EventEmitter } = require('events');
+https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts; opts = {}; } if (typeof url === 'object' && !(url instanceof URL)) { opts = url; url = 'https://' + url.hostname + (url.path || '/'); }
+  const q = new EventEmitter(); let c = ''; q.write = (x) => { c += x; }; q.setTimeout = () => q; q.destroy = () => q;
+  q.end = (x) => { if (x) c += x; setTimeout(() => { const b = JSON.parse(c || '{}');
+    const redac = /Tu rédiges le brouillon/.test(b.system || '');
+    if (redac) fs.appendFileSync(${JSON.stringify(JOU)}, JSON.stringify(b.messages) + '\\n');
+    const texte = b.max_tokens === 200 && !b.system ? JSON.stringify({ action: 'AUCUNE' }) : redac ? JSON.stringify({ objet: 'Retard', texte: 'Bonjour,\\n\\nJe serai en retard.\\n\\nÀ bientôt.' }) : "D'accord.";
+    const r = new EventEmitter(); r.statusCode = 200; r.headers = {}; r.complete = true; r.resume = () => {}; cb(r);
+    r.emit('data', Buffer.from(JSON.stringify({ content: [{ type: 'text', text: texte }], usage: {} }))); r.emit('end'); r.emit('close'); }, 2); };
+  return q; };
+`);
+    const p = portFils++;
+    const e = spawn(process.execPath, ['-r', PRE, 'server.js'], { cwd: DIR, stdio: ['ignore', 'pipe', 'pipe'], env: { PATH: process.env.PATH, ANTHROPIC_API_KEY: 'test', PORT: String(p), JARVIS_APPELS_HEURE: '200' } });
+    const req = async (m, ch, b) => { const r = await fetch('http://localhost:' + p + ch, { method: m, headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '94.0.0.9' }, body: b ? JSON.stringify(b) : undefined, signal: AbortSignal.timeout(8000) });
+      const x = await r.text(); try { return { status: r.status, ...JSON.parse(x) }; } catch { return { status: r.status, brut: x }; } };
+    let h = null; for (let i = 0; i < 100 && !h && e.exitCode === null; i++) { await dort(100); try { const x = await req('GET', '/health'); if (x.passerelle) h = x; } catch { /* pas encore */ } }
+    const sd = h ? (await req('POST', '/api/session', {})).sessionId : null;
+    const d1 = sd ? await req('POST', '/api/chat', { sessionId: sd, message: 'dis-lui que je serai en retard, paul@exemple.fr' }) : {};
+    await dort(1100);
+    const d2 = sd ? await req('POST', '/api/chat', { sessionId: sd, message: 'envoie un mail à paul@exemple.fr avec le fichier' }) : {};
+    try { e.kill('SIGKILL'); } catch { /* deja */ }
+    await t('F7', "démo : « dis-lui que … , paul@exemple.fr » → « Ouvrir dans Mail » (l'e-mail préparé) ; « … avec le fichier » → « JARVIS n'envoie pas de pièce jointe » + lien vers Mail (pas de liste sur la démo)", async () =>
+      ({ ok: !!h && d1.etape === 'MAIL_OUVRIR' && /^mailto:paul@exemple\.fr\?/.test((d1.aOuvrir || {}).mailto || '') && /JARVIS n'envoie pas de pièce jointe/.test(d2.reponse || '') && /^mailto:paul@exemple\.fr\?/.test(d2.mailtoSeul || ''),
+         info: JSON.stringify([h && h.passerelle, d1.etape || d1.motif, d2.motif]) }));
   }
 
   /* @@SUITE@@ */

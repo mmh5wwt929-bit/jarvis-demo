@@ -2115,7 +2115,8 @@ const adressesTapees = (propres) => [...new Set((propres.match(/[^\s<>()«»"';,
 async function brouillonDe(s, texte, cible, propres, o, verifier) {
   let bt = brouillonTape(texte), redigePar = 'toi';
   if (!bt) {
-    const r = await rediger(partieEmail(texte));
+    /* [S110] une reponse a « Que doit dire l'e-mail ? » : la redaction a partir de CES mots seulement */
+    const r = await rediger(o && o.contenuReponse ? o.contenuReponse : partieEmail(texte));
     if (depasse(s, o)) return { depasse: true };
     if (!r.ok) return { refus: { motif: 'REDACTION_IMPOSSIBLE', reponse: "Je n'ai pas pu rédiger le brouillon (" + propre(r.code, 30)
       + ") : rien n'est préparé. Tu peux l'écrire toi-même : « envoie à nom@domaine.fr, objet : …, texte : … »." } };
@@ -2261,6 +2262,11 @@ async function envoiMailReel(s, sessionId, texte, plan, avant, o = {}) {
       { decide: 'SANS_OBJET', etape: 'MAIL', motif: 'ADRESSE_NON_TAPEE' });
   if (MAIL_ENVOI.restants() <= 0)
     return dire("Le plafond d'envois du jour est atteint (" + MAIL_ENVOI.plafond + ') : rien n\'est préparé. Réessaie demain.', { decide: 'REFUSE', etape: 'MAIL', motif: 'PLAFOND_JOURNALIER' });
+  /* [S110] une piece jointe demandee (adresse de la liste) : dit tout de suite, « Ouvrir dans Mail » */
+  if (demandePieceJointe(o.contenuReponse || texte)) {
+    const pj = reponsePieceJointe(s, texte, cible, o, true);
+    return dire(pj.reponse, { decide: 'SANS_OBJET', etape: 'MAIL', motif: pj.motif, mailtoSeul: pj.mailtoSeul });
+  }
   /* 2. le brouillon [S72] : le meme pour un vrai e-mail et pour « Ouvrir dans Mail » */
   const b = await brouillonDe(s, texte, cible, propres, o, (c) => MAIL_ENVOI.verifier(c));
   if (b.depasse) return reponseDepassee(s, plan);
@@ -2301,11 +2307,31 @@ const ALERTE_ADRESSE_LUE = "Cette adresse apparaît dans un contenu lu (un e-mai
 const RE_ECRIRE_MAIL = /(^| )(envoie|envoies|envoyez|envoyer|renvoie|expedie|expedier|reponds|repondez|repondre|ecris|ecrivez|ecrire)((?: [a-z0-9]+){0,6}) (mail|mails|e mail|email|courriel|message|mot)( |$)/;
 /* « envoie les factures par mail » : un FICHIER a envoyer, pas un e-mail a ecrire (reste simule) */
 const RE_FICHIER = /(^| )(facture|factures|rapport|rapports|fichier|fichiers|document|documents|photo|photos|pdf|piece|pieces|devis|contrat|contrats|releve|releves)( |$)/;
+/* [S110] v4.12.1 « dis-lui que … », « réponds-lui que … », « transmets-lui que … » : un e-mail a ecrire */
+const RE_DIS_LUI = /(^| )(dis|dites|reponds|repondez|ecris|ecrivez|transmets|transmettez) (lui|leur) (que|qu|de|d)( |$)/;
 const demandeEcrireMail = (texte) => {
   if (brouillonTape(texte)) return true;
+  if (RE_DIS_LUI.test(V.mots(texte))) return true;
   const m = RE_ECRIRE_MAIL.exec(V.mots(texte));
   return !!m && !RE_FICHIER.test(m[3] + ' ');
 };
+/* [S110] v4.12.1 vu en ligne le 7 oct : « … pour lui transmettre les factures » -> « Que doit
+ * dire l'e-mail ? ». Une piece jointe demandee : JARVIS n'en envoie pas, et le dit tout de suite
+ * (apres l'adresse, la liste et l'alerte : [S108]) ; « Ouvrir dans Mail » si l'adresse passe la liste. */
+const FICHIERS_PJ = '(facture|factures|fichier|fichiers|document|documents|photo|photos|pdf|devis|contrat|contrats|releve|releves|rib|scan|scans|rapport|rapports|piece|pieces|planning|plannings|justificatif|justificatifs)';
+const DET_PJ = '(le |la |les |l |mes |ses |ce |cette |ces |un |une |des |mon |ma |son |sa |leur |leurs |tes |ton |ta )?';
+const RE_PIECE_JOINTE = new RegExp('(^| )(en (piece|pieces) (jointe|jointes)|en pj|(piece|pieces) (jointe|jointes)|ci (joint|jointe|joints|jointes)|joins|joindre'
+  + '|avec ' + DET_PJ + FICHIERS_PJ
+  + '|pour (lui|leur) (donner|transmettre|envoyer|faire suivre|passer|transferer|remettre|renvoyer) ' + DET_PJ + FICHIERS_PJ
+  + '|(transmets|transmettez|envoie|envoyez|transfere|transferez|fais suivre|faites suivre|donne|donnez) (lui|leur) ' + DET_PJ + FICHIERS_PJ + ')( |$)');
+const demandePieceJointe = (texte) => RE_PIECE_JOINTE.test(V.mots(texte));
+const TEXTE_PIECE_JOINTE = "JARVIS n'envoie pas de pièce jointe. Je peux écrire le message sans, ou tu l'envoies depuis Mail.";
+/* la reponse « piece jointe » : rien n'est prepare ; la demande attend ce que le message doit dire [S109] */
+function reponsePieceJointe(s, texte, cible, o, lien, avant) {
+  attendreMail(s, { type: 'contenu', texte, cible, tour: o && o.tour });
+  return { reponse: (avant || '') + TEXTE_PIECE_JOINTE + " Pour le message sans pièce jointe, réponds seulement par ce qu'il doit dire (ton prochain message, 2 min).",
+    motif: 'PIECE_JOINTE', ...(lien ? { mailtoSeul: GM.mailto({ a: cible, objet: '', texte: '' }) } : {}) };
+}
 async function preparerMailto(s, sessionId, texte, plan, avant, o = {}, extra = {}) {
   const g = s.g;
   const cible = String(plan.target || '').trim();
@@ -2329,11 +2355,17 @@ async function preparerMailto(s, sessionId, texte, plan, avant, o = {}, extra = 
   const al = alerteAdresse(s, cible);
   const horsListe = extra.horsListe ? "« " + lisible(cible, 80) + " » n'est pas dans ta liste d'adresses autorisées : pas d'envoi par le compte d'essai (Face ID n'y changerait rien). " : '';
   if (al) noterVerdict(s, { decide: 'SANS_OBJET', action: 'SEND', target: 'adresse:' + al.empreinte, motif: 'ALERTE_ADRESSE_VUE' });
+  const reponseAlerte = () => dire(horsListe + "Alerte : cette adresse apparaît dans un contenu reçu (" + al.origine + "), pas dans une de tes demandes. Vérifie-la par un autre moyen (téléphone, adresse déjà connue) : rien n'est préparé.",
+    { decide: 'SANS_OBJET', etape: 'MAILTO', motif: 'ALERTE_ADRESSE_VUE', alerte: al });
+  /* [S110] une piece jointe demandee : dit avant toute redaction (l'alerte d'abord) ; le lien seulement si l'adresse passe la liste */
+  if (demandePieceJointe(o.contenuReponse || texte)) {
+    if (al) return reponseAlerte();
+    const pj = reponsePieceJointe(s, texte, cible, o, !extra.horsListe, horsListe);
+    return dire(pj.reponse, { decide: 'SANS_OBJET', etape: 'MAILTO', motif: pj.motif, ...(pj.mailtoSeul ? { mailtoSeul: pj.mailtoSeul } : {}) });
+  }
   const b = await brouillonDe(s, texte, cible, propres, o, (c) => GM.verifierContenu(c, [], { listeFermee: false }));
   if (b.depasse) return reponseDepassee(s, plan);
-  if (b.refus && al)
-    return dire(horsListe + "Alerte : cette adresse apparaît dans un contenu reçu (" + al.origine + "), pas dans une de tes demandes. Vérifie-la par un autre moyen (téléphone, adresse déjà connue) : rien n'est préparé.",
-      { decide: 'SANS_OBJET', etape: 'MAILTO', motif: 'ALERTE_ADRESSE_VUE', alerte: al });
+  if (b.refus && al) return reponseAlerte();
   if (b.refus) return dire(horsListe + (horsListe ? "Je peux le préparer pour « Ouvrir dans Mail » (c'est toi qui l'envoies). " : '') + b.refus.reponse, { decide: 'SANS_OBJET', etape: 'MAILTO', motif: b.refus.motif });
   const lien = GM.mailto(b.brouillon);
   if (!lien) return dire("Je n'ai pas pu préparer le lien vers Mail : rien n'est préparé.", { decide: 'SANS_OBJET', etape: 'MAILTO', motif: 'LIEN_MAILTO_IMPOSSIBLE' });
@@ -3164,7 +3196,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
     /* [S109] la reponse a « Que doit dire l'e-mail ? » / « À qui ? » : les deux messages tapes, relus ensemble */
     if (!planReponse && enTemps(attentes.mail)) {
       const c = completerDemande(attentes.mail, texte);
-      if (c) { texte = c.texte; planReponse = c.plan; o.attenteUtilisee = true; }
+      if (c) { if (attentes.mail.type === 'contenu') o.contenuReponse = texte; texte = c.texte; planReponse = c.plan; o.attenteUtilisee = true; }
     }
   }
 

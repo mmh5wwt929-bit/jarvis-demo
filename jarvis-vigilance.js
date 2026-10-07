@@ -60,7 +60,9 @@
  * "mail" ni de "reponse" (noms) : "trie ma boite mail" ne vaut pas "envoie". */
 const VERBES = Object.freeze({
   SEND:    ['envoie', 'envoy', 'renvoie', 'renvoy', 'transfere', 'transmet', 'transmis', 'expedie',
-            'expedier', 'repond', 'send', 'forward', 'reply'],
+            'expedier', 'repond', 'send', 'forward', 'reply',
+            /* [S110] passerelle v4.12.1 (vu en ligne le 7 oct) : « dis-lui que … » a une adresse tapee */
+            'dis-lui', 'dis lui', 'dis-leur', 'dis leur', 'dites-lui', 'dites lui', 'dites-leur', 'dites leur'],
   DELETE:  ['supprim', 'effac', 'detrui', 'jette', 'jeter', 'vider', 'nettoi', 'nettoy', 'menage',
             'purge', 'delete', 'remove', 'erase'],
   PAY:     ['paie', 'paiement', 'paye', 'payer', 'regler', 'regle la', 'regle le', 'vire', 'virer', 'virement',
