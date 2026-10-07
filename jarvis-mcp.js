@@ -80,7 +80,7 @@ const negocier = (demandee) => PROTOCOLES.includes(demandee) ? demandee : PROTOC
 function initialiser(id, params) {
   return reponse(id, { protocolVersion: negocier(params && params.protocolVersion),
     capabilities: { tools: { listChanged: false } },
-    serverInfo: { name: 'jarvis', title: 'JARVIS', version: '4.12.0' },
+    serverInfo: { name: 'jarvis', title: 'JARVIS', version: '4.12.1' },
     instructions: "JARVIS lit le compte d'essai et enregistre des propositions. Rien n'est envoyé ni écrit sans un geste de la personne dans JARVIS. Ne dis jamais qu'un e-mail est envoyé ou qu'un événement est créé." });
 }
 

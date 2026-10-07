@@ -66,11 +66,18 @@
  *  - retirerOffres() couvre l'agenda : « Tu veux que je crée un événement
  *    dans ton agenda JARVIS pour samedi à 11h ? » (puis « Oui » : rien) ;
  *    rendu : { texte, retirees, agenda } (agenda = offres d'agenda retirees).
+ *
+ * 1.7 (v4.12.1, 7 oct) — VU EN LIGNE sur la v4.12
+ *  - questionAgendaSimple() : « J'ai quoi à faire samedi » ne demande que la
+ *    LISTE : le serveur l'ecrit seul (le modele en avait oublie un evenement
+ *    et invente un chevauchement entre 17:00→18:00 et 18:00→20:00).
+ *  - retirerHoraires() : question melee, le modele est appele ; toute phrase
+ *    qui contient une heure, « chevauch », « conflit » ou « libre » est retiree.
  * ========================================================================== */
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const AG = require('./jarvis-agenda.js');
 
-const VERSION = '1.6';
+const VERSION = '1.7';
 const JOUR_MS = 86400000;
 const JOURS = ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'];
 const JOURS_COURTS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
@@ -743,10 +750,43 @@ function retirerOffres(texte, { rouge = false, adressesLues = [] } = {}) {
   return { texte: retirees.length ? lignes.join('\n').replace(/\n{3,}/g, '\n\n').trim() : s, retirees, agenda };
 }
 
+/* ================================ 1.7 (v4.12.1) ================================ */
+/* [1.7] Une question d'agenda qui ne demande QUE la liste : chaque mot tape est
+ * un mot de liste, de date ou de politesse (« j'ai quoi à faire samedi »,
+ * « et dimanche ? », « montre mon agenda de la semaine »). Un seul autre mot
+ * (« libre », « où », « temps », « match »…) : question MELEE. Etroit exprès :
+ * le doute appelle le modele, filtre, et la liste du serveur reste en tete. */
+const MOTS_LISTE_AGENDA = new Set(('j ai as a quoi qu est ce que qui je tu on il y t c faire fais fait prevu prevus prevue prevues '
+  + 'mon ma mes ton ta tes agenda agendas planning programme calendrier rendez vous rdv evenement evenements '
+  + 'lis lire relis montre montrer affiche afficher donne donner moi regarde consulte verifie dis dire '
+  + 'quelque chose choses qqch truc trucs un une des du de d le la les l au aux en pour dans sur ce cet cette ces comme '
+  + 'quel quelle quels quelles et alors ok bon bonjour salut hello jarvis stp svp s plait merci please peux pourrais me '
+  + 'aujourd hui demain apres hier lundi mardi mercredi jeudi vendredi samedi dimanche matin soir midi aprem nuit '
+  + 'semaine semaines prochaine prochain prochains prochaines week end weekend mois jour jours journee toute tout entre jusqu er '
+  + Object.keys(MOIS).join(' ')).split(' '));
+function questionAgendaSimple(texte) {
+  const m = mots(texte).trim();
+  if (!m) return false;
+  return m.split(' ').every(w => MOTS_LISTE_AGENDA.has(w) || /^\d{1,4}$/.test(w) || /^\d{1,2}h(\d{2})?$/.test(w));
+}
+/* [1.7] question melee : le modele ne donne ni heure, ni conflit, ni « libre »
+ * (le serveur les calcule) ; ses phrases qui en parlent sont retirees */
+const RE_PHRASE_HORAIRE = /(^| )(\d{1,2} ?h(\d{2})?|\d{1,2} ?heures?|\d{1,2}:\d{2}|midi|minuit)( |$)|chevauch|conflit|(^| )libres?( |$)/;
+function retirerHoraires(texte) {
+  const s = String(texte == null ? '' : texte), retirees = [];
+  const out = s.split('\n').map((ligne) => phrases(ligne).filter((m) => {
+    const p = ' ' + norm(m).replace(/[^a-z0-9: ]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+    if (RE_PHRASE_HORAIRE.test(p)) { if (m.trim()) retirees.push(m.trim()); return false; }
+    return true;
+  }).join('').replace(/\s+$/, '')).join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return { texte: retirees.length ? out : s, retirees };
+}
+
 module.exports = Object.freeze({ VERSION, resoudreDates, dateUnique, tableDates, avertissementNuit, questionContradiction, questionDate,
   corrigerJours, retirerAffirmations, affirme, intentionSuppression, suppressionNue, titreNomme, resoudreHeures,
   creationDemandee, demandeSerie, parleAgenda, demandeAction, renonce, fusionner, texteFusion, mots,
   titreTape, titreDansMots, titreRepris, autreObjet, imiteServeur,   /* [1.6] */
   retirerMarque, lireSerie, finNue, titreSerie,
   demandesMultiples, corrigerMemoire, registreDe, retirerOffres, TEXTE_PAS_RETROUVE,   /* [1.4] */
-  libelle, libellePeriode, local, iso, jourDe, jourSemaine, civil });
+  libelle, libellePeriode, local, iso, jourDe, jourSemaine, civil,
+  questionAgendaSimple, retirerHoraires });   /* [1.7] */

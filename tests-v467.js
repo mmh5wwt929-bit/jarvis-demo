@@ -349,7 +349,8 @@ const plansJ = () => journal().filter(x => x.type === 'plan');
   const Wd3 = D3.getUTCDay();
   const faux = JOURS[(Wd3 + 1) % 7];
   const nomFaux = faux.charAt(0).toUpperCase() + faux.slice(1);
-  const qLecture = "Qu'est-ce que j'ai " + JOURS[Wd3] + ' ?';
+  /* v4.12.1 [S106] la liste seule est écrite par le serveur (sans modèle) : une question MÊLÉE garde le modèle (S19, S20) */
+  const qLecture = "Qu'est-ce que j'ai " + JOURS[Wd3] + ' ? Je dois prévoir quoi ?';
   scenario({ ics, plans: { [qLecture]: { action: 'READ', resource: 'AGENDA', target: iso(jour(4)) } },
     reponse: nomFaux + ' ' + D3.getUTCDate() + ' ' + MOIS[D3.getUTCMonth()] + ' : une réunion et du hand.',
     jarvisItems: [
@@ -365,7 +366,8 @@ const plansJ = () => journal().filter(x => x.type === 'plan');
          && /Hand · agenda JARVIS/.test(donnees) && /Réunion · agenda principal \+ JARVIS/.test(donnees),
        info: b1.agenda ? b1.agenda.evenements + ' évts, doublons ' + b1.agenda.doublons + ', sources ' + b1.agenda.sources : (b1.motif || '') }));
   await t('S20', "C : le modèle écrit « " + nomFaux + ' ' + D3.getUTCDate() + " » → corrigé en « " + JOURS[Wd3] + " » dans la réponse, correction dite", async () =>
-    ({ ok: (b1.reponse || '').toLowerCase().startsWith(JOURS[Wd3] + ' ' + D3.getUTCDate()) && /corrigé le jour de la semaine/.test(b1.reponse || ''), info: (b1.reponse || '').slice(0, 80) }));
+    ({ ok: String((b1.reponse || '').split('\n\n')[1] || '').toLowerCase().startsWith(JOURS[Wd3] + ' ' + D3.getUTCDate()) && /corrigé le jour de la semaine/.test(b1.reponse || ''),   /* v4.12.1 : la partie du modèle, sous la liste du serveur */
+       info: String((b1.reponse || '').split('\n\n')[1] || '').slice(0, 80) }));
   const gl = journal().filter(x => x.type === 'google' && x.methode === 'GET' && /\/events$/.test(x.path));
   await t('S21', "B : l'agenda JARVIS est lu en lecture seule, bornes timeMin/timeMax, aucune écriture pendant une lecture", async () =>
     ({ ok: gl.length === 1 && /timeMin=/.test(gl[0].query) && /timeMax=/.test(gl[0].query) && journal().filter(x => x.type === 'google' && x.methode !== 'GET').length === 0,
