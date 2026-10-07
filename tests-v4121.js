@@ -636,6 +636,30 @@ https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts
          info: JSON.stringify([h && h.passerelle, d1.etape || d1.motif, d2.motif]) }));
   }
 
+  /* ============================ G [S111] « TU AS PROMIS » DIT QUOI ============================ */
+  {
+    const AN = require(path.join(DIR, 'jarvis-analyse.js'));
+    /* mercredi 7 octobre 2026, 10:00 à Paris ; ta réponse du mardi 6 : « … jeudi » = jeudi 8 octobre */
+    const maint = Date.UTC(2026, 9, 7, 8, 0);
+    const fil = { id: 'f1', objet: 'Entraînement', messages: [
+      { id: 'm1', de: { nom: 'Luc', adresse: 'luc@club-hand.fr' }, texte: "Tu viens à l'entraînement jeudi ?", date: Date.UTC(2026, 9, 5, 8) },
+      { id: 'm2', de: { nom: 'Alsid', adresse: MOI }, moi: true, texte: "Je confirme, je serai bien présent à l'entraînement jeudi.", date: Date.UTC(2026, 9, 6, 8) }] };
+    const r = AN.analyser(fil, { moi: MOI, maintenant: maint, zone: 'Europe/Paris' });
+    const eng = r.aGerer.find(x => x.type === 'engagement') || {};
+    await t('G1', "« à gérer » : « Bientôt : tu as promis « serai bien présent à l'entraînement » (jeudi 8 octobre) » (la promesse, tirée de ta phrase)", async () =>
+      ({ ok: eng.titre === "Bientôt : tu as promis « serai bien présent à l'entraînement » (jeudi 8 octobre)", info: eng.titre }));
+    await t('G2', "pas de « Répondre » sur un point qui vient de TON message (engagement) ; « Me le rappeler » reste", async () =>
+      ({ ok: Array.isArray(eng.actions) && !eng.actions.includes('repondre') && eng.actions.includes('rappel'), info: JSON.stringify(eng.actions) }));
+    const fil2 = { id: 'f2', objet: 'Devis', messages: [
+      { id: 'n1', de: { nom: 'Paul', adresse: 'paul@menuiserie.fr' }, texte: 'Il me faut le devis signé.', date: Date.UTC(2026, 9, 5, 8) },
+      { id: 'n2', de: { nom: 'Alsid', adresse: MOI }, moi: true, texte: "Je vous envoie le devis signé d'ici vendredi.", date: Date.UTC(2026, 9, 6, 8) }] };
+    const r2 = AN.analyser(fil2, { moi: MOI, maintenant: maint, zone: 'Europe/Paris' });
+    const e2 = r2.aGerer.find(x => x.type === 'engagement') || {}, ech = r2.aGerer.find(x => x.type === 'echeance') || null;
+    await t('G3', "« Je vous envoie le devis signé d'ici vendredi » : « tu as promis « envoie le devis signé » (vendredi 9 octobre) » ; l'échéance que TU as donnée : pas de « Répondre »", async () =>
+      ({ ok: e2.titre === 'Bientôt : tu as promis « envoie le devis signé » (vendredi 9 octobre)' && !(e2.actions || []).includes('repondre') && (!ech || !ech.actions.includes('repondre')),
+         info: JSON.stringify([e2.titre, ech && ech.actions]) }));
+  }
+
   /* @@SUITE@@ */
 
   performance.now = vraiPerf; Date.now = vraiNow;

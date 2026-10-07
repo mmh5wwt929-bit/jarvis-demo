@@ -257,7 +257,8 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
   const FIL_T2 = { id: '18f00000000000a8', objet: 'Re : Tournoi', messages: [{ id: 't2', de: 'JARVIS essai <' + MOI + '>', a: 'luc@yahoo.fr', date: Date.now() - 2 * J, moi: true, texte: 'Je te confirme demain.' }] };
   W.gmail.fils = [FIL_T1, FIL_T2]; avance += 1100;
   const gT = await gerer(sid);
-  const itT = items(gT, 'Mails').find(x => x.type === 'engagement' && (x.actions || []).includes('repondre')) || {};   /* ta promesse (fil le plus récent) */
+  /* v4.12.1 [S111] le point « tu as promis » n'a plus de bouton « Répondre » (c'est TON message) : son jeton de conversation sert ici, comme « Voir la conversation » */
+  const itT = items(gT, 'Mails').find(x => x.type === 'engagement') || {};   /* ta promesse (fil le plus récent) */
   if (itT.fil) W.reponses.push(brouillon('Oui, je viens dimanche.'));
   const rT = itT.fil ? await appel('/api/mail/repondre', { sessionId: sid, jeton: itT.fil, consigne: 'oui je viens' }) : {};
   const rtT = rT.aRetaper ? await appel('/api/mail/retaper', { sessionId: sid, jeton: rT.aRetaper.jeton, adresse: 'luc@yahoo.fr' }) : {};

@@ -52,6 +52,10 @@
  *    « nous transférer » : vers soi, ce n'est pas un tiers) ; « je t'envoie les
  *    factures » (l'expediteur parle de lui) n'y est plus une consigne : c'etait
  *    un faux « suspect » (exige par la SPEC : pas de faux positif).
+ *  [S111] « Tu as promis (jeudi 8 octobre) » ne disait pas QUOI : le point dit
+ *    la promesse, tiree de ta phrase (« serai bien présent à l'entraînement ») ;
+ *    pas de « Répondre » sur un point qui vient de TON message (engagement,
+ *    echeance que tu as donnee).
  * ========================================================================== */
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const V = require('./jarvis-verite.js');
@@ -185,6 +189,21 @@ function demandeTransmission(phrase, expediteur, moi) {
   return tiers.length ? tiers[0] : null;
 }
 
+/* [S111] ce que TU as promis, tire de ta phrase : apres le dernier « je », sans pronom
+ * objet en tete ni la date en queue (« Je confirme, je serai bien présent à
+ * l'entraînement jeudi. » -> « serai bien présent à l'entraînement ») */
+const RE_DATE_FIN = new RegExp('\\s+(?:(?:d[\'’]ici|avant|pour|dès|des|au plus tard|à partir de)\\s+)?(?:(?:le|ce|cette)\\s+)?(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain|après-demain|aujourd[\'’]hui'
+  + '|soir|matin|midi|après-midi|semaine prochaine|\\d{1,2}(?:er)?(?:\\s+(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre))?'
+  + '|(?:à|a|vers)\\s+\\d{1,2}\\s*h(?:\\s*\\d{2})?|\\d{1,2}\\s*h(?:\\s*\\d{2})?)\\s*$', 'iu');
+function promesseDe(phrase) {
+  let x = String(phrase || '').replace(/\s+/g, ' ').trim();
+  const jes = [...x.matchAll(/(?:^|[^\p{L}])(je\s+|j['’]\s*)/giu)];
+  if (jes.length) { const m = jes[jes.length - 1]; x = x.slice(m.index + m[0].length); }
+  x = x.replace(/^(?:(?:vous|te|lui|leur|la|le|les)\s+|(?:t|l)['’]\s*)+/i, '').replace(/[\s.!?…,;:]+$/u, '');
+  for (let i = 0; i < 4; i++) { const y = x.replace(RE_DATE_FIN, '').replace(/[\s,;:]+$/u, ''); if (y === x) break; x = y; }
+  return court(x || phrase, 80);
+}
+
 /* ------------------------------------------------------------ analyse -- */
 /* fil : { id, objet, messages: [{ id, de: { nom, adresse }, repondreA, a: [], date (ms), texte, piecesJointes: [{nom}], moi }] }
  * o   : { moi (adresse), maintenant (ms), zone, contactsConnus (Set d'adresses), relanceJours } */
@@ -229,7 +248,7 @@ function analyser(fil, o = {}) {
       /* tes engagements dates */
       if (m.moi && RE_ENGAGEMENT.test(p) && rd.dates.length) {
         const d = rd.dates[0];
-        r.engagements.push({ jour: d.jour, iso: d.iso, libelle: V.libelle(d.jour, false), extrait: court(s), message: m.i,
+        r.engagements.push({ jour: d.jour, iso: d.iso, libelle: V.libelle(d.jour, false), extrait: court(s), promesse: promesseDe(s), message: m.i,
           etat: d.jour < auj ? 'en-retard' : d.jour === auj ? 'aujourdhui' : d.jour - auj <= 2 ? 'bientot' : 'plus-tard', certitude: 'deduction' });
       }
       /* creneaux proposes par un autre */
@@ -328,10 +347,10 @@ function analyser(fil, o = {}) {
   if (r.reponseAttendue && !r.suspect) item('reponse', 2, 'Répondre à ' + (r.reponseAttendue.nom || r.reponseAttendue.de) + ' — « ' + r.objet + ' »' + (r.reponseAttendue.depuis ? ' (depuis ' + r.reponseAttendue.depuis + ' j)' : ''),
     r.reponseAttendue.extrait, 'deduction', ['repondre', 'mail', 'rappel'], idDe(r.reponseAttendue.message));
   for (const e of r.engagements) if (e.etat !== 'plus-tard')
-    item('engagement', e.etat === 'en-retard' ? 1 : 2, (e.etat === 'en-retard' ? 'En retard : ' : e.etat === 'aujourdhui' ? "Aujourd'hui : " : 'Bientôt : ') + 'tu as promis (' + e.libelle + ')', e.extrait, 'deduction', ['repondre', 'rappel'],
+    item('engagement', e.etat === 'en-retard' ? 1 : 2, (e.etat === 'en-retard' ? 'En retard : ' : e.etat === 'aujourdhui' ? "Aujourd'hui : " : 'Bientôt : ') + 'tu as promis « ' + e.promesse + ' » (' + e.libelle + ')', e.extrait, 'deduction', ['rappel'],   /* [S111] ton message : pas de « Répondre » */
       idDe(e.message) + ':' + e.iso);
   for (const e of r.echeances) if (e.jour >= auj - 1 && e.jour <= auj + 3)
-    item('echeance', e.jour <= auj ? 1 : 2, 'Échéance ' + (e.jour < auj ? 'passée' : e.jour === auj ? "aujourd'hui" : e.libelle) + ' — « ' + r.objet + ' »', e.extrait, 'deduction', ['rappel', 'repondre'],
+    item('echeance', e.jour <= auj ? 1 : 2, 'Échéance ' + (e.jour < auj ? 'passée' : e.jour === auj ? "aujourd'hui" : e.libelle) + ' — « ' + r.objet + ' »', e.extrait, 'deduction', e.de === 'moi' ? ['rappel'] : ['rappel', 'repondre'],   /* [S111] */
       idDe(e.message) + ':' + e.iso);
   if (r.relance) item('relance', 3, 'Sans réponse depuis ' + r.relance.jours + ' jours — « ' + r.objet + ' » : relancer ?', r.relance.extrait, 'deduction', ['repondre', 'rappel'], idDe(r.relance.message));
   for (const x of r.pjManquantes) if (x.de === 'autre' && !repondu(x.message)) item('pj', 3, 'Pièce jointe annoncée mais absente — « ' + r.objet + ' »', x.extrait, 'fait', ['repondre'], idDe(x.message));
@@ -350,4 +369,4 @@ function contactsConnus(fils, moi) {
 }
 
 module.exports = Object.freeze({ VERSION, analyser, contactsConnus, phrasesDe, montantsDe, distance, LIMITES, demandeTransmission,   /* [S107] */
-  objetNormalise, grouperFils, fusionnerFils, correspondantDe, grandService, GRANDS_SERVICES });   /* [S85] [S86] v4.10.1 */
+  objetNormalise, grouperFils, fusionnerFils, correspondantDe, grandService, GRANDS_SERVICES, promesseDe });   /* [S85] [S86] v4.10.1 */
