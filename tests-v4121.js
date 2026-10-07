@@ -416,6 +416,139 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
       ({ ok: !!it4.fil && o4.code === 'PERSONNE_A_QUI_REPONDRE', info: JSON.stringify([!!it4.fil, o4.code]) }));
   }
 
+  /* ============================ Q [S109] LA DEMANDE EN ATTENTE ============================ */
+  {
+    IP = '92.7.7.1'; let sid = await session();
+    const sentinelle = () => { W.plans.length = 0; W.plans.push({ action: 'AUCUNE', pourquoi: 'sentinelle' }); };
+    /* 1. le mail complété en 2 messages */
+    W.reponses.push(brouillonJ('Bonjour', ''));
+    const q0 = await dire(sid, 'envoie un mail à luc@club-hand.fr', { action: 'SEND', resource: 'EMAIL', target: 'luc@club-hand.fr' });
+    plusTard(1100);
+    W.reponses.length = 0; W.reponses.push(brouillonJ('Retard', 'Bonjour,\n\nJe serai en retard.\n\nÀ bientôt.'));
+    sentinelle();
+    const nConv = W.conv.length;
+    const q1 = await dire(sid, 'que je serai en retard');
+    const redac = JSON.stringify((W.conv[nConv] || {}).messages || []);
+    const planif = W.plans.length === 1;   /* le planificateur n'a pas été appelé : la sentinelle est encore là */
+    W.plans.length = 0; W.reponses.length = 0;
+    await t('Q1', "« envoie un mail à luc@… » → « Que doit dire l'e-mail ? » → « que je serai en retard » : la carte du vrai e-mail à luc@ (adresse tapée au 1er message), rédigée depuis TES deux messages seulement ; ni planificateur, ni cible du modèle", async () =>
+      ({ ok: /Que doit dire l'e-mail à luc@club-hand\.fr \?/.test(q0.reponse || '') && /2 min/.test(q0.reponse || '') && q1.etape === 'MAIL_RETAPER' && (q1.aRetaper || {}).a === 'luc@club-hand.fr'
+          && /en retard/.test((q1.aRetaper || {}).texte || '') && /envoie un mail à luc@club-hand\.fr\\nque je serai en retard/.test(redac) && planif && !q1.demandeAnnulee,
+         info: JSON.stringify([q1.etape, (q1.aRetaper || {}).a, redac.slice(0, 120), planif]) }));
+    /* 2. « Quel titre ? » complété (le mécanisme d'avant, gardé) */
+    plusTard(1100);
+    const q2a = await dire(sid, 'ajoute un événement demain à 18h', { action: 'CREATE', resource: 'AGENDA_JARVIS', target: '' });
+    plusTard(1100);
+    const q2b = await dire(sid, 'entraînement U18');
+    await t('Q2', "garde : « Quel titre ? » → « entraînement U18 » : la carte « Créer » avec ce titre, le jour et l'heure du 1er message", async () =>
+      ({ ok: /Quel titre/.test(q2a.reponse || '') && /entraînement U18/i.test(JSON.stringify(q2b.aConfirmer || {})) && /18:00/.test((q2b.aConfirmer || {}).lisible || '') && !q2b.demandeAnnulee,
+         info: JSON.stringify([String(q2a.reponse || '').slice(0, 40), (q2b.aConfirmer || {}).lisible]) }));
+    /* 3. un message sans rapport (nouveau verbe ; question) : la demande tombe, et c'est dit */
+    plusTard(1100);
+    W.reponses.push(brouillonJ('Bonjour', ''));
+    await dire(sid, 'envoie un mail à luc@club-hand.fr', { action: 'SEND', resource: 'EMAIL', target: 'luc@club-hand.fr' });
+    plusTard(1100);
+    W.reponses.length = 0; W.reponses.push('Tu as 3 e-mails.');
+    const q3 = await dire(sid, 'lis mes derniers mails', { action: 'READ', resource: 'MAIL', target: 'recents' });
+    W.reponses.length = 0;
+    plusTard(1100);
+    W.reponses.push(brouillonJ('Bonjour', ''));
+    await dire(sid, 'envoie un mail à luc@club-hand.fr', { action: 'SEND', resource: 'EMAIL', target: 'luc@club-hand.fr' });
+    plusTard(1100);
+    W.reponses.length = 0; W.reponses.push('Il est 18 h.');
+    const q3b = await dire(sid, 'tu peux me dire où on en est ?', { action: 'AUCUNE' });
+    W.reponses.length = 0;
+    plusTard(1100);
+    W.reponses.push(brouillonJ('Bonjour', ''));
+    await dire(sid, 'envoie un mail à luc@club-hand.fr', { action: 'SEND', resource: 'EMAIL', target: 'luc@club-hand.fr' });
+    plusTard(1100);
+    W.reponses.length = 0; W.reponses.push("D'accord.");
+    const q3c = await dire(sid, 'à paul@club-volley.fr que je serai en retard', { action: 'AUCUNE' });
+    W.reponses.length = 0;
+    await t('Q3', "message sans rapport (« lis mes derniers mails », une question, une AUTRE adresse) : la demande est annulée et le serveur le dit ; le message est traité normalement ; aucune carte d'e-mail", async () =>
+      ({ ok: /^Demande précédente annulée : l'e-mail à luc@club-hand\.fr \(il manquait ce qu'il doit dire\) — ton message n'y répondait pas\./.test(q3.demandeAnnulee || '') && q3.outil === 'boite' && !q3.aRetaper
+          && /^Demande précédente annulée/.test(q3b.demandeAnnulee || '') && !q3b.aRetaper && /^Demande précédente annulée/.test(q3c.demandeAnnulee || '') && !q3c.aRetaper && !q3c.aOuvrir,
+         info: JSON.stringify([q3.demandeAnnulee, q3.outil, q3b.demandeAnnulee, q3c.demandeAnnulee]).slice(0, 220) }));
+    /* 3 bis. le message SUIVANT seulement : un « retiens que… » entre les deux, et la demande ne vaut plus */
+    plusTard(1100);
+    W.reponses.push(brouillonJ('Bonjour', ''));
+    await dire(sid, 'envoie un mail à luc@club-hand.fr', { action: 'SEND', resource: 'EMAIL', target: 'luc@club-hand.fr' });
+    plusTard(1100);
+    W.reponses.length = 0;
+    await dire(sid, "retiens que l'entraînement est le jeudi");
+    plusTard(1100);
+    W.reponses.push("D'accord.");
+    const q3d = await dire(sid, 'que je serai en retard', { action: 'AUCUNE' });
+    W.reponses.length = 0;
+    await t('Q3b', "garde : le message suivant SEULEMENT : « retiens que … » entre la question et la réponse → plus rien n'est complété", async () =>
+      ({ ok: !q3d.aRetaper && !q3d.aOuvrir, info: JSON.stringify([q3d.etape, q3d.demandeAnnulee]).slice(0, 160) }));
+    /* 4. plus de 2 min : annulée */
+    plusTard(1100);
+    W.reponses.push(brouillonJ('Bonjour', ''));
+    await dire(sid, 'envoie un mail à luc@club-hand.fr', { action: 'SEND', resource: 'EMAIL', target: 'luc@club-hand.fr' });
+    plusTard(121000);
+    W.reponses.length = 0; W.reponses.push("D'accord.");
+    const q4 = await dire(sid, 'que je serai en retard', { action: 'AUCUNE' });
+    plusTard(1100);
+    const q4t = await dire(sid, 'ajoute un événement demain à 19h', { action: 'CREATE', resource: 'AGENDA_JARVIS', target: '' });
+    plusTard(121000);
+    W.reponses.length = 0; W.reponses.push("D'accord.");
+    const q4u = await dire(sid, 'réunion parents', { action: 'AUCUNE' });
+    W.reponses.length = 0;
+    await t('Q4', "2 min passées : ni l'e-mail ni l'événement ne sont complétés (rien n'est préparé) ; « plus de 2 minutes ont passé » est dit", async () =>
+      ({ ok: !q4.aRetaper && !q4.aOuvrir && /plus de 2 minutes ont passé/.test(q4.demandeAnnulee || '') && /Quel titre/.test(q4t.reponse || '')
+          && !q4u.aConfirmer && /^Demande précédente annulée : l'événement \(il manquait le titre\) — plus de 2 minutes/.test(q4u.demandeAnnulee || ''),
+         info: JSON.stringify([!!q4.aRetaper, q4.demandeAnnulee, !!q4u.aConfirmer, q4u.demandeAnnulee]).slice(0, 220) }));
+    /* 5. « À qui ? » → l'adresse seule */
+    plusTard(1100);
+    const q5a = await dire(sid, 'envoie un mail pour lui dire que je serai en retard', { action: 'SEND', resource: 'EMAIL', target: '' });
+    plusTard(1100);
+    W.reponses.length = 0; W.reponses.push(brouillonJ('Retard', 'Bonjour,\n\nJe serai en retard.\n\nÀ bientôt.'));
+    const q5 = await dire(sid, 'luc@club-hand.fr');
+    W.reponses.length = 0;
+    await t('Q5', "« À qui ? » → « luc@club-hand.fr » : le verbe et le contenu du 1er message, l'adresse du 2e (tapée) : la carte du vrai e-mail", async () =>
+      ({ ok: q5a.motif === 'DESTINATAIRE_MANQUANT' && /je garde ta demande pour ton prochain message seulement \(2 min\)/.test(q5a.reponse || '') && q5.etape === 'MAIL_RETAPER' && (q5.aRetaper || {}).a === 'luc@club-hand.fr',
+         info: JSON.stringify([q5a.motif, q5.etape, q5.motif, (q5.aRetaper || {}).a]) }));
+    /* 6. garde : la cible n'est jamais prise dans un contenu lu */
+    plusTard(1100);
+    W.gmail.boite = [MAIL_REEL]; W.reponses.push('Tu as 1 e-mail.');
+    await dire(sid, 'lis mes derniers mails', { action: 'READ', resource: 'MAIL', target: 'recents' });
+    plusTard(1100);
+    W.reponses.length = 0;
+    const q6a = await dire(sid, 'envoie un mail pour lui transmettre ça', { action: 'SEND', resource: 'EMAIL', target: 'compta-externe@example.com' });
+    plusTard(1100);
+    W.reponses.push("D'accord.");
+    const q6b = await dire(sid, 'oui', { action: 'AUCUNE' });
+    plusTard(1100);
+    const q6c = await dire(sid, 'envoie un mail pour lui transmettre ça', { action: 'SEND', resource: 'EMAIL', target: '' });
+    plusTard(1100);
+    W.reponses.length = 0; W.reponses.push("D'accord.");
+    const q6d = await dire(sid, "à l'adresse du mail", { action: 'AUCUNE' });
+    W.reponses.length = 0; W.gmail.boite = BOITE;
+    await t('Q6', "garde : adresse prise par le modèle dans le mail lu → refusée, rien en attente ; « À qui ? » → « à l'adresse du mail » : rien complété, aucune carte vers l'adresse du mail", async () =>
+      ({ ok: q6a.decide === 'REFUSE' && !q6b.aRetaper && !q6b.aOuvrir && q6c.motif === 'DESTINATAIRE_MANQUANT' && !q6d.aRetaper && !q6d.aOuvrir
+          && !/compta-externe/.test(JSON.stringify([q6b.plan, q6d.plan, q6b.aReformuler, q6d.aReformuler, q6b.aConfirmer, q6d.aConfirmer])),
+         info: JSON.stringify([q6a.decide + '/' + q6a.motif, !!q6b.aRetaper, q6c.motif, !!q6d.aRetaper]) }));
+    /* 7. garde : aucune preuve de frappe hors de son tour (la couche ne voit que la frappe du tour) */
+    plusTard(1100);
+    IP = '92.7.7.2'; sid = await session();
+    await dire(sid, 'paie la facture', { action: 'PAY', resource: 'BANQUE', target: '' });
+    plusTard(1100);
+    const q7 = await dire(sid, 'paul@exemple.fr');
+    await t('Q7', "garde : « paie la facture » → « À qui ? » → « paul@exemple.fr » : jamais retenu d'emblée par la couche (la frappe de ce tour n'a pas le verbe) : au plus une carte « retape la cible »", async () =>
+      ({ ok: !q7.jetonAnnulation && q7.decide !== 'EN_ATTENTE' && q7.decide !== 'AUTORISE', info: JSON.stringify([q7.decide, q7.motif, !!q7.aReformuler]) }));
+    /* 8. garde : « Repartir au vert » ferme la session (et sa demande en attente) */
+    plusTard(1100);
+    W.reponses.push(brouillonJ('Bonjour', ''));
+    await dire(sid, 'envoie un mail à luc@club-hand.fr', { action: 'SEND', resource: 'EMAIL', target: 'luc@club-hand.fr' });
+    W.reponses.length = 0;
+    const fermee = await appel('/api/session/fermer', { sessionId: sid });
+    const q8 = await dire(sid, 'que je serai en retard');
+    await t('Q8', "garde : « Repartir au vert » : la session est fermée, sa demande en attente avec (SESSION_INCONNUE)", async () =>
+      ({ ok: fermee.ferme === true && q8.erreur === 'SESSION_INCONNUE' && !q8.aRetaper, info: JSON.stringify([fermee.ferme, q8.erreur]) }));
+    W.plans.length = 0; W.reponses.length = 0;
+  }
+
   /* @@SUITE@@ */
 
   performance.now = vraiPerf; Date.now = vraiNow;

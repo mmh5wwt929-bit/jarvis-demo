@@ -994,6 +994,9 @@ function emettreReformulation(s, a) {
 }
 function perimerCartes(s) {
   s.reformulations.clear();
+  /* [S109] une demande en attente ne survit pas a une carte perimee (le message qui
+   * perime les cartes l'a deja recue, une seule fois : voir /api/chat) */
+  s.demandeMail = null; s.questionCreation = null;
   /* [S68] la carte d'un vrai e-mail aussi ; [S71] son echange le dit */
   for (const c of s.brouillons.values()) completerEchange(c && c.memo, "carte abandonnée (la conversation a continué) : rien n'est parti");
   s.brouillons.clear();
@@ -2118,9 +2121,12 @@ async function brouillonDe(s, texte, cible, propres, o, verifier) {
       + ") : rien n'est préparé. Tu peux l'écrire toi-même : « envoie à nom@domaine.fr, objet : …, texte : … »." } };
     bt = r; redigePar = 'modele';
   }
-  if (!String(bt.texte || '').trim())
-    return { refus: { motif: 'CONTENU_ABSENT', reponse: "Que doit dire l'e-mail ? Redemande en une phrase, par exemple « envoie à " + lisible(cible, 80)
-      + " pour lui dire que l'entraînement est annulé ». Rien n'est préparé." } };
+  if (!String(bt.texte || '').trim()) {
+    /* [S109] v4.12.1 le message suivant complete seulement ce qui manque (l'adresse tapee est gardee) */
+    attendreMail(s, { type: 'contenu', texte, cible, tour: o && o.tour });
+    return { refus: { motif: 'CONTENU_ABSENT', reponse: "Que doit dire l'e-mail à " + lisible(cible, 80) + " ? Réponds seulement par ce qu'il doit dire, par exemple « que je serai en retard » : "
+      + "je garde l'adresse que tu as tapée, pour ton prochain message seulement (2 min). Rien n'est préparé." } };
+  }
   const v = verifier({ a: cible, objet: bt.objet, texte: bt.texte, liensPermis: GM.liensDe(propres) });
   if (!v.ok) return { refus: { motif: v.code, reponse: v.code === 'LIEN_NON_TAPE'
     ? "Le brouillon contient un lien que tu n'as pas écrit (« " + lisible(v.lien || '', 80) + " ») : rien n'est préparé. Un e-mail ne part qu'avec les liens que tu tapes toi-même."
@@ -2130,6 +2136,54 @@ async function brouillonDe(s, texte, cible, propres, o, verifier) {
     avertissements.push("Le brouillon mélange « tu » et « vous » : relis-le, ou redemande en précisant « en le tutoyant » ou « en le vouvoyant ».");
   return { brouillon: v.brouillon, redigePar, avertissements };
 }
+/* [S109] v4.12.1 — LA DEMANDE EN ATTENTE (vu en ligne le 7 oct : apres « Que doit dire
+ * l'e-mail ? », il fallait retaper verbe + adresse + contenu). Quand JARVIS pose une
+ * question pour completer une demande (« Que doit dire l'e-mail ? », « À qui ? » ;
+ * « Quel titre ? » et « À quelle heure ? » : s.questionCreation), le message SUIVANT
+ * complete seulement ce qui manque :
+ *  - ce qui est garde vient de la FRAPPE de la personne (la cible gardee est celle
+ *    qu'elle a tapee, jamais celle du modele ou d'un contenu lu) ; les deux messages
+ *    tapes sont relus ensemble par le serveur, la couche ne recoit que la frappe du
+ *    tour (aucune preuve ne survit a son tour : C3 inchangee) ;
+ *  - le message suivant seulement, 2 min au plus ; un message qui n'y repond pas
+ *    (nouveau verbe, autre adresse, question) l'annule, et le serveur le dit ;
+ *  - « Repartir au vert » (session fermee) et une carte perimee l'effacent. */
+const ATTENTE_MS = 2 * 60 * 1000;
+function attendreMail(s, d) {
+  if (!s) return;
+  s.demandeMail = { type: d.type, texte: String(d.texte || '').slice(0, 1500), cible: d.cible || null, action: d.action || 'SEND', tour: d.tour || 0, ts: Date.now() };
+}
+/* les adresses tapees, telles que tapees (la cible executee reste la chaine tapee [C4]) */
+const adressesBrutes = (propres) => [...new Set((String(propres).match(/[^\s<>()«»"';,]+@[^\s<>()«»"';,]+/g) || []).map(x => x.replace(/[.:!?]+$/, '')))].filter(adresseValide);
+const RE_CONTENU_REPONSE = /^\s*(que |qu['’]|pour (lui|leur) |de (lui|leur) |dis[- ]|demande[- ]|ecris|écris)/i;
+/* -> { texte, plan } si ce message complete la demande ; null sinon */
+function completerDemande(am, texte) {
+  const propres = separer(texte).propres;
+  if (!propres.trim() || V.renonce(texte) || demandeGerer(texte) || V.questionDate(texte, Date.now(), FUSEAU) || M.extraireSouvenir(texte)) return null;
+  const adresses = adressesBrutes(propres), types = V.demandesMultiples(texte).map(d => d.type);
+  const question = /\?\s*$/.test(propres.trim()) && !RE_CONTENU_REPONSE.test(propres);
+  if (question) return null;
+  if (am.type === 'contenu') {
+    if (adresses.length || types.some(t => t !== 'envoi')) return null;   /* autre adresse (ou toute la demande retapee), nouveau verbe */
+    return { texte: am.texte + '\n' + texte, plan: { action: 'SEND', resource: 'EMAIL', target: am.cible,
+      pourquoi: "réponse à « Que doit dire l'e-mail ? » : l'adresse tapée au message précédent" } };
+  }
+  if (am.type === 'destinataire') {
+    if (adresses.length !== 1 || types.length || propres.trim().split(/\s+/).length > 6) return null;
+    return { texte: am.texte + '\n' + texte, plan: { action: am.action, resource: ressourceDe(am.action), target: adresses[0],
+      pourquoi: "réponse à « À qui ? » : le verbe tapé au message précédent" } };
+  }
+  return null;
+}
+/* ce que dit le serveur quand une demande en attente tombe */
+function texteAnnulee(a, expiree) {
+  const quoi = a.mail ? (a.mail.type === 'contenu' ? "l'e-mail à " + lisible(a.mail.cible || '', 80) + " (il manquait ce qu'il doit dire)"
+      : "« " + lisible(a.mail.texte, 80) + " » (il manquait le destinataire)")
+    : "l'événement" + (a.creation.titre ? ' « ' + lisible(a.creation.titre, 60) + ' »' : '') + ' (il manquait ' + (a.creation.attendTitre ? 'le titre' : 'le jour ou l\'heure') + ')';
+  return 'Demande précédente annulée : ' + quoi + (expiree ? ' — plus de 2 minutes ont passé.' : " — ton message n'y répondait pas.")
+    + ' Rien n\'est préparé pour elle ; redemande-la en entier si tu la veux encore.';
+}
+
 /* [S71] ce que l'historique garde d'un brouillon : destinataire, objet, texte (tronque) */
 const resumeBrouillon = (quoi, b, par) => quoi + ' — À : ' + b.a + ' ; objet « ' + String(b.objet).slice(0, 120) + ' » ; texte : « '
   + String(b.texte).replace(/\s+/g, ' ').slice(0, 400) + (String(b.texte).length > 400 ? '…' : '') + ' »' + (par === 'modele' ? ' (rédigé par Claude)' : ' (tes mots)');
@@ -3031,7 +3085,11 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
 
   /* [S49] [S53] [S54] [S55] AVANT le modele : ce que le serveur sait lui-meme */
   let precedent = null, planReponse = null;
-  const question = s.questionCreation; s.questionCreation = null;   /* une seule reponse attendue */
+  /* [S109] les demandes en attente : remises par /api/chat (lues avant de perimer les cartes) */
+  const attentes = o.attentes || { creation: s.questionCreation, mail: s.demandeMail };
+  s.questionCreation = null; s.demandeMail = null;   /* une seule reponse attendue */
+  const enTemps = (x) => !!x && x.tour === (o.tour || 0) - 1 && Date.now() - x.ts < ATTENTE_MS;   /* le message suivant, 2 min au plus */
+  const question = attentes.creation;
   if (!confirme && !actionForcee) {
     /* [S82] v4.10 « qu'est-ce que j'ai a gerer aujourd'hui ? » : le SERVEUR repond, sans modele */
     if (demandeGerer(texte)) {
@@ -3084,7 +3142,7 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
     /* [S55] G reponse NUE (« 18h », « mercredi ») a « A quelle heure ? » /
      * « Quel jour ? » pose au message precedent : les deux messages tapes sont
      * relus ensemble par le serveur ; le titre est celui de la question */
-    const reponseNue = !planReponse && ECRITURE && question && question.tour === (o.tour || 0) - 1 && Date.now() - question.ts < 10 * 60 * 1000
+    const reponseNue = !planReponse && ECRITURE && enTemps(question)   /* [S109] 2 min (10 avant) */
         && !isup.presente && !V.creationDemandee(texte) && !V.renonce(texte) && texte.trim().split(/\s+/).length <= 8;
     if (reponseNue && question.serie) {   /* [S63] reponse a une question sur une serie */
       const maintenant = Date.now();
@@ -3101,6 +3159,12 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
     } else if (reponseNue && (V.resoudreHeures(texte).heures.length || V.resoudreDates(texte, Date.now(), FUSEAU).dates.length)) {
       precedent = question.texte;
       planReponse = { action: 'CREATE', resource: 'AGENDA_JARVIS', target: '||' + question.titre, pourquoi: 'réponse à la question du serveur' };
+    }
+    if (planReponse && precedent) o.attenteUtilisee = true;
+    /* [S109] la reponse a « Que doit dire l'e-mail ? » / « À qui ? » : les deux messages tapes, relus ensemble */
+    if (!planReponse && enTemps(attentes.mail)) {
+      const c = completerDemande(attentes.mail, texte);
+      if (c) { texte = c.texte; planReponse = c.plan; o.attenteUtilisee = true; }
     }
   }
 
@@ -3207,6 +3271,12 @@ async function messageGouverne(sessionId, texte, actionForcee, cibleForcee, conf
    * personne n'a pas voulue (verbe venu d'un contenu lu) garde son refus et
    * ses alertes ; on ne lui demande jamais « a qui ? » pour elle. */
   const refusDest = destinataireRefuse(acte, plan.target, plan.manuel ? null : texte, voix ? 'voix' : 'clavier');   /* [S41] [S47] */
+  /* [S109] « À qui ? » : le verbe tape est garde pour le message suivant (2 min), jamais une cible */
+  if (refusDest && refusDest.motif === 'DESTINATAIRE_MANQUANT' && !plan.manuel && !confirme && !actionForcee) {
+    attendreMail(s, { type: 'destinataire', texte, action: acte, tour: o.tour });
+    refusDest.texte = "À qui ? Je n'ai pas de destinataire, donc rien n'a été préparé. Réponds seulement par l'adresse e-mail complète (par exemple « nom@exemple.fr ») : "
+      + 'je garde ta demande pour ton prochain message seulement (2 min).';
+  }
   if (refusDest) {
     noterVerdict(s, { decide: 'REFUSE', action: acte, target: propre(plan.target, 80), motif: refusDest.motif });
     memoriser(s, sessionId, texte, refusDest.texte);
@@ -4099,6 +4169,7 @@ const serveur = http.createServer((req, res) => {
       noterMasque(sc, b);   /* [S101] « qu'est-ce que j'ai à gérer ? » tapé : les points marqués restent masqués */
       const avaitProposition = [...sc.propositions.values()].some(p => p && p.etat === 'PROPOSEE');   /* [S49] « annule » juste apres une carte */
       const enCours = [...sc.enAttente.values()].filter(a => a && !a.annule);
+      const attentes = { creation: sc.questionCreation || null, mail: sc.demandeMail || null };   /* [S109] avant de perimer */
       perimerCartes(sc);   /* [S40] un nouveau message : les anciennes cartes ne valent plus */
       const annulees = enCours.filter(a => a.perime).map(a => ({ action: a.action, target: a.target }));   /* [S49] */
       const tour = ++sc.tour;   /* [S43] */
@@ -4112,7 +4183,14 @@ const serveur = http.createServer((req, res) => {
       /* [S104] un passage colle ou cite (vigilance) : un contenu recu, pas tes mots */
       const citesM = separer(message).cites;
       if (citesM) noterVues(sc, citesM, { source: 'collé', libelle: 'texte collé ou cité dans ton message' });
-      const dec = await messageGouverne(String(b.sessionId), message, b.action, b.cible, undefined, { canal: b.canal === 'voix' ? 'voix' : 'clavier', tour, avaitProposition, annulees });
+      const og = { canal: b.canal === 'voix' ? 'voix' : 'clavier', tour, avaitProposition, annulees, attentes };
+      const dec = await messageGouverne(String(b.sessionId), message, b.action, b.cible, undefined, og);
+      /* [S109] une demande en attente qui n'a pas servi : annulee, et c'est dit */
+      const at = attentes.mail ? { mail: attentes.mail } : attentes.creation ? { creation: attentes.creation } : null;
+      if (at && !og.attenteUtilisee && dec && dec.etape !== 'DEPASSE') {
+        const x = at.mail || at.creation;
+        dec.demandeAnnulee = texteAnnulee(at, x.tour === tour - 1 && Date.now() - x.ts >= ATTENTE_MS);
+      }
       /* [S74] une action a la fois : ce qui n'est PAS fait est dit (et garde dans l'historique) */
       const nf = !b.action ? nonFaitDe(message, dec) : null;
       if (nf) { dec.nonFait = nf; completerEchange(dernierEchange(sc, message), nf.texte); }

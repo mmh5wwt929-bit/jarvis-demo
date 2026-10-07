@@ -1727,6 +1727,8 @@ async function envoyer() {
     try { d = await api('/api/chat', corps); } finally { if (lecture) lecture.remove(); }
     if (d && d.etape === 'DEBIT' && limiteAtteinte(d)) { $('envoyer').disabled = false; return; }
     if (d && d.etape === 'MEMOIRE' && d.decide === 'AUTORISE' && d.souvenir) Memoire.ajouter(d.souvenir);
+    /* [S109] v4.12.1 la demande en attente qui tombe (message sans rapport, 2 min) : dite par le serveur */
+    if (d && typeof d.demandeAnnulee === 'string' && d.demandeAnnulee) tour('JARVIS', d.demandeAnnulee, false).classList.add('non-fait');
     majEtat(d); rendreDecision(d);
     /* [S74] v4.9.1 une action par message : ce qui n'est PAS fait est dit par JARVIS */
     if (d && d.nonFait && d.nonFait.texte) tour('JARVIS', d.nonFait.texte, false).classList.add('non-fait');
