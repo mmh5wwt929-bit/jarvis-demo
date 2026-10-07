@@ -51,5 +51,14 @@ Vu : dans l'appli Claude, on ne distingue pas un refus de Claude lui-même d'une
 - Le marqueur ne contient jamais de contenu lu (pas d'extrait de mail) ; l'adresse refusée seulement si la personne l'a vue (elle vient de Claude).
 - Tests : chaque verdict a son marqueur ; marqueur présent même en erreur ; aucun extrait dans le marqueur.
 
+## 10. Onglet « Contrôle » : Claude fait / JARVIS protège (instance privée)
+Voulu par Alsid pour la vidéo : voir d'un coup d'œil ce que Claude demande et ce que JARVIS en fait. Maquette : artefact « JARVIS — salle de contrôle », écran « Coupé en deux ».
+- 4e onglet **Contrôle** (avant Aujourd'hui) : un **noyau** d'état en haut (vert « veille » / orange « attend ton geste » / rouge « coupé », avec le mot écrit, jamais la couleur seule), puis deux colonnes alignées ligne par ligne : à gauche **CLAUDE FAIT** (l'appel du connecteur : lire, proposer un mail à <adresse>, proposer un événement <jour, heures>), à droite **JARVIS PROTÈGE** (verdict : ✓ lu / ◐ attend ton geste / ⛔ coupé + raison en mots simples + code de règle). Sous une coupure due à l'alerte B : l'extrait d'origine (même carte que l'alerte).
+- Source : les traces déjà tenues par le serveur (`tracerMcp`, propositions, verdicts), servies par une route derrière la clé d'accès ; 50 lignes max, en mémoire (perdu au réveil de Render, et la page le dit). Rafraîchi toutes les 5 s quand l'onglet est ouvert.
+- Honnêteté : jamais de ligne « Claude a refusé » (JARVIS ne le voit pas) ; une phrase fixe le dit en bas. Aucun contenu de mail hors l'extrait d'alerte ; aucune clé, aucun jeton.
+- Look : sombre, noyau à anneaux animés (désactivés si « réduire les animations »), polices Chakra Petch / IBM Plex (Google Fonts) — CSP à adapter seulement si nécessaire, sinon polices système.
+- Démo publique : inchangée (pas d'onglet Contrôle).
+- Tests : une proposition hors liste → ligne ⛔ avec extrait ; une proposition dans la liste → ◐ puis ✓ après Face ID ; lecture → ✓ ; route sans clé → 401 ; démo → absente ; aucun extrait hors alerte.
+
 ## Livrables
 `server.js`, `jarvis-analyse.js`, `jarvis-verite.js` si touché, `jarvis-mcp.js` si touché, `index.html`, `MANIFESTE.json`, `tests-v4121.js`, `CLAUDE.md` (état), `PROGRESSION-v4.12.1.md` (tests en ligne : les cas exacts du 7 oct). Une seule PR, CI verte. Ne pas fusionner.
