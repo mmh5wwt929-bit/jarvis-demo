@@ -2398,6 +2398,7 @@ async function terminerEnvoiReel(s, id, jeton, att, r) {
   else env = att.mail && att.mail.filId ? await MAIL_ENVOI.envoyerReponse(att.permis, att.mail) : await MAIL_ENVOI.envoyer(att.permis, att.mail);   /* [S81] */
   g.constaterEffet(tx, r.jetonEffet, { ok: env.ok, code: env.code, preuve: env.preuve || null });   /* [F1] (la verification [S81] est dans la reponse et l'historique) */
   if (env.ok) { s.gerer = null; s.mailsGerer = null; s.pointDuJour = null; }   /* [S101] ta reponse retire ses points : relire */
+  if (PROPOSITIONS_CLAUDE.mail && PROPOSITIONS_CLAUDE.mail.brouillon === att.mail) PROPOSITIONS_CLAUDE.mail.etat = env.ok ? 'ENVOYEE' : env.code === 'RESULTAT_INCERTAIN' ? 'INCERTAIN' : 'ECHEC';   /* [S115] « Contrôle » : ✓ envoyé */
   noterVerdict(s, { decide: env.ok ? 'EXECUTE' : 'REFUSE', action: 'SEND', target: att.target, motif: env.ok ? 'ENVOYE' : env.code });
   const b = att.mail;
   /* [S81] une reponse : le resultat VERIFIE chez Google (Envoyes, meme conversation, destinataire) */
@@ -2877,9 +2878,81 @@ function etatProposition(p) {
 function proposerClaude(type, contenu) {
   const avant = PROPOSITIONS_CLAUDE[type];
   const remplace = !!(avant && etatProposition(avant) === 'EN_ATTENTE');   /* l'ancienne sort du seul emplacement : plus confirmable */
+  if (remplace) avant.etat = 'REMPLACEE';   /* [S115] dit dans « Contrôle » (elle n'etait deja plus confirmable) */
   const p = { id: 'pc_' + crypto.randomBytes(12).toString('hex'), type, nee: Date.now(), etat: 'EN_ATTENTE', remplace, essais: 0, ...contenu };
   PROPOSITIONS_CLAUDE[type] = p;
   return p;
+}
+
+/* [S115] v4.12.1 — L'ONGLET « CONTRÔLE » (instance privee) : ce que Claude demande (a gauche),
+ * ce que JARVIS en fait (a droite), ligne a ligne. Voulu par Alsid pour la video.
+ *  - Source : les appels du connecteur deja traces (outil, verdict, raison, codes, heure) et
+ *    l'etat VIVANT des propositions (◐ attend ton geste -> ✓ envoyé apres Face ID, ✓ créé) ;
+ *    50 lignes, EN MEMOIRE (perdues au reveil de Render, et la page le dit) ; derriere la cle
+ *    d'acces ; jamais sur la demo (404).
+ *  - Une ligne garde ce que Claude a DEMANDE (lire ; proposer un mail a <adresse de Claude> ;
+ *    proposer un evenement <jour, heures recalcules>) : jamais un contenu de mail, une cle, un
+ *    jeton. L'extrait d'une alerte B n'est pas dans la ligne : il est relu dans le magasin des
+ *    alertes au moment de servir (meme carte que l'alerte).
+ *  - Jamais « Claude a refusé » : JARVIS ne le voit pas (la page le dit en bas). */
+const CONTROLE = [], CONTROLE_MAX = 50;
+let nControle = 0;
+const PROPOSITIONS_VUES = new Map();   /* id -> proposition (les 50 dernieres) : leur etat vivant */
+function noterControle(l) {
+  CONTROLE.push({ n: ++nControle, ts: Date.now(), ...l });
+  while (CONTROLE.length > CONTROLE_MAX) CONTROLE.shift();
+  if (l.proposition) { PROPOSITIONS_VUES.set(l.proposition.id, l.proposition); while (PROPOSITIONS_VUES.size > CONTROLE_MAX) PROPOSITIONS_VUES.delete(PROPOSITIONS_VUES.keys().next().value); }
+}
+/* ce que Claude a demande, en mots simples (ses arguments, recalcules par le serveur ; jamais un contenu) */
+function demandeClaude(outil, args) {
+  if (outil === 'lire_mails') return 'lire les ' + ((args && args.nombre) || 5) + ' derniers e-mails';
+  if (outil === 'proposer_mail') return 'proposer un mail à ' + (args && adresseValide(args.a) ? cleMail(args.a) : '(adresse invalide)');
+  if (outil === 'proposer_evenement') {
+    const d = MCP.dateIso(args && args.debut), f = MCP.dateIso(args && args.fin);
+    if (d == null || f == null) return 'proposer un événement (dates illisibles)';
+    return 'proposer un événement ' + V.libelle(V.local(d, FUSEAU).jour) + ', ' + horaire(d) + ' → ' + horaire(f);
+  }
+  return 'appeler « ' + propre(outil, 40) + ' »';
+}
+/* l'etat vivant d'une ligne « attend ton geste » */
+const ETATS_PROPOSITION = {
+  EN_ATTENTE: { verdict: 'attend', jarvis: '◐ attend ton geste' }, CONFIRMEE: { verdict: 'attend', jarvis: '◐ attend ton geste', raison: 'adresse retapée : il reste 10 s puis Face ID' },
+  EN_COURS: { verdict: 'attend', jarvis: '◐ attend ton geste' },
+  ENVOYEE: { verdict: 'ok', jarvis: '✓ envoyé', raison: 'après ton adresse retapée, 10 s et Face ID' }, CREEE: { verdict: 'ok', jarvis: '✓ créé', raison: 'après ton toucher sur « Créer »' },
+  REFUSEE: { verdict: 'fin', jarvis: '— refusée par toi', raison: "rien n'est envoyé ni écrit" }, PERIMEE: { verdict: 'fin', jarvis: '— périmée', raison: "30 min sans geste : rien n'est envoyé ni écrit" },
+  REMPLACEE: { verdict: 'fin', jarvis: '— remplacée', raison: "une proposition plus récente l'a remplacée" }, FERMEE: { verdict: 'fin', jarvis: '— fermée', raison: 'trois adresses retapées fausses' },
+  NON_ENVOYEE: { verdict: 'fin', jarvis: '— pas envoyée', raison: "adresse retapée, mais l'envoi n'a pas été confirmé (annulé ou périmé)" },
+  ECHEC: { verdict: 'fin', jarvis: '— pas partie', raison: "Face ID donné, mais Google n'a pas pris l'envoi" },
+  INCERTAIN: { verdict: 'fin', jarvis: '— résultat incertain', raison: "Google n'a pas répondu clairement : regarde les Envoyés" }
+};
+function vueControle() {
+  const lignes = CONTROLE.slice().reverse().map((l) => {
+    const p = l.proposition ? PROPOSITIONS_VUES.get(l.proposition.id) : null;
+    /* adresse retapee, mais rien de confirme au-dela de la vie d'une autorisation (5 min) + la fenetre : « pas envoyée » */
+    if (p && p.etat === 'CONFIRMEE' && Date.now() - (p.confirmeeA || 0) > 6 * 60 * 1000) p.etat = 'NON_ENVOYEE';
+    const e = p ? ETATS_PROPOSITION[etatProposition(p)] || ETATS_PROPOSITION.EN_ATTENTE : null;
+    const verdict = e ? e.verdict : l.type;
+    const al = l.adresseVue ? alerteAdresse(null, l.adresseVue) : null;   /* [S104] relue dans le magasin des alertes */
+    return { n: l.n, heure: horaire(l.ts) + ':' + String(new Date(l.ts).getUTCSeconds()).padStart(2, '0'), outil: l.outil, claude: l.claude,
+      verdict, jarvis: e ? e.jarvis : l.type === 'ok' ? '✓ lu' : l.type === 'attend' ? '◐ attend ton geste' : '⛔ coupé',
+      raison: (e && e.raison) || l.raison, codes: l.codes, ...(al ? { alerte: al } : {}) };
+  });
+  const attend = lignes.some(x => x.verdict === 'attend');
+  const dernier = CONTROLE[CONTROLE.length - 1];
+  const coupe = !attend && dernier && dernier.type === 'coupe' && Date.now() - dernier.ts < 10 * 60 * 1000;
+  const etat = attend ? 'attend' : coupe ? 'coupe' : 'veille';
+  return { etat, mot: { veille: 'VEILLE', attend: 'ATTEND TON GESTE', coupe: 'COUPÉ' }[etat], dernier: nControle,
+    connecteur: { etat: etatMcp(), appelsHeure: MCP_GARDE.appelsHeure() }, lignes,
+    memoire: "En mémoire seulement : " + CONTROLE_MAX + " lignes au plus, effacées quand Render s'endort ou redémarre.",
+    honnetete: "JARVIS ne voit que ce que Claude lui demande : un refus de Claude lui-même n'arrive jamais ici." };
+}
+/* la page interroge toutes les 5 s quand l'onglet est ouvert : un seau a part (pas celui des actions) */
+const seauxControle = new Map();
+function controleAutorise(ip) {
+  const now = Date.now(), x = seauxControle.get(ip);
+  if (!x || now - x.fenetre > 3600000) { seauxControle.set(ip, { compte: 1, fenetre: now }); if (seauxControle.size > 5000) seauxControle.delete(seauxControle.keys().next().value); return true; }
+  if (x.compte >= 1500) return false;
+  x.compte += 1; return true;
 }
 function nonRetenueClaude(x) {
   NON_RETENUES_CLAUDE.push({ ...x, nee: Date.now() });
@@ -2953,7 +3026,7 @@ function mcpProposerMail(args) {
   const v = MAIL_ENVOI.verifier({ a, objet: args.objet, texte: args.texte, liensPermis: [] });
   if (!v.ok) return refus(v.code, 'Proposition non retenue : ' + (v.code === 'LIEN_NON_TAPE' ? "elle contient un lien qu'Alsid n'a pas tapé" : erreurMail(v.code)) + ". Rien n'est enregistré.");
   const p = proposerClaude('mail', { brouillon: v.brouillon });
-  return { verdict: 'PROPOSEE', raison: p.remplace ? 'REMPLACE_LA_PRECEDENTE' : null, codes: ['PROPOSEE'].concat(p.remplace ? ['REMPLACE_LA_PRECEDENTE'] : []),
+  return { verdict: 'PROPOSEE', raison: p.remplace ? 'REMPLACE_LA_PRECEDENTE' : null, proposition: p, codes: ['PROPOSEE'].concat(p.remplace ? ['REMPLACE_LA_PRECEDENTE'] : []),
     dit: "rien n'est envoyé : dans JARVIS (Aujourd'hui), Alsid retape l'adresse, attend 10 s, puis confirme avec Face ID",
     texte: TEXTE_PROPOSITION_MAIL + (p.remplace ? ' (Elle remplace la proposition précédente, désormais périmée.)' : '') };
 }
@@ -2985,7 +3058,7 @@ async function mcpProposerEvenement(args, ctx = {}) {
   if (ctx.expire) return { erreur: true, verdict: 'DELAI', raison: 'DELAI_DEPASSE', dit: "délai dépassé : rien n'est enregistré", texte: "Délai dépassé : rien n'est enregistré." };
   /* le serveur garde le QUAND (jour, heure, duree) ; le titre ne nait qu'a la carte (le sien, ou celui que tu tapes) */
   const p = proposerClaude('evenement', { quand: v.cle.split('|').slice(0, 2).join('|'), cles: new Set(), suggestion, jour, debut, fin, conflits, nonVerifies });
-  return { verdict: 'PROPOSEE', raison: nonVerifies ? 'CONFLITS_NON_VERIFIES' : conflits.length ? 'CONFLIT' : null, plancher: plancherDe(s),
+  return { verdict: 'PROPOSEE', raison: nonVerifies ? 'CONFLITS_NON_VERIFIES' : conflits.length ? 'CONFLIT' : null, plancher: plancherDe(s), proposition: p,
     codes: ['PROPOSEE'].concat(nonVerifies ? ['CONFLITS_NON_VERIFIES'] : conflits.length ? ['CONFLIT'] : [], p.remplace ? ['REMPLACE_LA_PRECEDENTE'] : []),
     dit: "rien n'est écrit : dans JARVIS (Aujourd'hui), Alsid touche « Créer »" + (nonVerifies ? ' ; conflits non vérifiés' : conflits.length ? ' ; ' + conflits.length + ' conflit' + (conflits.length > 1 ? 's' : '') + ' dans l\'agenda' : ''),
     texte: 'Proposition enregistrée dans JARVIS : ' + jour + ', de ' + debut + ' à ' + fin + ', titre « ' + TITRE_SERVEUR + " » (fait par JARVIS ; ta suggestion est seulement affichée, Alsid tape son titre s'il le veut). "
@@ -3005,8 +3078,11 @@ async function traiterMcp(m) {
   const va = MCP.validerArguments(params.name, params.arguments);
   if (!va.ok) { const code = va.inconnu ? 'OUTIL_INCONNU' : 'ARGUMENTS_INVALIDES';
     tracerMcp(typeof params.name === 'string' ? params.name : '?', 'REFUSE', code);
+    noterControle({ outil: typeof params.name === 'string' ? propre(params.name, 40) : '?', claude: va.inconnu ? 'appeler un outil inconnu' : demandeClaude(params.name, {}) + ' (arguments invalides)',
+      type: 'coupe', raison: va.inconnu ? "outil inconnu : rien n'est fait" : "arguments invalides : rien n'est fait", codes: [code] });   /* [S115] */
     return { status: 200, corps: MCP.erreur(id, MCP.ERR.PARAMS, MCP.marqueur('coupe', va.inconnu ? "outil inconnu : rien n'est fait" : "arguments invalides : rien n'est fait", [code]) + '\n' + va.message) }; }   /* [S114] */
   if (!MCP_GARDE.appel()) { tracerMcp(params.name, 'REFUSE', 'PLAFOND_HEURE');
+    noterControle({ outil: params.name, claude: demandeClaude(params.name, va.args), type: 'coupe', raison: "plafond d'appels de l'heure atteint : rien n'est fait", codes: ['PLAFOND_HEURE'] });   /* [S115] */
     return { status: 200, corps: MCP.reponse(id, MCP.texte(MCP.marqueur('coupe', 'plafond de ' + MCP.LIMITES.appelsHeure + " appels par heure atteint : rien n'est fait", ['PLAFOND_HEURE'])
       + '\n' + "Plafond du connecteur atteint (" + MCP.LIMITES.appelsHeure + " appels par heure) : réessaie plus tard. Rien n'a été fait.", true)) }; }
   let r;
@@ -3021,7 +3097,11 @@ async function traiterMcp(m) {
   tracerMcp(params.name, r.verdict, r.raison, r.plancher);
   /* [S114] v4.12.1 le marqueur fixe, ecrit par le serveur, en tete de CHAQUE reponse d'outil */
   const type = r.verdict === 'AUTORISE' ? 'ok' : r.verdict === 'PROPOSEE' ? 'attend' : 'coupe';
-  return { status: 200, corps: MCP.reponse(id, MCP.texte(MCP.marqueur(type, r.dit, r.codes || [r.raison || r.verdict]) + '\n' + r.texte, !!r.erreur)) };
+  const codes = r.codes || [r.raison || r.verdict];
+  /* [S115] la ligne de « Contrôle » : ce que Claude demande, ce que JARVIS en fait (jamais un contenu) */
+  noterControle({ outil: params.name, claude: demandeClaude(params.name, va.args), type, raison: String(r.dit || '').slice(0, 200), codes: codes.filter(Boolean).map(x => propre(x, 40)),
+    ...(r.proposition ? { proposition: r.proposition } : {}), ...(codes.includes('ADRESSE_VUE') && adresseValide(va.args.a) ? { adresseVue: cleMail(va.args.a) } : {}) });
+  return { status: 200, corps: MCP.reponse(id, MCP.texte(MCP.marqueur(type, r.dit, codes) + '\n' + r.texte, !!r.erreur)) };
 }
 /* la route : fermee par defaut (404), origine, cle (comptee globalement), corps borne */
 function routeMcp(req, res) {
@@ -3635,6 +3715,12 @@ const serveur = http.createServer((req, res) => {
   /* [S14] toute route qui n'appelle pas Claude passe par le seau des actions.
    * /api/session a deja sa limite ; /api/chat et /api/finaliser ont le budget IA
    * (et « retiens que », qui passe par /api/chat, est compte ici plus bas). */
+  /* [S115] v4.12.1 « Contrôle » : instance privee seulement (derriere la cle, ci-dessus) ; son propre seau (la page interroge toutes les 5 s) */
+  if (u.pathname === '/api/controle' && req.method === 'GET') {
+    if (!CLE_ACCES || MCP_CONFIG.etat === 'inactif') { res.writeHead(404); return res.end('Introuvable'); }
+    if (!controleAutorise(ipDe(req))) return json(429, { erreur: 'LIMITE_CONTROLE', reessayerDans: 60 });
+    return json(200, vueControle());
+  }
   if (u.pathname.startsWith('/api/') && !['/api/session', '/api/chat', '/api/finaliser'].includes(u.pathname)) {
     const a = actionAutorisee(ipDe(req));
     if (!a.ok) return json(429, { erreur: a.motif, motif: a.motif, reessayerDans: a.reessayerDans });
@@ -4115,7 +4201,7 @@ const serveur = http.createServer((req, res) => {
         return json(400, { erreur: 'ADRESSE_DIFFERENTE', message: "Ce n'est pas l'adresse de la proposition : rien n'est préparé. " + (p.essais >= 3 ? 'Trois essais : la proposition est fermée.' : 'Retape-la exactement.') });
       }
       if (!MAIL_ENVOI.autorise(adresse)) return json(400, { erreur: 'HORS_LISTE', message: "Adresse hors de ta liste autorisée : rien n'est préparé." });
-      p.etat = 'CONFIRMEE';   /* usage unique, AVANT toute attente */
+      p.etat = 'CONFIRMEE'; p.confirmeeA = Date.now();   /* usage unique, AVANT toute attente ; [S115] l'heure, pour « Contrôle » */
       /* le texte vient de Claude : un contenu que JARVIS n'a pas vu naitre (jamais une cible : l'adresse est TA frappe) */
       s.g.ingerer({ origine: 'MODEL_INFERRED', source: 'claude:proposition', resume: 'e-mail rédigé par Claude (connecteur), objet « ' + String(p.brouillon.objet).slice(0, 80) + ' »' });
       const rf = s.entree.reformuler('SEND', adresse);   /* la frappe de la personne, par sa capacite */

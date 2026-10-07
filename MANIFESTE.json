@@ -1,10 +1,10 @@
 {
   "format": 1,
   "passerelle": "v4.12.1",
-  "empreinte": "df3e9072c34d",
+  "empreinte": "499df0614797",
   "fichiers": {
-    "server.js": "f6bf946810d93057bddb549bdc4890ea07453ca52ba66e6de52b0893d9b50ba4",
-    "index.html": "ace7186a43854476fc9bb3355f5f5613ef741d2c0b151b56535446e1360fad11",
+    "server.js": "7d8b66a8d5bcc44147d22302d1d2aacf35f3e44f15daeeea723bd2639a4e7744",
+    "index.html": "3fe7cb507ee39a8f91e1036c752f0c2c2eaaf65842f3913247793301d68ff812",
     "package.json": "570aeab2c5dd22edfcaab8f1c8e97c273d60a3d813fd5cc9c2d8adc35964845d",
     "jarvis-5.28.3.js": "0eb75bec3cdfab34fbc44f7c0360f6c2357451489702fc14c347890b35c58350",
     "jarvis-plus-5.29.js": "5d5a15289b5c120f13ddf8f2c6c076f4a20d03058d584f399cfb34a53aedb331",
