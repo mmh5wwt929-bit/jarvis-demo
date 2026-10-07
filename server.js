@@ -2268,13 +2268,21 @@ async function preparerMailto(s, sessionId, texte, plan, avant, o = {}, extra = 
   if (!adressesTapees(propres).includes(cleMail(cible)))
     return dire("Pour préparer un e-mail, écris toi-même l'adresse dans ta demande (je ne la prends ni dans un e-mail lu, ni dans un souvenir). Rien n'est préparé.",
       { decide: 'SANS_OBJET', etape: 'MAILTO', motif: 'ADRESSE_NON_TAPEE' });
+  /* [S108] v4.12.1 L'ADRESSE D'ABORD (vu en ligne le 7 oct : deux fois « Que doit dire
+   * l'e-mail ? » avant « hors liste ») : adresse valide -> liste -> alerte -> contenu.
+   * [S104] adresse vue dans un contenu recu : la carte d'alerte d'abord ; le lien
+   * n'est donne qu'apres « J'ai vérifié autrement » ; jamais une question sur le contenu. */
+  const al = alerteAdresse(s, cible);
+  const horsListe = extra.horsListe ? "« " + lisible(cible, 80) + " » n'est pas dans ta liste d'adresses autorisées : pas d'envoi par le compte d'essai (Face ID n'y changerait rien). " : '';
+  if (al) noterVerdict(s, { decide: 'SANS_OBJET', action: 'SEND', target: 'adresse:' + al.empreinte, motif: 'ALERTE_ADRESSE_VUE' });
   const b = await brouillonDe(s, texte, cible, propres, o, (c) => GM.verifierContenu(c, [], { listeFermee: false }));
   if (b.depasse) return reponseDepassee(s, plan);
-  if (b.refus) return dire(b.refus.reponse, { decide: 'SANS_OBJET', etape: 'MAILTO', motif: b.refus.motif });
+  if (b.refus && al)
+    return dire(horsListe + "Alerte : cette adresse apparaît dans un contenu reçu (" + al.origine + "), pas dans une de tes demandes. Vérifie-la par un autre moyen (téléphone, adresse déjà connue) : rien n'est préparé.",
+      { decide: 'SANS_OBJET', etape: 'MAILTO', motif: 'ALERTE_ADRESSE_VUE', alerte: al });
+  if (b.refus) return dire(horsListe + (horsListe ? "Je peux le préparer pour « Ouvrir dans Mail » (c'est toi qui l'envoies). " : '') + b.refus.reponse, { decide: 'SANS_OBJET', etape: 'MAILTO', motif: b.refus.motif });
   const lien = GM.mailto(b.brouillon);
   if (!lien) return dire("Je n'ai pas pu préparer le lien vers Mail : rien n'est préparé.", { decide: 'SANS_OBJET', etape: 'MAILTO', motif: 'LIEN_MAILTO_IMPOSSIBLE' });
-  /* [S104] adresse vue dans un contenu recu : la carte d'alerte d'abord ; le lien n'est donne qu'apres « J'ai vérifié autrement » */
-  const al = alerteAdresse(s, cible);
   const avertissements = (s.adressesLues.has(cleMail(cible)) ? [ALERTE_ADRESSE_LUE] : []).concat(b.avertissements);
   let jetonAlerte = null;
   if (al) {
@@ -2282,10 +2290,9 @@ async function preparerMailto(s, sessionId, texte, plan, avant, o = {}, extra = 
     s.mailtoRetenus = s.mailtoRetenus || new Map();
     s.mailtoRetenus.set(jetonAlerte, { lien, empreinte: al.empreinte, nee: Date.now() });
     while (s.mailtoRetenus.size > 4) s.mailtoRetenus.delete(s.mailtoRetenus.keys().next().value);
-    noterVerdict(s, { decide: 'SANS_OBJET', action: 'SEND', target: 'adresse:' + al.empreinte, motif: 'ALERTE_ADRESSE_VUE' });
   }
   noterVerdict(s, { decide: 'PREPARE', action: 'SEND', target: propre(cible, 80), motif: 'OUVRIR_DANS_MAIL' });
-  const reponse = (extra.horsListe ? "« " + lisible(cible, 80) + " » n'est pas dans ta liste d'adresses autorisées : pas d'envoi par le compte d'essai (Face ID n'y changerait rien). " : '')
+  const reponse = horsListe
     + "E-mail préparé : relis-le, puis touche « Ouvrir dans Mail » ; c'est toi qui l'envoies depuis ton application. JARVIS n'envoie rien et ne saura pas s'il est parti.";
   memoriser(s, sessionId, texte, resumeBrouillon("E-mail préparé pour « Ouvrir dans Mail » (c'est la personne qui l'envoie ; JARVIS n'envoie rien)", b.brouillon, b.redigePar), 'serveur', 700);
   return base({ decide: 'PREPARE', etape: 'MAIL_OUVRIR', motif: null, classe: 'REVERSIBLE', reponse,
@@ -2635,7 +2642,6 @@ async function preparerReponse(s, sessionId, jeton, consigne, o = {}) {
   const c = String(consigne || '').trim().slice(0, LIMITES_GERER.consigneMax);
   const refus = (code, message) => ({ ok: false, code, message });
   if (!f0) return refus('CONVERSATION_INCONNUE', "Cette conversation n'est plus dans la session : redemande « qu'est-ce que j'ai à gérer ? ».");
-  if (!c) return refus('CONSIGNE_VIDE', 'Écris ce que tu veux répondre (par exemple « d\'accord pour samedi 10h »).');
   /* [S85] toute la conversation (chaque fil relu, gouverne) ; un fil manquant : rien n'est prepare */
   const lu = await lireGroupe(s, f0);
   if (!lu.ok || !lu.complet) return refus(lu.code || 'FIL_INCOMPLET', 'Conversation non relue ' + (lu.ok ? 'en entier' : ': ' + erreurLecture(lu.code || 'FIL_INTROUVABLE')) + ". Rien n'est préparé.");
@@ -2643,6 +2649,8 @@ async function preparerReponse(s, sessionId, jeton, consigne, o = {}) {
   /* la reponse va au DERNIER message d'un autre de la conversation, dans SON fil */
   const vise = f.messages.slice().reverse().find(m => !m.moi && m.messageId && adresseValide(m.de.adresse));
   if (!vise) return refus('PERSONNE_A_QUI_REPONDRE', "Dans cette conversation, aucun message d'un autre à qui répondre (ou identifiant de message absent). Rien n'est préparé.");
+  /* [S108] le destinataire d'abord (lu dans « De »), le contenu ensuite */
+  if (!c) return refus('CONSIGNE_VIDE', 'Écris ce que tu veux répondre (par exemple « d\'accord pour samedi 10h »).');
   const a = vise.de.adresse, filVise = vise.filId || f.id, objetN = AN.objetNormalise(f.objet) || f.objet;
   const objet = 'Re: ' + (objetN || '(sans objet)');   /* [S85] jamais « Re: Re : Re: … » */
   /* la conversation entre dans le contexte du MODELE : c'est un contenu externe (G1) */
