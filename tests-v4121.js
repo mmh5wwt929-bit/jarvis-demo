@@ -714,6 +714,34 @@ https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts
          info: filV.slice(-220) }));
   } else await t('U0', 'jsdom absent : pas de test de page', async () => ({ ok: false }));
 
+  /* ============================ S [S113] LE CONNECTEUR : AJOUT PLUS SIMPLE ============================ */
+  {
+    const inst = await fils({ JARVIS_CLE_ACCES: CLE, JARVIS_CLE_MCP: CLE_MCP });
+    const brut = async (entetes) => { const r = await fetch(inst.base + '/mcp', { method: 'POST', signal: AbortSignal.timeout(8000),
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', ...entetes }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }) });
+      return { status: r.status, www: r.headers.get('www-authenticate') }; };
+    const sondes = [];
+    for (let i = 0; i < 30; i++) sondes.push(await brut({}));
+    const ok1 = await brut({ Authorization: 'Bearer ' + CLE_MCP });
+    const h1 = inst.h ? await inst.req('GET', '/api/health') : {};
+    await t('S1', "30 sondes SANS en-tête Authorization (l'ajout dans Claude) : 401, jamais « WWW-Authenticate » (pas d'OAuth proposé), non comptées : le connecteur reste ouvert", async () =>
+      ({ ok: !!inst.h && sondes.every(x => x.status === 401 && x.www === null) && ok1.status === 200 && (h1.mcp || {}).etat === 'actif',
+         info: JSON.stringify([sondes[0], ok1.status, (h1.mcp || {}).etat]) }));
+    inst.arreter();
+    /* une autre instance (neuve) : les clés fausses comptent toujours */
+    const inst2 = await fils({ JARVIS_CLE_ACCES: CLE, JARVIS_CLE_MCP: CLE_MCP });
+    const brut2 = async (entetes) => { const r = await fetch(inst2.base + '/mcp', { method: 'POST', signal: AbortSignal.timeout(8000),
+      headers: { 'Content-Type': 'application/json', ...entetes }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }) });
+      return { status: r.status }; };
+    const fausses = [];
+    for (let i = 0; i < 20; i++) fausses.push(await brut2({ Authorization: 'Bearer ' + CLE_MCP.slice(0, -2) + 'zz' }));
+    const apres = await brut2({ Authorization: 'Bearer ' + CLE_MCP });
+    const h2 = inst2.h ? await inst2.req('GET', '/api/health') : {};
+    inst2.arreter();
+    await t('S2', "garde : 20 clés PRÉSENTES et fausses : fermé 1 h (503, même avec la bonne clé), /health dit « ferme »", async () =>
+      ({ ok: !!inst2.h && fausses.every(x => x.status === 401) && apres.status === 503 && (h2.mcp || {}).etat === 'ferme', info: JSON.stringify([fausses[0], apres.status, (h2.mcp || {}).etat]) }));
+  }
+
   /* @@SUITE@@ */
 
   performance.now = vraiPerf; Date.now = vraiNow;

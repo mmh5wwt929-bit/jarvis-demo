@@ -3015,10 +3015,18 @@ function routeMcp(req, res) {
   if (MCP_CONFIG.etat !== 'actif') { res.writeHead(404); return res.end('Introuvable'); }
   if (!MCP.origineAdmise(req.headers.origin)) return repondre(403, MCP.erreur(null, MCP.ERR.REQUETE, 'Origine refusée'));
   if (MCP_GARDE.ferme()) return repondre(503, MCP.erreur(null, MCP.ERR.REQUETE, 'Connecteur fermé 1 h après trop de clés fausses. Rien n\'est fait.'));
-  if (!MCP.cleAcceptee(req.headers.authorization, MCP_EMPREINTE)) {
+  /* [S113] v4.12.1 vu en ligne le 7 oct : a l'ajout dans Claude, la sonde SANS cle recevait
+   * 401 + « WWW-Authenticate: Bearer » -> Claude proposait « Se connecter » (OAuth, qui
+   * n'existe pas ici), et chaque sonde comptait comme une cle fausse (20 -> ferme 1 h).
+   * Jamais d'en-tete WWW-Authenticate ; sans en-tete Authorization : 401, NON comptee (ni
+   * tracee : des sondes ne doivent pas chasser les vraies lignes) ; seule une cle presente
+   * et fausse compte. La comparaison en temps constant a lieu dans tous les cas. */
+  const entete = req.headers.authorization;
+  if (!MCP.cleAcceptee(entete, MCP_EMPREINTE)) {
+    if (entete === undefined) return repondre(401, MCP.erreur(null, MCP.ERR.REQUETE, 'Clé absente : en-tête « Authorization: Bearer <clé> » attendu'));
     MCP_GARDE.cleFausse();
     tracerMcp('cle', 'REFUSE', 'CLE_FAUSSE');
-    return repondre(401, MCP.erreur(null, MCP.ERR.REQUETE, 'Clé refusée'), { 'WWW-Authenticate': 'Bearer' });
+    return repondre(401, MCP.erreur(null, MCP.ERR.REQUETE, 'Clé refusée'));
   }
   if (req.method === 'GET') return repondre(405, MCP.erreur(null, MCP.ERR.REQUETE, 'Flux SSE non proposé : POST seulement'), { Allow: 'POST' });
   if (req.method !== 'POST') return repondre(405, MCP.erreur(null, MCP.ERR.REQUETE, 'POST seulement'), { Allow: 'POST' });
