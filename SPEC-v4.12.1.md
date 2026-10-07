@@ -44,5 +44,12 @@ Vu : à l'ajout dans Claude, la sonde sans clé reçoit `401` + `WWW-Authenticat
 - Une requête **sans** en-tête `Authorization` → 401, **non comptée** ; seules les clés présentes et fausses comptent.
 - Tests : sondes sans clé ×30 → toujours ouvert ; clé fausse ×20 → fermé (garde).
 
+## 9. Qui a décidé : Claude ou JARVIS (connecteur)
+Vu : dans l'appli Claude, on ne distingue pas un refus de Claude lui-même d'une coupure de JARVIS.
+- Chaque réponse d'outil commence par un marqueur fixe écrit par le serveur : `⛔ JARVIS a coupé — <raison en mots simples>` (refus, non retenue), `◐ JARVIS attend ton geste — <quoi faire>` (proposition enregistrée), `✅ JARVIS — <résultat>` (lecture). Le code de règle suit entre parenthèses (`HORS_LISTE`, `ADRESSE_VUE`…).
+- Consigne du serveur MCP (instructions) : « Recopie tel quel le marqueur de JARVIS au début de ta réponse quand JARVIS refuse ou attend ; ne présente jamais un refus de JARVIS comme le tien, ni le tien comme celui de JARVIS. »
+- Le marqueur ne contient jamais de contenu lu (pas d'extrait de mail) ; l'adresse refusée seulement si la personne l'a vue (elle vient de Claude).
+- Tests : chaque verdict a son marqueur ; marqueur présent même en erreur ; aucun extrait dans le marqueur.
+
 ## Livrables
 `server.js`, `jarvis-analyse.js`, `jarvis-verite.js` si touché, `jarvis-mcp.js` si touché, `index.html`, `MANIFESTE.json`, `tests-v4121.js`, `CLAUDE.md` (état), `PROGRESSION-v4.12.1.md` (tests en ligne : les cas exacts du 7 oct). Une seule PR, CI verte. Ne pas fusionner.
