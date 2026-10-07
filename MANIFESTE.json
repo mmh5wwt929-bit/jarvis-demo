@@ -1,9 +1,9 @@
 {
   "format": 1,
   "passerelle": "v4.12.1",
-  "empreinte": "a2549365bebc",
+  "empreinte": "df3e9072c34d",
   "fichiers": {
-    "server.js": "aed4d4c239dfe259ceff540843bb34ed47b9eb18d9f9e5957d01e96dc6bd7bc5",
+    "server.js": "f6bf946810d93057bddb549bdc4890ea07453ca52ba66e6de52b0893d9b50ba4",
     "index.html": "ace7186a43854476fc9bb3355f5f5613ef741d2c0b151b56535446e1360fad11",
     "package.json": "570aeab2c5dd22edfcaab8f1c8e97c273d60a3d813fd5cc9c2d8adc35964845d",
     "jarvis-5.28.3.js": "0eb75bec3cdfab34fbc44f7c0360f6c2357451489702fc14c347890b35c58350",
@@ -20,6 +20,6 @@
     "confidentialite.html": "d18c00908fa80082aa0783f9a9f4f944201c86c8ad12a845415add81e327dbf6",
     "conditions.html": "123615b2d2774c44f68cbb8a86a63cc4f77b72906b1990fda6e0ee0401a37afc",
     "jarvis-analyse.js": "8d062eb4bf9532c7dfbe617c7918ae1fc26816e22e6c8fdfde8fb85aab1b46fc",
-    "jarvis-mcp.js": "13208dc5aca4e7490cca53bd11c238d0b78d8b7edde21d66a06de10a894e0107"
+    "jarvis-mcp.js": "0c5ba4ee8b2b13d8a4e723cdccac3138498b6f2fa54683ae65b82575da497da4"
   }
 }
