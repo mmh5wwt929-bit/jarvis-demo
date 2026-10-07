@@ -660,9 +660,64 @@ https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts
          info: JSON.stringify([e2.titre, ech && ech.actions]) }));
   }
 
+  /* ============================ U [S112] UN SEUL « ENVOYÉ » (LA PAGE, jsdom) ============================ */
+  let JS = null; try { JS = require(process.env.JSDOM || 'jsdom'); } catch { JS = null; }
+  const HTML = (() => { try { return fs.readFileSync(path.join(DIR, 'index.html'), 'utf8'); } catch { return ''; } })();
+  const pages = [];
+  const page = async ({ prive = false, routes = null } = {}) => {
+    const vcj = new JS.VirtualConsole(); const err = []; vcj.on('jsdomError', (e) => err.push(e.message));
+    const envois = [];
+    const dom = new JS.JSDOM(HTML, { url: 'http://localhost:1/', runScripts: 'dangerously', virtualConsole: vcj, pretendToBeVisual: true,
+      beforeParse(w) {
+        if (prive) w.localStorage.setItem('jarvis_cle', CLE);
+        w.fetch = async (url, o) => {
+          const u = String(url), b = o && o.body ? JSON.parse(o.body) : null;
+          envois.push({ u, ...(b || {}) });
+          const perso = routes ? await routes(u, b, w) : undefined;
+          const j = perso !== undefined ? perso : u.includes('/api/session') ? { sessionId: 's1', ...(prive ? { acces: 'protege' } : { acces: 'public' }) } : {};
+          return { ok: true, status: 200, headers: new w.Headers({ 'content-type': 'application/json' }), json: async () => j, text: async () => JSON.stringify(j), clone() { return this; } };
+        };
+        w.scrollTo = () => {}; w.HTMLElement.prototype.scrollIntoView = () => {};
+        w.matchMedia = w.matchMedia || (() => ({ matches: false, addListener() {}, removeListener() {} }));
+      } });
+    await dort(400);
+    const w = dom.window, d = w.document;
+    const clic = async (el) => { el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true })); await dort(150); };
+    const p = { w, d, $: (id) => d.getElementById(id), err, envois, clic };
+    pages.push(p);
+    return p;
+  };
+  /* ce qu'on VOIT : hors [hidden], hors <details> fermés (leur <summary> seul), hors lignes repliées */
+  const visible = (el) => { if (!el) return ''; const c = el.cloneNode(true);
+    for (const x of [c, ...c.querySelectorAll('.replie')].filter(x => x.classList.contains('replie'))) for (const y of [...x.children]) if (!y.classList.contains('ligne-repliee')) y.remove();
+    for (const x of [...c.querySelectorAll('details:not([open])')]) for (const y of [...x.childNodes]) if (!(y.nodeType === 1 && y.tagName === 'SUMMARY')) y.remove();
+    for (const x of [...c.querySelectorAll('[hidden]')]) x.remove();
+    return c.textContent.replace(/\s+/g, ' '); };
+  if (JS) {
+    const PREUVE = "Envoyé pour de vrai, depuis le compte d'essai JARVIS, à luc@club-hand.fr (objet « Re: Match samedi »). Preuve : identifiant du message chez Google « 18cabc ». Vérifié chez Google : dans les Envoyés ✓, dans la même conversation ✓, au bon destinataire ✓.";
+    const routesU = (u) => u.includes('/api/finaliser') ? { etat: 'EXECUTE', reel: true, envoye: true, code: 'ENVOYE', preuve: '18cabc', reponse: PREUVE } : undefined;
+    const envoi = async (P, jeton) => {
+      P.w.eval('rendreDecision')({ decide: 'EN_ATTENTE', etape: 'G2_FENETRE', outil: 'mail', plan: { action: 'SEND', target: 'luc@club-hand.fr' }, jetonAnnulation: jeton, executableApres: 0,
+        message: 'Retenu 10 s.', mail: { a: 'luc@club-hand.fr', objet: 'Re: Match samedi', texte: 'Bonjour Luc, je serai présent samedi à 11h.', reel: true } });
+      await P.w.eval('finaliserJeton')(jeton); await dort(150);
+    };
+    const Pu = await page({ routes: routesU });
+    await envoi(Pu, 'jt_u_1');
+    const filU = visible(Pu.$('fil')), compteU = ([...Pu.d.querySelectorAll('#fil .compte')].pop() || {}).textContent || '';
+    await t('U1', "après un vrai envoi : « Envoyé pour de vrai » UNE fois (le message du serveur, avec la preuve) ; la carte dit « Parti — voir ci-dessous »", async () =>
+      ({ ok: (filU.match(/Envoyé pour de vrai/g) || []).length === 1 && /18cabc/.test(filU) && compteU === 'Parti — voir ci-dessous', info: compteU + ' ; ×' + (filU.match(/Envoyé pour de vrai/g) || []).length }));
+    const Pv = await page({ prive: true, routes: (u) => routesU(u) || (/\/api\/claude$/.test(u) ? { connecteur: { etat: 'actif', appelsHeure: 0, trace: [] }, propositions: [], nonRetenues: [] } : /\/api\/gerer$/.test(u) ? { actif: true, sections: [], resume: "rien d'urgent", aTraiter: 0 } : undefined) });
+    await envoi(Pv, 'jt_u_2');
+    const filV = visible(Pv.$('fil'));
+    await t('U2', "instance privée (allégée) : la carte devient la ligne « ✓ Parti — voir ci-dessous (à luc@… — « Re: Match samedi ») » ; un seul « Envoyé pour de vrai », preuve visible", async () =>
+      ({ ok: /✓ Parti — voir ci-dessous \(à luc@club-hand\.fr — « Re: Match samedi »\)/.test(filV) && (filV.match(/Envoyé pour de vrai/g) || []).length === 1 && /18cabc/.test(filV) && !/✓ Envoyé/.test(filV),
+         info: filV.slice(-220) }));
+  } else await t('U0', 'jsdom absent : pas de test de page', async () => ({ ok: false }));
+
   /* @@SUITE@@ */
 
   performance.now = vraiPerf; Date.now = vraiNow;
+  for (const p of (typeof pages !== 'undefined' ? pages : [])) { const e = p.err.filter(x => !/Not implemented/.test(x)); if (e.length) R.push({ id: 'PJS', nom: 'garde : aucune erreur JavaScript dans la page', ok: false, info: e.slice(0, 2).join(' | ') }); }
   log('JARVIS — passerelle v4.12.1 : corrections vues en ligne le 7 oct (' + DIR + ')\n');
   for (const r of R) log((r.ok ? 'OK    ' : 'ECHEC ') + r.id.padEnd(5) + ' ' + r.nom + (r.info ? '  [' + r.info + ']' : ''));
   const k = R.filter(r => !r.ok).length;

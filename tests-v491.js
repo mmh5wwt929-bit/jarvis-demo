@@ -545,7 +545,7 @@ https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts
     await P1.w.eval('finaliserJeton')(rR.jetonAnnulation); await dort(100);
     const bR = boiteDe(rR.jetonAnnulation);
     await t('B1', "page : après « Envoyé pour de vrai », « Annuler » et « Confirmer l'envoi » (grisé) sont MASQUÉS", async () =>
-      ({ ok: /Envoyé pour de vrai/.test(bR.querySelector('.compte').textContent) && cachee(bR), info: [...bR.querySelectorAll('button')].map(x => x.textContent + (x.hidden ? ' (masqué)' : ' (visible)')).join(', ') }));
+      ({ ok: /Parti — voir ci-dessous/.test(bR.querySelector('.compte').textContent) && cachee(bR),   /* v4.12.1 [S112] la carte : « Parti — voir ci-dessous » */ info: [...bR.querySelectorAll('button')].map(x => x.textContent + (x.hidden ? ' (masqué)' : ' (visible)')).join(', ') }));
     const rP = retenue('PAY', 'luc@exemple.fr', false); rendre(rP);
     const bP = boiteDe(rP.jetonAnnulation), libP = bP.querySelector('[data-finaliser]').textContent;
     await P1.w.eval('finaliserJeton')(rP.jetonAnnulation); await dort(100);

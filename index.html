@@ -1545,14 +1545,14 @@ async function finaliserJeton(jeton) {
   if (r.etat === 'INTROUVABLE') return clore(jeton, 'Déjà traitée (envoyée ou annulée) : plus rien à confirmer.');
   if (r.etat === 'PERIME') return clore(jeton, r.message || TEXTE_PERIMEE);   /* [S40] */
   if (r.etat === 'EXECUTE' && r.reel) {   /* [S68] vrai e-mail : le SERVEUR dit s'il est parti, preuve de Google */
-    clore(jeton, r.envoye ? 'Envoyé pour de vrai.' : r.code === 'RESULTAT_INCERTAIN' ? 'Résultat incertain : vérifie les envoyés.' : "Pas parti : rien n'a été envoyé.", true);   /* [S78] */
-    if (r.envoye && allege()) {   /* [S102] APRES l'envoi seulement : une ligne (à qui, quel objet) ; le mail, la preuve et la vérification au toucher */
+    /* [S112] v4.12.1 vu en ligne : « Envoyé pour de vrai » affiché deux fois. UN message après l'envoi :
+     * celui du serveur, avec la preuve ; la carte dit seulement « Parti — voir ci-dessous ». */
+    clore(jeton, r.envoye ? 'Parti — voir ci-dessous' : r.code === 'RESULTAT_INCERTAIN' ? 'Résultat incertain : vérifie les envoyés.' : "Pas parti : rien n'a été envoyé.", true);   /* [S78] */
+    if (r.envoye && allege()) {   /* [S102] APRES l'envoi seulement : une ligne (à qui, quel objet) ; le mail et Face ID au toucher */
       const boite = retenueDe(jeton), carte = boite && boite.closest('.tour'), m = carte && carte.querySelector('.mail-carte');
-      replier(carte, '✓ Envoyé' + (m ? ' à ' + m.dataset.a + ' — « ' + m.dataset.objetMail + ' »' : ''));
+      replier(carte, '✓ Parti — voir ci-dessous' + (m ? ' (à ' + m.dataset.a + ' — « ' + m.dataset.objetMail + ' »)' : ''));
       const el = [...document.querySelectorAll('#fil .elevation')].find(x => x.dataset.jeton === jeton); if (el) replier(el.closest('.tour') || el, '✓ Face ID validé');
-      const b = tour('JARVIS', 'Envoyé pour de vrai' + (/Vérifié chez Google/.test(r.reponse || '') && !/✗/.test(r.reponse || '') ? ', vérifié chez Google.' : '.'), false);
-      b.querySelector('.quoi').insertAdjacentHTML('beforeend', plie('<div>' + esc(r.reponse || '') + '</div>'));
-    } else
+    }
     tour('JARVIS', r.reponse || (r.envoye ? 'Envoyé.' : 'Pas parti.'), false);
     if (r.trace) ajouterTrace(r.trace);
     return;
