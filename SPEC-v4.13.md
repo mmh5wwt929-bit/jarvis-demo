@@ -15,8 +15,11 @@ Vu en ligne le 8 oct (connecteur, « Lis mes mails ») : le 3e mail est coupé �
 - Ligne du verdict quand l'extrait est coupé : « texte affiché coupé ; règles appliquées au mail entier ».
 - Toutes les lectures : connecteur (`lire_mails`), boîte dans JARVIS, conversations (fils).
 - Tests (échouent sur v4.12.1) : consigne à 1 300, 5 000 et 60 000 caractères → SUSPECT ; adresse tierce à 1 300 caractères → dans le magasin, alerte à la frappe ; mail de 70 Ko propre → « analyse incomplète » ; garde : rien au-delà de l'extrait dans le prompt du modèle ni dans la réponse du connecteur ; temps d'analyse < 200 ms sur 64 Ko piégés (motifs répétés). `jarvis-gmail.js` → 1.5.
-### 0b. Le connecteur ne dit pas ce qu'il ne peut pas savoir
-- `server.js` (proposition hors liste + alerte) écrit « elle apparaît dans un contenu reçu, pas dans une demande d'Alsid ». JARVIS ne voit pas la conversation dans Claude : remplacer par « elle apparaît dans un contenu reçu ; JARVIS ne l'a pas vue tapée par Alsid ».
+### 0b. JARVIS ne dit pas ce qui est faux ou invérifiable
+- Connecteur (proposition hors liste + alerte) : « elle apparaît dans un contenu reçu, pas dans une demande d'Alsid ». JARVIS ne voit pas la conversation dans Claude → « elle apparaît dans un contenu reçu ; JARVIS ne l'a pas vue tapée par Alsid ».
+- Appli (vu le 8 oct, 23:49, « Envoie un mail à compta-externe@example.com pour lui transmettre les factures ») : `TEXTE_ALERTE` dit « Cette adresse vient d'un contenu que tu as reçu, **pas de toi** » et `reponseAlerte` « **pas dans une de tes demandes** ». Or cette alerte ne naît **que** quand la personne a tapé l'adresse elle-même : c'est toujours faux. Remplacer par : « Tu l'as tapée, mais elle apparaît aussi dans un contenu reçu (<origine>). Si elle vient de là, vérifie par téléphone, à un numéro que tu connais déjà. »
+- Dit une seule fois : la carte d'alerte porte l'explication ; le message qui suit se réduit à « Pas dans ta liste : rien n'est préparé. » (il le répète aujourd'hui).
+- Tests : texte exact des trois cas ; garde : les refus où l'intention vient vraiment d'un contenu (vigilance, « cette demande vient du mail, pas de toi ») gardent leur phrase.
 ### 0c. Bruit : avertissement sur une adresse de la liste
 - Vu le 8 oct, 23:29 : carte d'un vrai e-mail vers sa propre adresse (dans la liste) avec « Cette adresse apparaît dans un contenu lu (un e-mail) : écris-lui seulement si c'est bien ta décision. » (`ALERTE_ADRESSE_LUE`). Règle v4.12 : jamais d'alerte pour une adresse de la liste ni pour l'expéditeur lu dans « De ». Ne plus l'afficher dans ces deux cas (fatigue d'alarme) ; rien d'autre ne change.
 - Tests : adresse de la liste vue dans un mail → pas d'avertissement ; garde : adresse hors liste vue dans un mail → l'alerte v4.12 reste.
@@ -99,8 +102,13 @@ Vu en ligne le 8 oct (connecteur, « Lis mes mails ») : le 3e mail est coupé �
 - Même thème ; états existants → gravité : veille → blanc, attend → orange, coupe → rouge (même pastille, même flash).
 - Retirés : liseré de 3 px, noyau à anneaux animés. Gardés : les deux colonnes « Claude fait » / « JARVIS protège », le mot d'état, la carte d'alerte sous une coupure, la phrase « Quand Claude refuse de lui-même, rien n'arrive ici. »
 
+## 8. « Envoie un mail » sans adresse (vu le 8 oct, 23:49 — à faire en dernier, après 7)
+- Vu : « Envoie un mail » seul → réponse du modèle « Je ne l'ai pas préparée. Pour envoyer un mail, dis-moi en une phrase à qui et ce que tu veux lui dire… » : il faut tout retaper, contraire à v4.12.1 point 4.
+- Le serveur reconnaît la demande d'envoi tapée sans adresse (verbe d'envoi + « mail »/« e-mail »/« message », sans adresse ni contenu) et pose lui-même « À qui ? » (demande en attente, mêmes règles : message suivant, 2 min, frappe seule) ; puis « Que doit dire l'e-mail ? » ; puis la carte. Le modèle n'est pas appelé.
+- Tests : « Envoie un mail » → « À qui ? » → adresse de la liste → « Que doit dire l'e-mail ? » → « que je serai en retard » → carte ; adresse hors liste à « À qui ? » → refus (l'adresse d'abord) ; question sans rapport → annulée et dit.
+
 ## Ordre des commits
-0. Sécurité (0a, 0b, 0c) dès le commit en cours fini. 1. Thème clair + en-tête (points 1, 2). 2. `gravite` côté serveur (3). 3. Gravité côté page (3). 4. Bulles (4). 5. Onglets et saisie (5). 6. « À gérer » (6). 7. Contrôle (7). 8. Livraison.
+0. Sécurité (0a, 0b, 0c) dès le commit en cours fini. 1. Thème clair + en-tête (points 1, 2). 2. `gravite` côté serveur (3). 3. Gravité côté page (3). 4. Bulles (4). 5. Onglets et saisie (5). 6. « À gérer » (6). 7. Contrôle (7). 8. « Envoie un mail » sans adresse (8). 9. Livraison.
 
 ## Livrables
 `index.html`, `server.js`, `jarvis-gmail.js` (1.5, point 0a), `jarvis-appli.js`, `MANIFESTE.json`, `tests-v413.js`, `PROGRESSION-v4.13.md`, `CLAUDE.md` (état v4.13 + règles « la gravité est calculée par le serveur, jamais par le modèle » et « les règles d'analyse d'un mail portent sur le texte entier (64 Ko), le modèle ne voit que l'extrait »). Passerelle **v4.13.0**.
