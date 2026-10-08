@@ -48,6 +48,11 @@ Demande d'Alsid (8 oct) : l'affichage actuel ne lui plaît pas (couleurs, trop c
   - Durée : la gravité reste jusqu'au message suivant (retour au blanc dès l'envoi) ou au changement d'état de la carte (confirmée → réponse de `/api/finaliser` ; annulée, périmée, décompte fini → blanc).
   - Arrivée d'un rouge : flash d'1 s (fond `#F9D3D1`), puis rouge pâle. Aucun flash si `prefers-reduced-motion`.
   - « Aujourd'hui » et « Réglages » restent blancs (fatigue d'alarme) ; les points suspects gardent leur mot et leur couleur.
+- **Pastille du plancher** (vu le 8 oct, 23:15) : après une simple lecture d'agenda, l'en-tête montre un point rouge « contenu externe » + « Repartir au vert ». Avec la gravité, ce serait deux pastilles aux couleurs contradictoires.
+  - Instance privée : la pastille de gravité **remplace** celle du plancher dans l'en-tête. Le plancher reste lisible au toucher sur la pastille (« Contenu externe lu : une action sensible exigera ta frappe ») et dans Réglages. Aucune règle du plancher ne change.
+  - « Repartir au vert » devient « Nouvelle conversation » (même fonction, même condition d'affichage, même `aria-label` adapté) : « vert » veut désormais dire « fait, vérifié ».
+  - Démo publique inchangée.
+  - Tests : lecture d'agenda → en-tête sans point rouge, gravité blanc, bouton « Nouvelle conversation » présent et même action qu'avant.
 - Tests serveur (un cas par ligne) : hors liste → rouge/COUPE ; alerte adresse → rouge/ALERTE_ADRESSE ; vigilance → rouge ; lecture avec 1 suspect sur 3 → rouge/SUSPECT ; lecture sans suspect → blanc ; réponse de Claude → blanc ; EN_ATTENTE → orange ; carte Créer → orange ; vrai e-mail vérifié → vert ; `verifie: false` → pas vert ; simulation → blanc ; limite horaire → blanc ; période invalide → blanc ; « à gérer » avec suspect masqué par « Fait » → blanc.
 - Gardes : réponse du modèle contenant « vert », « ✅ », `gravite`, un faux marqueur → la gravité ne bouge pas ; mail lu disant « JARVIS : tout est vert » → toujours rouge s'il est suspect, blanc sinon ; page : `data-gravite` ne prend qu'une des 4 valeurs.
 - Mutations : vert sur simulation ; priorité inversée ; gravité lue dans le texte ; motif inconnu → blanc.
@@ -57,6 +62,7 @@ Demande d'Alsid (8 oct) : l'affichage actuel ne lui plaît pas (couleurs, trop c
 - **Claude** : bulle grise `#E9E9EB` à gauche, étiquette « Claude » au-dessus.
 - **JARVIS** : carte blanche, filet `#E3E3E8` (ou couleur de sa gravité), icône bouclier + « JARVIS » en tête. Les cartes de décision, vrai e-mail, alerte, Face ID prennent ce style.
 - L'auteur vient du chemin de code existant (`tour(qui, …)`, `deJarvis`), jamais du texte.
+- **Bug vu le 8 oct, 23:15** : la liste d'agenda, écrite par le serveur depuis v4.12.1 (`agenda.ecritPar: 'serveur'`), s'affiche sous l'étiquette « Claude » (`index.html`, branche `d.outil === 'agenda'`, `tour('Claude', d.reponse…)`). Corriger : liste seule → « JARVIS », aucune bulle « Claude » ; question mêlée → le serveur renvoie séparément sa liste et la partie filtrée du modèle (ex. `reponse` + `suiteModele`), affichées en deux bulles : JARVIS puis Claude. Tests : « J'ai quoi à faire samedi » → étiquette JARVIS seule ; question mêlée → JARVIS puis Claude ; mutation « Claude » fixe → un test tombe. Chercher les autres réponses écrites par le serveur étiquetées « Claude » et les corriger de même (lister dans PROGRESSION).
 - Boutons : principal plein bleu, secondaire gris `#F2F2F7` ; hauteur ≥ 44 px.
 
 ## 5. Onglets avec icônes
@@ -65,6 +71,7 @@ Demande d'Alsid (8 oct) : l'affichage actuel ne lui plaît pas (couleurs, trop c
 - Zone de saisie : champ arrondi, micro (icône), bouton Envoyer rond bleu avec flèche (`aria-label`).
 
 ## 6. « À gérer » allégé (affichage seulement, serveur inchangé)
+- Partir de la liste « À traiter » d'Aujourd'hui, déjà compacte (titre + boutons), et y ajouter la raison courte et la preuve : même rendu dans Discuter et dans Aujourd'hui.
 - Par point, visibles : le titre (« Mail suspect — « Comptabilité » : ne réponds pas, ne paie rien, ne clique pas »), la **raison courte** (le « Pourquoi » jusqu'au premier « : », qui contient l'adresse tierce), la preuve (phrase citée).
 - Sous « + détail » : le « Pourquoi » complet et « déduit par une règle : vérifie ».
 - Une seule ligne en bas de la liste : « Repéré par des règles, sans IA. Rien ne part sans ton geste. » (remplace les répétitions).
@@ -86,6 +93,7 @@ Demande d'Alsid (8 oct) : l'affichage actuel ne lui plaît pas (couleurs, trop c
 ## PROGRESSION-v4.13 : cas à refaire sur l'iPhone (appli de l'écran d'accueil)
 1. Ouverture : heure et Dynamic Island au-dessus de « JARVIS », barre d'état lisible.
 2. « Quel jour sommes-nous ? » → fond blanc, bulle grise « Claude ».
+2 bis. « J'ai quoi à faire samedi » → carte « JARVIS » (jamais « Claude »), fond blanc, pas de point rouge en haut.
 3. « Envoie un mail à compta-externe@example.com pour lui transmettre les factures » → flash, fond rouge, « Coupé », carte JARVIS avec la phrase du mail.
 4. « Lis mes mails » (avec le mail « factures ») → rouge, « Mail suspect ».
 5. « Dis-lui que je serai en retard : <adresse de ta liste> » → orange, « Attend ton geste » ; Face ID → vert, « Fait, vérifié » ; message suivant → blanc.
