@@ -89,7 +89,8 @@ const appel = async (p, corps, brut) => {
 };
 const session = async () => (await appel('/api/session', {})).sessionId;
 const dire = (sid, message, plan) => { if (plan !== undefined) plans.push(plan); return appel('/api/chat', { sessionId: sid, message }); };
-const lireDemain = async (sid) => dire(sid, "qu'est-ce qui est prévu demain ?", { action: 'READ', resource: 'AGENDA', target: 'demain' });
+/* v4.12.1 [S106] la liste seule est écrite par le serveur (sans modèle) : une question MÊLÉE garde le modèle dans la preuve (ce qu'il voit, ce qu'il ne voit pas) */
+const lireDemain = async (sid) => dire(sid, "qu'est-ce qui est prévu demain, et c'est où ?", { action: 'READ', resource: 'AGENDA', target: 'demain' });
 const dort = ms => new Promise(r => setTimeout(r, ms));
 
 const R = [];

@@ -432,6 +432,37 @@ body.prive #conversation{height:calc(100vh - var(--haut-entete,0px) - var(--haut
 .gerer-item.traite{opacity:.75}
 .traite-ligne{font-size:13px;color:var(--sourd)}
 button.traite{font-size:12px;padding:4px 9px;color:var(--sourd)}
+/* [S115] v4.12.1 « CONTRÔLE » (instance privée) : Claude fait / JARVIS protège. Fond sombre ; liseré de 3 px autour
+ * de l'écran et bandeau du haut teintés selon l'état ; flash rouge d'1 s à une coupure ; le MOT d'état toujours écrit. */
+body.prive[data-onglet="controle"] #controle{display:flex}
+#controle{padding:6px 20px 24px;gap:10px}
+body{--ctl:var(--sur)}
+body[data-ctl="attend"]{--ctl:var(--retenu)}
+body[data-ctl="coupe"]{--ctl:var(--refus)}
+body.prive[data-onglet="controle"]::after{content:"";position:fixed;inset:0;border:3px solid var(--ctl);pointer-events:none;z-index:70;transition:background .2s}
+body.prive[data-onglet="controle"].ctl-flash::after{background:rgba(248,81,73,.55)}
+body.prive[data-onglet="controle"] header{background:var(--ardoise);background:color-mix(in srgb,var(--ctl) 22%,var(--encre));border-bottom-color:var(--ctl)}
+.ctl-tete{display:flex;align-items:center;gap:14px;margin-top:8px;padding:10px 14px;border-radius:12px;border:1px solid var(--ctl);background:var(--ardoise);
+  background:color-mix(in srgb,var(--ctl) 16%,var(--ardoise))}
+.ctl-tete h2{font-size:17px;font-weight:600;color:var(--lumiere)}
+.ctl-etat{font-weight:700;letter-spacing:.08em;color:var(--ctl);font-size:15px}
+.ctl-noyau{position:relative;width:46px;height:46px;flex:none}
+.ctl-noyau span{position:absolute;inset:0;border-radius:50%;border:2px solid var(--ctl)}
+.ctl-noyau span:nth-child(2){inset:8px;border-style:dashed;opacity:.8;animation:ctlTour 6s linear infinite}
+.ctl-noyau span:nth-child(3){inset:16px;border:none;background:var(--ctl);animation:ctlPouls 2.2s ease-in-out infinite}
+@keyframes ctlTour{to{transform:rotate(360deg)}}
+@keyframes ctlPouls{50%{transform:scale(.75);opacity:.6}}
+@media(prefers-reduced-motion:reduce){.ctl-noyau span{animation:none!important}body.prive[data-onglet="controle"]::after{transition:none}}
+.ctl-colonnes{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+.ctl-entetes{font-size:12px;letter-spacing:.12em;color:var(--sourd);font-weight:600;margin-top:4px}
+.ctl-ligne{border-top:1px solid var(--regle);padding:8px 0;font-size:14px;overflow-wrap:anywhere}
+.ctl-ligne .heure{font-size:12px;color:var(--sourd)}
+.ctl-verdict.ok{color:var(--sur)}
+.ctl-verdict.attend{color:var(--retenu)}
+.ctl-verdict.coupe{color:var(--refus)}
+.ctl-verdict.fin{color:var(--sourd)}
+.ctl-code{font-size:12px;color:var(--sourd)}
+.ctl-ligne .alerte-adresse{margin-top:8px}
 /* [S102] un flux termine (reponse envoyee, evenement cree, ancienne liste) : une ligne, le detail au toucher */
 .replie>:not(.ligne-repliee){display:none!important}
 button.ligne-repliee{display:block;width:100%;text-align:left;background:none;border:none;padding:2px 0;color:var(--sourd);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -470,7 +501,7 @@ button.ligne-repliee{display:block;width:100%;text-align:left;background:none;bo
       <div class="mesure">ancres publiées <b id="mAncres" class="mono">0</b></div>
       <div class="mesure">contexte déclaré <b id="mCouv" class="mono">—</b></div>
     </div>
-    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.12.0</div>
+    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.12.1</div>
   </div>
 </header>
 
@@ -623,6 +654,18 @@ button.ligne-repliee{display:block;width:100%;text-align:left;background:none;bo
     </details>
   </section>
 
+  <!-- ─────────── [S115] v4.12.1 CONTRÔLE (instance privée) : Claude fait / JARVIS protège ─────────── -->
+  <section class="colonne prive-seul" id="controle" aria-labelledby="ctlTitre">
+    <div class="ctl-tete">
+      <div class="ctl-noyau" id="ctlNoyau" data-etat="veille" aria-hidden="true"><span></span><span></span><span></span></div>
+      <div><h2 id="ctlTitre">Contrôle</h2><p class="ctl-etat" id="ctlEtat" role="status" aria-live="polite">VEILLE</p></div>
+    </div>
+    <div class="ctl-colonnes ctl-entetes" aria-hidden="true"><div>CLAUDE FAIT</div><div>JARVIS PROTÈGE</div></div>
+    <div id="ctlLignes"><p class="pdj-vide">Rien encore : aucun appel du connecteur Claude depuis le réveil du serveur.</p></div>
+    <p class="pdj-note" id="ctlMemoire">En mémoire seulement : effacé quand Render s'endort ou redémarre.</p>
+    <p class="pdj-note" id="ctlHonnete">JARVIS ne voit que ce que Claude lui demande : un refus de Claude lui-même n'arrive jamais ici.</p>
+  </section>
+
   <!-- ─────────── [S102] v4.11 AUJOURD'HUI (instance privée) ─────────── -->
   <section class="colonne prive-seul" id="aujourdhui" aria-labelledby="aujTitre">
     <div class="auj-tete"><h2 id="aujTitre">Aujourd'hui</h2><button type="button" class="lien" id="aujActualiser">Actualiser</button></div>
@@ -634,6 +677,7 @@ button.ligne-repliee{display:block;width:100%;text-align:left;background:none;bo
   </section>
 </main>
 <nav class="onglets prive-seul" id="onglets" aria-label="Vues">
+  <button type="button" data-onglet="controle">Contrôle</button>
   <button type="button" data-onglet="aujourdhui" aria-current="page">Aujourd'hui</button>
   <button type="button" data-onglet="discuter">Discuter</button>
   <button type="button" data-onglet="reglages">Réglages</button>
@@ -751,13 +795,62 @@ const Traites = (() => {
     maj
   };
 })();
-/* [S102] une vue a la fois sur l'instance privee : Aujourd'hui / Discuter / Reglages */
+/* [S115] v4.12.1 « CONTRÔLE » (instance privée) : ce que Claude fait / ce que JARVIS en fait, ligne à ligne.
+ * Lu toutes les 5 s quand l'onglet est ouvert (et la page visible) ; tout est échappé ; sous une coupure due à
+ * l'alerte « adresse vue », la MÊME carte que l'alerte. Le mot d'état est toujours écrit (jamais la couleur seule). */
+const Ctl = (() => {
+  let minuteur = null, dernierN = null, flashT = null;
+  const MOTS = { veille: 'VEILLE', attend: 'ATTEND TON GESTE', coupe: 'COUPÉ' };
+  const ouvert = () => document.body.dataset.onglet === 'controle' && document.body.classList.contains('prive') && document.visibilityState !== 'hidden';
+  function etat(e) {
+    const ok = Object.prototype.hasOwnProperty.call(MOTS, e) ? e : 'veille';
+    document.body.dataset.ctl = ok;
+    if ($('ctlNoyau')) $('ctlNoyau').dataset.etat = ok;
+    if ($('ctlEtat')) $('ctlEtat').textContent = MOTS[ok];
+  }
+  function flash() {
+    if (flashT) clearTimeout(flashT);
+    document.body.classList.add('ctl-flash');
+    flashT = setTimeout(() => document.body.classList.remove('ctl-flash'), 1000);
+  }
+  function rendre(v) {
+    if (!v || !Array.isArray(v.lignes)) return;
+    etat(v.etat);
+    const ns = v.lignes.map(l => Number(l.n) || 0);
+    if (dernierN != null && v.lignes.some(l => (Number(l.n) || 0) > dernierN && l.verdict === 'coupe')) flash();   /* une NOUVELLE coupure */
+    dernierN = Math.max(Number(v.dernier) || 0, 0, ...ns);
+    const z = $('ctlLignes'); if (!z) return;
+    z.innerHTML = v.lignes.length ? v.lignes.map(l => {
+      const cls = ['ok', 'attend', 'coupe', 'fin'].includes(l.verdict) ? l.verdict : 'fin';
+      return '<div class="ctl-ligne" data-verdict="' + cls + '"><div class="ctl-colonnes"><div><span class="heure mono">' + esc(l.heure) + '</span><br>' + esc(l.claude) + '</div>'
+        + '<div><b class="ctl-verdict ' + cls + '">' + esc(l.jarvis) + '</b>' + (l.raison ? ' — ' + esc(l.raison) : '')
+        + (Array.isArray(l.codes) && l.codes.length ? '<br><span class="ctl-code mono">' + l.codes.map(esc).join(' · ') + '</span>' : '') + '</div></div>'
+        + (l.alerte && cls === 'coupe' ? carteAlerte(l.alerte) : '') + '</div>';
+    }).join('') : '<p class="pdj-vide">Rien encore : aucun appel du connecteur Claude depuis le réveil du serveur.</p>';
+    if (typeof v.memoire === 'string') $('ctlMemoire').textContent = v.memoire;
+    if (typeof v.honnetete === 'string') $('ctlHonnete').textContent = v.honnetete;
+  }
+  async function lire() {
+    if (!ouvert()) return arreter();
+    try {
+      const r = await versServeur(API + '/api/controle');
+      if (r.ok) rendre(await r.json());
+      else if (r.status === 404) $('ctlLignes').innerHTML = '<p class="pdj-vide">Le connecteur Claude n\'est pas actif sur cette instance.</p>';
+    } catch (e) { /* hors ligne : la prochaine lecture réessaie */ }
+  }
+  function arreter() { if (minuteur) clearInterval(minuteur); minuteur = null; document.body.classList.remove('ctl-flash'); }
+  function demarrer() { arreter(); lire(); minuteur = setInterval(lire, 5000); }
+  document.addEventListener('visibilitychange', () => { if (ouvert()) demarrer(); else arreter(); });
+  return { demarrer, arreter, rendre, lire };
+})();
+/* [S102] une vue a la fois sur l'instance privee : Aujourd'hui / Discuter / Reglages ([S115] + Contrôle) */
 function montrer(onglet) {
-  if (!['aujourdhui', 'discuter', 'reglages'].includes(onglet)) return;
+  if (!['controle', 'aujourdhui', 'discuter', 'reglages'].includes(onglet)) return;
   document.body.dataset.onglet = onglet;
   for (const b of document.querySelectorAll('#onglets [data-onglet]')) { if (b.dataset.onglet === onglet) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
   if (onglet === 'discuter') { const f = $('fil'); if (f) f.scrollTop = f.scrollHeight; }
   if (onglet === 'aujourdhui' && document.body.classList.contains('prive') && Date.now() - Auj.charge > 120000) Auj.charger(false);
+  if (onglet === 'controle') Ctl.demarrer(); else Ctl.arreter();   /* [S115] */
   try { window.scrollTo(0, 0); } catch (e) {}
 }
 /* [S102] un flux termine (reponse envoyee, evenement cree, ancienne liste « à gérer ») : UNE ligne,
@@ -1166,6 +1259,9 @@ function rendreDecision(d) {
       || d.outil === 'mail' || d.outil === 'boite' || d.outil === 'mailto';   /* [S68] [S69] [S75] */
     if (d.reponse) tour(deJarvis ? 'JARVIS' : 'Claude', d.reponse, false, !deJarvis);
     else tour('JARVIS', sansReponse(d), false);
+    /* [S110] v4.12.1 pièce jointe demandée : « Ouvrir dans Mail » (adresse seule, lien du serveur) ; c'est toi qui joins et envoies */
+    if (lienMail(d.mailtoSeul)) tour('JARVIS', '', false).querySelector('.quoi').outerHTML = '<div class="decision autorise mail-ouvrir"><div class="rang">'
+      + '<a class="bouton primaire" data-ouvrir-mail="1" href="' + esc(lienMail(d.mailtoSeul)) + '">Ouvrir dans Mail</a></div><p class="etat-carte">JARVIS n\'envoie rien : tu joins le fichier et tu envoies depuis ton application.</p></div>';
     return;
   }
   /* [S75] v4.9.1 « OUVRIR DANS MAIL » : l'e-mail en entier (texte echappe), et un
@@ -1542,14 +1638,14 @@ async function finaliserJeton(jeton) {
   if (r.etat === 'INTROUVABLE') return clore(jeton, 'Déjà traitée (envoyée ou annulée) : plus rien à confirmer.');
   if (r.etat === 'PERIME') return clore(jeton, r.message || TEXTE_PERIMEE);   /* [S40] */
   if (r.etat === 'EXECUTE' && r.reel) {   /* [S68] vrai e-mail : le SERVEUR dit s'il est parti, preuve de Google */
-    clore(jeton, r.envoye ? 'Envoyé pour de vrai.' : r.code === 'RESULTAT_INCERTAIN' ? 'Résultat incertain : vérifie les envoyés.' : "Pas parti : rien n'a été envoyé.", true);   /* [S78] */
-    if (r.envoye && allege()) {   /* [S102] APRES l'envoi seulement : une ligne (à qui, quel objet) ; le mail, la preuve et la vérification au toucher */
+    /* [S112] v4.12.1 vu en ligne : « Envoyé pour de vrai » affiché deux fois. UN message après l'envoi :
+     * celui du serveur, avec la preuve ; la carte dit seulement « Parti — voir ci-dessous ». */
+    clore(jeton, r.envoye ? 'Parti — voir ci-dessous' : r.code === 'RESULTAT_INCERTAIN' ? 'Résultat incertain : vérifie les envoyés.' : "Pas parti : rien n'a été envoyé.", true);   /* [S78] */
+    if (r.envoye && allege()) {   /* [S102] APRES l'envoi seulement : une ligne (à qui, quel objet) ; le mail et Face ID au toucher */
       const boite = retenueDe(jeton), carte = boite && boite.closest('.tour'), m = carte && carte.querySelector('.mail-carte');
-      replier(carte, '✓ Envoyé' + (m ? ' à ' + m.dataset.a + ' — « ' + m.dataset.objetMail + ' »' : ''));
+      replier(carte, '✓ Parti — voir ci-dessous' + (m ? ' (à ' + m.dataset.a + ' — « ' + m.dataset.objetMail + ' »)' : ''));
       const el = [...document.querySelectorAll('#fil .elevation')].find(x => x.dataset.jeton === jeton); if (el) replier(el.closest('.tour') || el, '✓ Face ID validé');
-      const b = tour('JARVIS', 'Envoyé pour de vrai' + (/Vérifié chez Google/.test(r.reponse || '') && !/✗/.test(r.reponse || '') ? ', vérifié chez Google.' : '.'), false);
-      b.querySelector('.quoi').insertAdjacentHTML('beforeend', plie('<div>' + esc(r.reponse || '') + '</div>'));
-    } else
+    }
     tour('JARVIS', r.reponse || (r.envoye ? 'Envoyé.' : 'Pas parti.'), false);
     if (r.trace) ajouterTrace(r.trace);
     return;
@@ -1727,6 +1823,8 @@ async function envoyer() {
     try { d = await api('/api/chat', corps); } finally { if (lecture) lecture.remove(); }
     if (d && d.etape === 'DEBIT' && limiteAtteinte(d)) { $('envoyer').disabled = false; return; }
     if (d && d.etape === 'MEMOIRE' && d.decide === 'AUTORISE' && d.souvenir) Memoire.ajouter(d.souvenir);
+    /* [S109] v4.12.1 la demande en attente qui tombe (message sans rapport, 2 min) : dite par le serveur */
+    if (d && typeof d.demandeAnnulee === 'string' && d.demandeAnnulee) tour('JARVIS', d.demandeAnnulee, false).classList.add('non-fait');
     majEtat(d); rendreDecision(d);
     /* [S74] v4.9.1 une action par message : ce qui n'est PAS fait est dit par JARVIS */
     if (d && d.nonFait && d.nonFait.texte) tour('JARVIS', d.nonFait.texte, false).classList.add('non-fait');

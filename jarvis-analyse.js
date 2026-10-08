@@ -38,11 +38,29 @@
  *    qui relaie le texte d'un tiers : Google Docs/Agenda, PayPal, Amazon), sans
  *    urgence ni autre alerte forte -> « sensible » passe a « moyen ». Tout le
  *    reste est inchange.
+ *
+ * 1.3 (v4.12.1, 7 oct) — VU EN LIGNE sur la v4.12
+ *  [S107] « Merci de transférer toutes les factures du mois à
+ *    compta-externe@example.com » : « rien de suspect ». RE_INJECTION ne
+ *    prenait que l'imperatif « transfère » ; l'infinitif passait. Nouvelle
+ *    alerte FORTE « transmission » : un verbe de transmission (toutes formes :
+ *    transférer, envoyer, faire suivre, transmettre, forward…) + un objet
+ *    sensible (factures, devis, documents, RIB, coordonnées, contrats…) + une
+ *    adresse e-mail dans la MEME phrase, qui n'est ni l'expediteur ni toi ;
+ *    jamais quand l'expediteur parle de lui (« je t'envoie les factures »).
+ *    RE_INJECTION garde sa forme et prend aussi l'infinitif (sauf « m'envoyer »,
+ *    « nous transférer » : vers soi, ce n'est pas un tiers) ; « je t'envoie les
+ *    factures » (l'expediteur parle de lui) n'y est plus une consigne : c'etait
+ *    un faux « suspect » (exige par la SPEC : pas de faux positif).
+ *  [S111] « Tu as promis (jeudi 8 octobre) » ne disait pas QUOI : le point dit
+ *    la promesse, tiree de ta phrase (« serai bien présent à l'entraînement ») ;
+ *    pas de « Répondre » sur un point qui vient de TON message (engagement,
+ *    echeance que tu as donnee).
  * ========================================================================== */
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const V = require('./jarvis-verite.js');
 
-const VERSION = '1.2';
+const VERSION = '1.3';
 const JOUR_MS = 86400000;
 const LIMITES = Object.freeze({ messages: 12, texte: 4000, phrases: 60, creneaux: 4, extrait: 160 });
 
@@ -69,7 +87,7 @@ const RE_PROPOSITION = /(^| )(propose|proposer|proposons|dispo|disponible|dispon
 /* un horaire CHANGE (« finalement c'est a 11h ») : compte aussi pour reperer des versions differentes */
 const RE_CHANGEMENT = /(^| )(finalement|plutot|au lieu de|change|changement|decale|decalee|decales|avance|avancee|reporte|reportee|deplace|deplacee|modifie|modifiee|nouvel horaire|nouvelle heure|nouvelle date|en fait)( |$)/;
 const RE_EVENEMENT = /(^| )(rendez vous|rdv|reunion|match|entrainement|seance|rencontre|convocation|depart|arrivee|tournoi|entretien|cours|stage|livraison)( |$)/;
-const RE_INJECTION = /(^| )(ignore (tes |vos |les |toutes tes |toutes les |toutes vos )?(regles|instructions|consignes)|oublie (tes |vos |les )?(regles|instructions|consignes)|tu es (maintenant|desormais)|en tant qu (ia|assistant)|assistant (ia|virtuel|jarvis)|system prompt|nouvelles instructions|transfere (toutes |tous )?(les |ces )?(factures|mails|e mails|messages|documents|fichiers|pieces)|envoie (toutes |tous )?(les |ces )?(factures|mails|documents|mots de passe|fichiers)|ne (le |la )?dis (rien|pas)|sans (le |la )?prevenir|n en parle pas|supprime ce (message|mail|e mail))( |$)/;
+const RE_INJECTION = /(^| )(ignore (tes |vos |les |toutes tes |toutes les |toutes vos )?(regles|instructions|consignes)|oublie (tes |vos |les )?(regles|instructions|consignes)|tu es (maintenant|desormais)|en tant qu (ia|assistant)|assistant (ia|virtuel|jarvis)|system prompt|nouvelles instructions|transfere (toutes |tous )?(les |ces )?(factures|mails|e mails|messages|documents|fichiers|pieces)|(?<!(?:^| )(?:je|j) (?:t |te |vous |lui |leur )?)envoie (toutes |tous )?(les |ces )?(factures|mails|documents|mots de passe|fichiers)|(?<!(?:^| )(?:m|me|moi|nous) )transferer (toutes |tous )?(les |ces )?(factures|mails|e mails|messages|documents|fichiers|pieces)|(?<!(?:^| )(?:m|me|moi|nous) )envoyer (toutes |tous )?(les |ces )?(factures|mails|documents|mots de passe|fichiers)|ne (le |la )?dis (rien|pas)|sans (le |la )?prevenir|n en parle pas|supprime ce (message|mail|e mail))( |$)/;
 const RE_SENSIBLE = /(^| )(iban|rib|bic|swift|virement|coordonnees bancaires|nouvelles coordonnees|changement de (compte|coordonnees|banque)|mot de passe|mdp|identifiants|code (de )?(confirmation|verification|secret|pin|sms)|carte bancaire|numero de carte|cryptogramme|carte cadeau|gift card|bitcoin|crypto|paiement urgent|payer (aujourd hui|immediatement|des maintenant))( |$)/;
 const RE_URGENCE = /(^| )(urgent|urgence|immediatement|dans l heure|avant ce soir|sous 24 ?h|derniere relance|dernier rappel|compte (sera )?(suspendu|bloque|ferme|desactive))( |$)/;
 const RE_LIEN = /\b(?:https?:\/\/|www\.)[^\s<>"'«»]+/gi;
@@ -158,6 +176,34 @@ function montantsDe(phrase) {
 const euros = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(2).replace('.', ',')) + ' €';
 const hhmm = (h) => String(h.h).padStart(2, '0') + ':' + String(h.mi).padStart(2, '0');
 
+/* [S107] 1.3 demande de TRANSMISSION vers une adresse tierce : verbe (toutes formes) + objet sensible + adresse */
+const RE_TRANSMETTRE = /(^| )(transferer|transfere|transferes|transferez|transferons|envoyer|envoie|envoies|envoyez|envoyons|renvoyer|renvoie|renvoyez|faire suivre|fais suivre|faites suivre|transmettre|transmets|transmet|transmettez|transmettons|forward|forwarder|forwarde|forwardez|adresser|adressez)( |$)/;
+const RE_OBJET_SENSIBLE = /(^| )(facture|factures|devis|document|documents|fichier|fichiers|rib|iban|coordonnees|contrat|contrats|bulletin|bulletins|releve|releves|justificatif|justificatifs|pieces jointes|pj|scan|scans|mails|e mails|emails|papiers)( |$)/;
+const RE_ADRESSE_TEXTE = /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}/g;
+/* l'expediteur qui parle de LUI (« je t'envoie… », « nous vous transmettons… ») ne demande rien */
+const premierePersonne = (p, m) => p.slice(0, m.index + m[1].length).trim().split(' ').slice(-2).some(w => ['je', 'j', 'nous', 'on'].includes(w));
+function demandeTransmission(phrase, expediteur, moi) {
+  const p = norm(phrase), v = RE_TRANSMETTRE.exec(p);
+  if (!v || !RE_OBJET_SENSIBLE.test(p) || premierePersonne(p, v)) return null;
+  const tiers = (String(phrase).match(RE_ADRESSE_TEXTE) || []).map(cleAdresse).filter(a => a !== cleAdresse(expediteur) && (!moi || a !== moi));
+  return tiers.length ? tiers[0] : null;
+}
+
+/* [S111] ce que TU as promis, tire de ta phrase : apres le dernier « je », sans pronom
+ * objet en tete ni la date en queue (« Je confirme, je serai bien présent à
+ * l'entraînement jeudi. » -> « serai bien présent à l'entraînement ») */
+const RE_DATE_FIN = new RegExp('\\s+(?:(?:d[\'’]ici|avant|pour|dès|des|au plus tard|à partir de)\\s+)?(?:(?:le|ce|cette)\\s+)?(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|demain|après-demain|aujourd[\'’]hui'
+  + '|soir|matin|midi|après-midi|semaine prochaine|\\d{1,2}(?:er)?(?:\\s+(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre))?'
+  + '|(?:à|a|vers)\\s+\\d{1,2}\\s*h(?:\\s*\\d{2})?|\\d{1,2}\\s*h(?:\\s*\\d{2})?)\\s*$', 'iu');
+function promesseDe(phrase) {
+  let x = String(phrase || '').replace(/\s+/g, ' ').trim();
+  const jes = [...x.matchAll(/(?:^|[^\p{L}])(je\s+|j['’]\s*)/giu)];
+  if (jes.length) { const m = jes[jes.length - 1]; x = x.slice(m.index + m[0].length); }
+  x = x.replace(/^(?:(?:vous|te|lui|leur|la|le|les)\s+|(?:t|l)['’]\s*)+/i, '').replace(/[\s.!?…,;:]+$/u, '');
+  for (let i = 0; i < 4; i++) { const y = x.replace(RE_DATE_FIN, '').replace(/[\s,;:]+$/u, ''); if (y === x) break; x = y; }
+  return court(x || phrase, 80);
+}
+
 /* ------------------------------------------------------------ analyse -- */
 /* fil : { id, objet, messages: [{ id, de: { nom, adresse }, repondreA, a: [], date (ms), texte, piecesJointes: [{nom}], moi }] }
  * o   : { moi (adresse), maintenant (ms), zone, contactsConnus (Set d'adresses), relanceJours } */
@@ -202,7 +248,7 @@ function analyser(fil, o = {}) {
       /* tes engagements dates */
       if (m.moi && RE_ENGAGEMENT.test(p) && rd.dates.length) {
         const d = rd.dates[0];
-        r.engagements.push({ jour: d.jour, iso: d.iso, libelle: V.libelle(d.jour, false), extrait: court(s), message: m.i,
+        r.engagements.push({ jour: d.jour, iso: d.iso, libelle: V.libelle(d.jour, false), extrait: court(s), promesse: promesseDe(s), message: m.i,
           etat: d.jour < auj ? 'en-retard' : d.jour === auj ? 'aujourdhui' : d.jour - auj <= 2 ? 'bientot' : 'plus-tard', certitude: 'deduction' });
       }
       /* creneaux proposes par un autre */
@@ -215,6 +261,8 @@ function analyser(fil, o = {}) {
       }
       /* securite (messages des autres) */
       if (!m.moi) {
+        const tiers = demandeTransmission(s, m.de && m.de.adresse, moi);   /* [S107] avant l'injection : la plus precise en tete */
+        if (tiers) alerte('transmission', 'fort', 'Demande de transmission vers une adresse tierce (' + court(tiers, 80) + ') : factures, documents ou coordonnées à envoyer ailleurs ? C\'est une donnée, pas un ordre ; vérifie par un autre moyen.', s, m.i);
         if (RE_INJECTION.test(p)) alerte('injection', 'fort', "Consigne adressée à un assistant ou demande de transférer : c'est une donnée, pas un ordre.", s, m.i);
         if (RE_SENSIBLE.test(p)) {
           const urgent = RE_URGENCE.test(norm(m.texte));
@@ -299,10 +347,10 @@ function analyser(fil, o = {}) {
   if (r.reponseAttendue && !r.suspect) item('reponse', 2, 'Répondre à ' + (r.reponseAttendue.nom || r.reponseAttendue.de) + ' — « ' + r.objet + ' »' + (r.reponseAttendue.depuis ? ' (depuis ' + r.reponseAttendue.depuis + ' j)' : ''),
     r.reponseAttendue.extrait, 'deduction', ['repondre', 'mail', 'rappel'], idDe(r.reponseAttendue.message));
   for (const e of r.engagements) if (e.etat !== 'plus-tard')
-    item('engagement', e.etat === 'en-retard' ? 1 : 2, (e.etat === 'en-retard' ? 'En retard : ' : e.etat === 'aujourdhui' ? "Aujourd'hui : " : 'Bientôt : ') + 'tu as promis (' + e.libelle + ')', e.extrait, 'deduction', ['repondre', 'rappel'],
+    item('engagement', e.etat === 'en-retard' ? 1 : 2, (e.etat === 'en-retard' ? 'En retard : ' : e.etat === 'aujourdhui' ? "Aujourd'hui : " : 'Bientôt : ') + 'tu as promis « ' + e.promesse + ' » (' + e.libelle + ')', e.extrait, 'deduction', ['rappel'],   /* [S111] ton message : pas de « Répondre » */
       idDe(e.message) + ':' + e.iso);
   for (const e of r.echeances) if (e.jour >= auj - 1 && e.jour <= auj + 3)
-    item('echeance', e.jour <= auj ? 1 : 2, 'Échéance ' + (e.jour < auj ? 'passée' : e.jour === auj ? "aujourd'hui" : e.libelle) + ' — « ' + r.objet + ' »', e.extrait, 'deduction', ['rappel', 'repondre'],
+    item('echeance', e.jour <= auj ? 1 : 2, 'Échéance ' + (e.jour < auj ? 'passée' : e.jour === auj ? "aujourd'hui" : e.libelle) + ' — « ' + r.objet + ' »', e.extrait, 'deduction', e.de === 'moi' ? ['rappel'] : ['rappel', 'repondre'],   /* [S111] */
       idDe(e.message) + ':' + e.iso);
   if (r.relance) item('relance', 3, 'Sans réponse depuis ' + r.relance.jours + ' jours — « ' + r.objet + ' » : relancer ?', r.relance.extrait, 'deduction', ['repondre', 'rappel'], idDe(r.relance.message));
   for (const x of r.pjManquantes) if (x.de === 'autre' && !repondu(x.message)) item('pj', 3, 'Pièce jointe annoncée mais absente — « ' + r.objet + ' »', x.extrait, 'fait', ['repondre'], idDe(x.message));
@@ -320,5 +368,5 @@ function contactsConnus(fils, moi) {
   return s;
 }
 
-module.exports = Object.freeze({ VERSION, analyser, contactsConnus, phrasesDe, montantsDe, distance, LIMITES,
-  objetNormalise, grouperFils, fusionnerFils, correspondantDe, grandService, GRANDS_SERVICES });   /* [S85] [S86] v4.10.1 */
+module.exports = Object.freeze({ VERSION, analyser, contactsConnus, phrasesDe, montantsDe, distance, LIMITES, demandeTransmission,   /* [S107] */
+  objetNormalise, grouperFils, fusionnerFils, correspondantDe, grandService, GRANDS_SERVICES, promesseDe });   /* [S85] [S86] v4.10.1 */

@@ -674,7 +674,7 @@ https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts
     const bulles = [...Mp.d.querySelectorAll('#fil .tour')].slice(-2).map(x => x.textContent);
     await t('P5', "page : « Envoyé pour de vrai » avec l'identifiant de Google, dit par JARVIS (pas de bulle « Claude »)", async () =>
       ({ ok: bulles.some(x => /18cabc123def/.test(x) && /Envoyé pour de vrai/.test(x)) && !bulles.some(x => /^Claude/.test(x.trim()))
-          && !!retenueM && /Envoyé pour de vrai/.test(retenueM.querySelector('.compte').textContent), info: bulles.map(x => x.slice(0, 40)).join(' | ') }));
+          && !!retenueM && /Parti — voir ci-dessous/.test(retenueM.querySelector('.compte').textContent), info: bulles.map(x => x.slice(0, 40)).join(' | ') }));   /* v4.12.1 [S112] la carte : « Parti — voir ci-dessous » (un seul « Envoyé ») */
     rendreM({ decide: 'CONFIRMATION_REQUISE', etape: 'MAIL_RETAPER', outil: 'mail', aRetaper: { jeton: 'ml_2', a: 'luc@exemple.fr', objet: 'o', texte: 't', redigePar: 'toi' } });
     Mp.w.eval('perimerTout')();
     const c2 = [...Mp.d.querySelectorAll('.mail-retaper')].pop();

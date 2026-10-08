@@ -419,8 +419,8 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
     const apres = visible(dMail), dernier = [...Pp.d.querySelectorAll('#fil .tour')].pop();
     await t('P8', "vrai e-mail : destinataire, objet et texte visibles AVANT l'envoi ; APRÈS « Envoyé », une ligne « ✓ Envoyé à luc@… — « Re: Match samedi » » (le texte au toucher) et un message court (preuve sous « + détail »)", async () =>
       ({ ok: /luc@club-hand\.fr/.test(avantEnvoi) && /je serai présent samedi/.test(avantEnvoi) && !!dMail && dMail.classList.contains('replie')
-          && /✓ Envoyé à luc@club-hand\.fr — « Re: Match samedi »/.test(apres) && !/je serai présent/.test(apres)
-          && /Envoyé pour de vrai, vérifié chez Google\./.test(visible(dernier)) && !/18cabc/.test(visible(dernier)) && /18cabc/.test((dernier || {}).textContent || ''),
+          && /✓ Parti — voir ci-dessous \(à luc@club-hand\.fr — « Re: Match samedi »\)/.test(apres) && !/je serai présent/.test(apres)   /* v4.12.1 [S112] un seul message : celui du serveur, avec la preuve */
+          && /^JARVIS ?Envoyé pour de vrai, depuis le compte d'essai JARVIS, à luc@club-hand\.fr/.test(visible(dernier).trim()) && /18cabc/.test(visible(dernier)),
          info: apres.slice(0, 90) + ' | ' + visible(dernier).slice(0, 80) }));
     const Pd = await page({ routes: routesP }); pagesT.push(Pd);
     await t('P9', "garde : démo publique inchangée : pas d'onglets actifs (ni « prive »), le point du jour reste dans la conversation, rien n'est replié", async () =>

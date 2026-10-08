@@ -104,7 +104,9 @@ const derniereReponse = () => [...appelsModele].reverse().find(c => c.max_tokens
   sid = (await appel('/api/session', {})).sessionId;
   const n0 = appelsAgenda;
   plans.push({ action: 'READ', resource: 'AGENDA', target: 'demain' });
-  const r1 = await appel('/api/chat', { sessionId: sid, message: "qu'est-ce que j'ai demain ?" });
+  /* v4.12.1 [S106] « qu'est-ce que j'ai demain ? » (la liste seule) est écrite par le serveur, sans modèle :
+   * une question MÊLÉE (« … et c'est où ? ») garde ce que ces tests regardent chez le modèle */
+  const r1 = await appel('/api/chat', { sessionId: sid, message: "qu'est-ce que j'ai demain, et c'est où ?" });
   const plan1 = dernierPlanificateur(), rep1 = derniereReponse();
   await t('V4', "le planificateur connait l'outil (declare par la couche) et la date du jour", async () => {
     const ok = /resource AGENDA/.test(plan1.messages[0].content) && /Aujourd'hui : /.test(plan1.messages[0].content);

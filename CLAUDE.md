@@ -1,8 +1,8 @@
 # JARVIS — consignes pour Claude (dépôt public : aucun secret, aucune adresse privée)
 
-## État (branche `Racine`, après fusion de la PR v4.12)
-- Passerelle **v4.12.0** (avant : v4.11.0) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
-- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.4, `jarvis-mcp.js` 1.0, `jarvis-verite.js` 1.6, `jarvis-analyse.js` 1.2.
+## État (branche `Racine`, après fusion de la PR v4.12.1)
+- Passerelle **v4.12.1** (avant : v4.12.0) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
+- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.4, `jarvis-mcp.js` 1.1, `jarvis-verite.js` 1.7, `jarvis-analyse.js` 1.3, vigilance 5.29.5 (+ « dis-lui »).
 - v4.9.1 : « Ouvrir dans Mail » (mailto:), demande double dite, historique 12 échanges, pages `/confidentialite` et `/conditions`.
 - v4.10 : « qu'est-ce que j'ai à gérer ? » (agenda + conversations + notes, sans IA), conversations entières, réponse dans la conversation, créneau vérifié contre l'agenda, rappels, sauvegarde des souvenirs (fichier).
 - v4.10.1 : fils Gmail regroupés (objet normalisé + même correspondant, 4 au plus), DMARC (1er en-tête Authentication-Results), offres d'agenda retirées, interface allégée sur l'instance privée (« Tout afficher »), lecture 4 par 4, « Repartir au vert », carte périmée relue, « à gérer » dans le point du jour.
@@ -11,6 +11,7 @@
 - v4.12 A : connecteur MCP pour l'appli Claude (`POST /mcp`, instance privée) : `lire_mails`, `proposer_mail`, `proposer_evenement` ; propositions confirmées dans « Aujourd'hui » ; état dans Réglages.
 - v4.12 B : alerte « adresse vue dans un mail » : adresse retapée par la personne mais vue dans un contenu reçu → carte qui cite l'extrait d'origine, avant toute suite.
 - v4.12 C : démo publique lisible en 10 s : promesse, bouton « Voir un mail piégé bloqué », parcours en 3 écrans (vraie tentative, « Essaie toi-même »), jargon dans « Détails techniques » (replié), lien vidéo si `JARVIS_DEMO_VIDEO` (https, démo seulement). SMS (SPEC D) non codé.
+- v4.12.1 (vu en ligne le 7 oct) : liste d'agenda + conflits écrits par le serveur (modèle non appelé pour « j'ai quoi samedi ») ; alerte forte « transmission vers une adresse tierce » ; l'adresse d'abord (liste, alerte), le contenu ensuite ; demande en attente (« Que doit dire l'e-mail ? », « À qui ? », « Quel titre ? », « À quelle heure ? » : message suivant, 2 min) ; pièce jointe dite tout de suite ; « dis-lui que … » ; « tu as promis « … » » ; un seul « Envoyé » ; `/mcp` sans `WWW-Authenticate`, sondes sans clé non comptées ; marqueur ⛔ / ◐ / ✅ en tête de chaque réponse d'outil ; onglet « Contrôle » (Claude fait / JARVIS protège).
 - Render déploie `Racine` seulement « After CI Checks Pass ».
 - Deux services, même code :
   - démo publique (sans `JARVIS_CLE_ACCES`) : **jamais** de variable Gmail, agenda, élévation ni connecteur (`JARVIS_DEMO_VIDEO` seulement) ;
@@ -30,7 +31,7 @@
 | `jarvis-elevation.js` | Face ID (WebAuthn) et code de secours, liés à UNE transaction. |
 | `jarvis-gmail.js` | Gmail du compte d'essai : envoi (liste fermée), réponse dans une conversation (fil revérifié), lecture des e-mails et des conversations ; deux jetons séparés. |
 | `jarvis-analyse.js` | Analyse des conversations par règles, sans IA : réponse attendue, échéances, engagements, relances, PJ manquante, versions différentes, créneaux, mail suspect ; chaque résultat avec sa preuve et sa certitude. |
-| `jarvis-mcp.js` | Connecteur Claude (MCP), module pur : JSON-RPC, schémas des 3 outils, contrôles d'entrée, clé, origine, compteurs globaux. |
+| `jarvis-mcp.js` | Connecteur Claude (MCP), module pur : JSON-RPC, schémas des 3 outils, contrôles d'entrée, clé, origine, compteurs globaux, marqueur ⛔ / ◐ / ✅ (1.1). |
 | `jarvis-appli.js` | Manifeste web et icônes (écran d'accueil). |
 | `confidentialite.html`, `conditions.html` | Pages publiques exigées par Google (appli OAuth en Production). |
 | `jarvis-manifeste.js` + `MANIFESTE.json` | Empreintes SHA-256 des fichiers qui tournent ; CI refuse un dépôt non conforme. |
@@ -54,6 +55,11 @@
 - Une action par message : ce qui n'est pas fait est dit par le serveur ; le modèle ne propose jamais d'agir à la place de la personne.
 - Option `manuel` de la couche : seulement pour un geste du serveur (carte « Créer », envoi retapé, lectures déclenchées par un toucher avec une cible fixée par le serveur). Jamais pour un plan du modèle : il garde son sceau de contexte.
 - Une lecture en échec ou incomplète ne s'affiche jamais comme « rien » : elle le dit, et n'est pas gardée en cache.
+- Agenda (v4.12.1) : la liste et les conflits sont écrits par le serveur (chevauchement strict ; s'enchaîner, journée entière, anniversaire : jamais un conflit ; agenda non lu → « conflits non vérifiés ») ; question qui ne demande que la liste : le modèle n'est pas appelé ; question mêlée : ses phrases avec heure, « chevauch », « conflit », « libre » sont retirées.
+- Envoi (v4.12.1) : adresse valide → liste → alerte → seulement ensuite contenu / rédaction ; une adresse refusée ou en alerte ne fait jamais demander le contenu.
+- Demande en attente (v4.12.1) : ce qui est gardé vient de la frappe (la cible gardée est celle tapée) ; le message suivant seulement, 2 min au plus ; nouveau verbe, autre adresse, question → annulée et dite ; la couche ne reçoit que la frappe du tour (aucune preuve hors de son tour) ; « Repartir au vert » et une carte périmée l'effacent.
+- Connecteur (v4.12.1) : chaque réponse d'outil commence par le marqueur du serveur (⛔ JARVIS a coupé / ◐ JARVIS attend ton geste / ✅ JARVIS + codes), jamais un contenu lu dedans ; pas de `WWW-Authenticate` ; sans `Authorization` : 401 non compté.
+- « Contrôle » (v4.12.1) : instance privée seulement, derrière la clé ; 50 lignes en mémoire ; jamais « Claude a refusé » ; aucun contenu de mail hors l'extrait d'alerte (relu dans le magasin des alertes, jamais gardé dans la ligne).
 - Démo publique : aucun mot de jargon (plancher, sceau, ancre, rayon, G1…G5, noyau, CONTENT_DERIVED) dans le texte visible hors « Détails techniques » ; son modèle reçoit la promesse, jamais « inviolable » (phrase retirée par le serveur, et c'est dit).
 - Fermé par défaut : une variable mal réglée désactive l'outil et `/health` le dit ; jamais de repli silencieux vers la simulation.
 - Aucun secret (clé, jeton, client OAuth, code) dans un commit, un journal, une capture, un message ou une réponse d'API.
