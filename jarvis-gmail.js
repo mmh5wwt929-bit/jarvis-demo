@@ -271,10 +271,11 @@ function texteDe(payload) {
     if (Array.isArray(p.parts)) for (const x of p.parts.slice(0, 30)) visiter(x, prof + 1);
   };
   visiter(payload, 0);
-  const liens = html !== null ? liensTrompeursDe(html) : [];   /* [S133] v4.15 : dans le HTML, meme si le texte brut existe */
+  const al = html !== null ? analyserLiens(html) : { liens: [], incomplet: false };   /* [S133] v4.15 : dans le HTML, meme si le texte brut existe */
+  const liens = al.liens;
   const brut = plain !== null ? plain : html !== null ? html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>|<\/p>/gi, '\n')
     .replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'") : '';
-  return { texte: brut, piecesJointes: pj, liens };
+  return { texte: brut, piecesJointes: pj, liens, liensIncomplet: al.incomplet };
 }
 /* [S133] v4.15 LE VRAI LIEN : un lien HTML dont le texte AFFICHE est une adresse web
  * ou un domaine (« banque.fr », « https://www.banque.fr/compte ») mais dont la CIBLE
@@ -283,21 +284,32 @@ function texteDe(payload) {
  * vraie destination disparaissait avec les balises. */
 const RE_DOMAINE_AFFICHE = /^(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,24})(?::\d+)?(?:[\/?#]\S*)?$/i;
 const domaineEnregistrable = (h) => { const l = String(h || '').toLowerCase().replace(/\.$/, '').split('.').filter(Boolean); return l.length >= 2 ? l.slice(-2).join('.') : null; };
-function liensTrompeursDe(html) {
-  const out = [], vus = new Set();
-  const decode = (x) => String(x).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
-  for (const m of String(html).slice(0, 1024 * 1024).matchAll(/<a\b[^>]*?\bhref\s*=\s*(["'])([^"']{1,2048})\1[^>]*>([\s\S]{0,600}?)<\/a\s*>/gi)) {
-    if (out.length >= 5) break;
-    const texte = decode(m[3]), a = RE_DOMAINE_AFFICHE.exec(texte);
-    if (!a) continue;
-    let cible = null; try { const u = new URL(decode(m[2])); if (u.protocol === 'http:' || u.protocol === 'https:') cible = u.hostname; } catch { cible = null; }
-    const dA = domaineEnregistrable(a[1]), dC = domaineEnregistrable(cible);
+function analyserLiens(html) {
+  /* lecture LINEAIRE (pas de regex sur tout le HTML : « <a <a <a … » sans « > » prenait 110 s) :
+   * chaque balise <a> est bornee (1 000 caracteres), son texte aussi (600), 2 000 balises au plus */
+  const out = [], vus = new Set(), h = String(html).slice(0, 512 * 1024), bas = h.toLowerCase();
+  const decode = (x) => String(x).replace(/<[^>]{0,200}>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
+  let pos = 0, n = 0, incomplet = String(html).length > h.length;
+  while (out.length < 5) {
+    if (n++ >= 2000) { incomplet = bas.indexOf('<a', pos) >= 0; break; }
+    const a = bas.indexOf('<a', pos); if (a < 0) break;
+    pos = a + 2;
+    if (!/[\s>]/.test(bas[a + 2] || '')) continue;
+    const f0 = bas.slice(a, a + 1001).indexOf('>'), fin = f0 < 0 ? -1 : a + f0; if (fin < 0) continue;
+    const balise = h.slice(a, fin + 1), href = /\bhref\s*=\s*(["'])([^"']{1,2048})\1/i.exec(balise);
+    const f1 = bas.slice(fin, fin + 604).indexOf('</a'), ferme = f1 < 0 ? -1 : fin + f1; if (!href || ferme < 0) continue;
+    pos = ferme + 3;
+    const texte = decode(h.slice(fin + 1, ferme)), m = RE_DOMAINE_AFFICHE.exec(texte);
+    if (!m) continue;
+    let cible = null; try { const u = new URL(decode(href[2])); if (u.protocol === 'http:' || u.protocol === 'https:') cible = u.hostname; } catch { cible = null; }
+    const dA = domaineEnregistrable(m[1]), dC = domaineEnregistrable(cible);
     if (!dA || !dC || dA === dC || vus.has(dA + '>' + dC)) continue;
     vus.add(dA + '>' + dC);
-    out.push(Object.freeze({ affiche: a[1].toLowerCase(), cible: String(cible).toLowerCase() }));
+    out.push(Object.freeze({ affiche: m[1].toLowerCase(), cible: String(cible).toLowerCase() }));
   }
-  return out;
+  return { liens: out, incomplet };
 }
+const liensTrompeursDe = (html) => analyserLiens(html).liens;
 /* [S120] v4.13 0a — le texte ENTIER (64 Ko au plus) pour les REGLES seulement.
  * Range a cote du mail, jamais DANS le mail : ni JSON.stringify, ni le modele,
  * ni la page, ni le connecteur ne peuvent l'emporter. Retrouve par
@@ -307,11 +319,11 @@ function liensTrompeursDe(html) {
  * incomplet : le mail depasse 64 Ko, sa fin n'est pas lue par les regles. */
 const ANALYSE = new Map();
 const ANALYSE_MAX = 400, ANALYSE_MS = 30 * 60 * 1000;
-function retenirAnalyse(objet, brutComplet, liens) {
+function retenirAnalyse(objet, brutComplet, liens, liensIncomplet) {
   const c = nettoyer(brutComplet, LIMITES_MAIL.analyseMax + 1), id = String(objet && objet.id || '');
   if (!id) return objet;
   ANALYSE.delete(id);
-  ANALYSE.set(id, Object.freeze({ texte: c.slice(0, LIMITES_MAIL.analyseMax), incomplet: c.length > LIMITES_MAIL.analyseMax, ts: Date.now(),
+  ANALYSE.set(id, Object.freeze({ texte: c.slice(0, LIMITES_MAIL.analyseMax), incomplet: c.length > LIMITES_MAIL.analyseMax || liensIncomplet === true, ts: Date.now(),
     liensTrompeurs: Object.freeze((liens || []).slice(0, 5)) }));   /* [S133] */
   while (ANALYSE.size > ANALYSE_MAX) ANALYSE.delete(ANALYSE.keys().next().value);
   return objet;
@@ -560,7 +572,7 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
         mails.push(retenirAnalyse(Object.freeze({ id, de: nettoyer(entete(m.json, 'from'), 150), objet: nettoyer(entete(m.json, 'subject'), 200), date: nettoyer(entete(m.json, 'date'), 60),
           texte: brut.slice(0, L.extraitMax), coupe: brut.length > L.extraitMax, piecesJointes: t.piecesJointes,
           nonLu: Array.isArray(m.json.labelIds) && m.json.labelIds.includes('UNREAD'),
-          repondreA: (adressesDe(entete(m.json, 'reply-to'))[0] || {}).adresse || null, cc: adressesDe(entete(m.json, 'cc')).map(x => x.adresse).slice(0, 20) }), t.texte, t.liens));
+          repondreA: (adressesDe(entete(m.json, 'reply-to'))[0] || {}).adresse || null, cc: adressesDe(entete(m.json, 'cc')).map(x => x.adresse).slice(0, 20) }), t.texte, t.liens, t.liensIncomplet));
       }
       return { ok: true, filtre: permis.filtre, mails: Object.freeze(mails), tronque: typeof l.json.nextPageToken === 'string' };
     },
@@ -686,7 +698,7 @@ function convertirFil(id, json, moi) {
       objet: nettoyer(decoderEntete(entete(m, 'subject')), 200), texte: brut.slice(0, LIMITES_MAIL.texteFil), coupe: brut.length > LIMITES_MAIL.texteFil,
       piecesJointes: Object.freeze(piecesDe(m.payload)), messageId: RE_MESSAGE_ID.test(mid) ? mid : null,
       references: referencesDe(m), auth: authDe(m),   /* [S85] [S86] */
-      moi: labels.includes('SENT') || (!!m0 && de.adresse === m0), nonLu: labels.includes('UNREAD') }), nouvelle, t.liens);
+      moi: labels.includes('SENT') || (!!m0 && de.adresse === m0), nonLu: labels.includes('UNREAD') }), nouvelle, t.liens, t.liensIncomplet);
   });
   return Object.freeze({ id, objet: messages.length ? messages[0].objet : '', messages: Object.freeze(messages) });
 }

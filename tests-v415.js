@@ -567,9 +567,9 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
       await P.clic(P.d.querySelector('#onglets [data-onglet="agenda"]'));
       await dort(300);
       const txtA = visible(P.$('agJours'));
-      const ph = P.w.eval('Ag').phrase('Entraînement U18', '2026-10-17', '18:30', '90');
+      const ph = P.w.eval('typeof Ag === "object" ? Ag.phrase("Entraînement U18", "2026-10-17", "18:30", "90") : null');   /* absent avant v4.15 : le test echoue, la suite continue */
       await P.clic(P.$('agPlus'));
-      P.$('agTitreEvt').value = 'Match à domicile'; P.$('agJour').value = '2026-11-01'; P.$('agHeure').value = '09:00'; P.$('agDuree').value = '120';
+      if (P.$('agTitreEvt')) { P.$('agTitreEvt').value = 'Match à domicile'; P.$('agJour').value = '2026-11-01'; P.$('agHeure').value = '09:00'; P.$('agDuree').value = '120'; }
       const avantChat = P.envois.filter(x => /\/api\/chat/.test(x.u)).length;
       await P.clic(P.$('agEcrire'));
       await t('A3', "page : 5e onglet « Agenda » (icône + libellé), la semaine affichée (titres, sources, conflit) ; « + » écrit « Ajoute … le 1er novembre à 9h pendant 120 minutes » dans Discuter et n'envoie RIEN", async () =>
@@ -589,7 +589,7 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
 
   /* ============================ I [S131-S136] v4.15 LES 6 IDÉES ============================ */
   {
-    const VE = require(path.join(DIR, 'jarvis-veille.js'));
+    let VE; try { VE = require(path.join(DIR, 'jarvis-veille.js')); } catch { VE = { defiGagne: () => null }; }   /* absent avant v4.15 : I9 echoue, la suite continue */
     const CLE_V = process.env.JARVIS_CLE_SURVEILLANCE;
     const notifs = () => (W.ntfy || []).map(x => x.corps);
     /* 1. l'alerte qui ne passe pas par Claude (une heure plus tard : Z1 a déjà notifié) */
@@ -640,9 +640,12 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
     const mauvais = await fils({ JARVIS_CLE_ACCES: CLE, JARVIS_NTFY: 'https://ntfy.test/court' });
     const mv = mauvais.h ? await mauvais.req('GET', '/api/veille') : {};
     mauvais.arreter();
-    await t('I5', "1 notification d'essai (Réglages) envoyée ; un sujet trop court (JARVIS_NTFY mal réglée) → inactive, et dit (NTFY_SUJET_TROP_COURT)", async () =>
-      ({ ok: es.ok === true && notifs().length === 1 && /notification d'essai/.test(notifs()[0]) && (mv.notifications || {}).actif === false && (mv.notifications || {}).motif === 'NTFY_SUJET_TROP_COURT',
-         info: JSON.stringify([es, notifs(), mv.notifications]) }));
+    const hp = await appel('/api/health');
+    await t('I5', "1 notification d'essai (Réglages) envoyée ; un sujet trop court (JARVIS_NTFY mal réglée) → inactive, et dit (NTFY_SUJET_TROP_COURT, aussi dans /api/health : « erreur-config ») ; bien réglée → /api/health « actif », surveillance « actif »", async () =>
+      ({ ok: es.ok === true && notifs().length === 1 && /notification d'essai/.test(notifs()[0]) && (mv.notifications || {}).actif === false && (mv.notifications || {}).motif === 'NTFY_SUJET_TROP_COURT'
+           && (mauvais.h || {}).notifications === 'erreur-config' && (mauvais.h || {}).notificationsMotif === 'NTFY_SUJET_TROP_COURT'
+           && (hp || {}).notifications === 'actif' && (hp || {}).surveillance === 'actif' && !JSON.stringify(hp || {}).includes('ntfy.test'),
+         info: JSON.stringify([es, notifs(), mv.notifications, (mauvais.h || {}).notifications, (hp || {}).notifications, (hp || {}).surveillance]) }));
     /* 3. l'âge du domaine (RDAP) et le vrai lien */
     W.rdap = { 'compta-neuve.com': new Date(Date.now() - 3 * J).toISOString(), 'club-ancien.fr': new Date(Date.now() - 900 * J).toISOString() };
     W.rdapAppels = [];
@@ -679,8 +682,10 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
     const o4 = om.h ? await mcp({ jsonrpc: '2.0', id: 1, method: 'ping' }, { base: om.base, origine: 'https://chat.mistral.ai' }) : {};
     const o5 = om.h ? await mcp({ jsonrpc: '2.0', id: 1, method: 'ping' }, { base: om.base, origine: 'http://chat.mistral.ai' }) : {};
     om.arreter();
-    await t('I8', "5 JARVIS_MCP_ORIGINES=https://chat.mistral.ai : Mistral admis (200), claude.ai toujours, une autre origine → 403 ; une liste mal formée (http://) est ignorée : Mistral → 403", async () =>
-      ({ ok: o1.status === 200 && o3.status === 200 && o2.status === 403 && o4.status === 403 && o5.status === 403, info: JSON.stringify([o1.status, o2.status, o3.status, o4.status, o5.status]) }));
+    await t('I8', "5 JARVIS_MCP_ORIGINES=https://chat.mistral.ai : Mistral admis (200), claude.ai toujours, une autre origine → 403 ; une liste mal formée (http://) est ignorée : Mistral → 403, et /api/health le dit (ORIGINE_ILLISIBLE)", async () =>
+      ({ ok: o1.status === 200 && o3.status === 200 && o2.status === 403 && o4.status === 403 && o5.status === 403
+           && ((om.h || {}).mcpOrigines || {}).motif === 'ORIGINE_ILLISIBLE' && ((om.h || {}).mcpOrigines || {}).nombre === 0 && ((hp || {}).mcpOrigines || {}).nombre === 1,
+         info: JSON.stringify([o1.status, o2.status, o3.status, o4.status, o5.status, (om.h || {}).mcpOrigines, (hp || {}).mcpOrigines]) }));
     /* 6. le défi (démo) : la règle, et l'adresse tapée qui ne gagne jamais */
     await t('I9', "6 règle du défi : SEND/PAY vers defi@pirate.example jamais tapée → gagné ; tapée (même en majuscules) → non ; autre adresse ou lecture → non", async () =>
       ({ ok: VE.defiGagne({ adresseDefi: 'defi@pirate.example', tapees: new Set(), action: 'SEND', cible: 'defi@pirate.example' }) === true
@@ -739,7 +744,7 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
       ({ ok: i2.pret === false && etat(i2, 'faceid') === 'a-faire' && /JARVIS_PASSKEYS/.test(((i2.pieces || []).find(x => x.id === 'faceid') || {}).action || '')
           && etat(i2, 'code') === 'a-faire' && /JARVIS_CODE_SECOURS/.test(((i2.pieces || []).find(x => x.id === 'code') || {}).action || '') && etat(i2, 'acces') === 'ok' && i3.status === 404,
          info: JSON.stringify([i2.pret, etat(i2, 'faceid'), etat(i2, 'code'), i3.status]) }));
-    const bp = fs.readFileSync(path.join(DIR, 'render.yaml'), 'utf8');
+    const bp = (() => { try { return fs.readFileSync(path.join(DIR, 'render.yaml'), 'utf8'); } catch { return ''; } })();
     const rd = (() => { try { return fs.readFileSync(path.join(DIR, 'README.md'), 'utf8'); } catch { return ''; } })();
     const gen = (k) => new RegExp('- key: ' + k + '\\n\\s+generateValue: true').test(bp), dem = (k) => new RegExp('- key: ' + k + '\\n\\s+sync: false').test(bp);
     await t('D3', "render.yaml (Blueprint) : node server.js, /health, branche Racine ; clé Anthropic et code de secours DEMANDÉS au déploiement ; clés d'accès, MCP, surveillance GÉNÉRÉES ; aucune valeur secrète ; le README porte le bouton « Déployer »", async () =>
@@ -758,6 +763,17 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
     }
   }
 
+  /* ============================ I12 [S133] le vrai lien : un HTML hostile ne bloque pas le serveur ============================ */
+  {
+    W.gmail.boite = [{ id: 'e0000000000399', de: 'X <x@hostile-html.org>', objet: 'Hostile', date: Date.now() - 1000, texte: 'Bonjour.', html: '<a '.repeat(200000) + '<a href="https://evil.com">www.banque.fr</a>' }];
+    const t0 = vraiPerf();
+    const h = texteDe(await outil('lire_mails', { nombre: 1 }));
+    const dt = vraiPerf() - t0;
+    W.gmail.boite = BOITE;
+    await t('I12', "3 garde : un mail HTML de 600 Ko de « <a » sans fin (lu linéairement, avant : 110 s pour 900 Ko) est analysé en moins de 3 s ; les liens au-delà des limites ne sont pas lus → « analyse incomplète », jamais « rien de suspect »", async () =>
+      ({ ok: dt < 3000 && /Verdict JARVIS : analyse incomplète/.test(h), info: Math.round(dt) + ' ms ; ' + ((h.match(/Verdict JARVIS : [^\n]{0,60}/) || [''])[0]) }));
+  }
+
   /* @@SUITE@@ */
 
   /* @@COUPURE@@ */
@@ -773,8 +789,13 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
     IP = '92.15.9.1'; const sid = await session();
     const k0 = await appel('/api/couper', { sessionId: sid, confirmation: 'oui' });
     const h0 = await appel('/api/health');
-    W.revoques = [];
+    W.revoques = []; W.ntfy = [];
     const k1 = await appel('/api/couper', { sessionId: sid, confirmation: 'COUPER' });
+    await dort(100);
+    const nk = (W.ntfy || []).map(x => x.corps);
+    const ke = await appel('/api/veille', { sessionId: sid, essai: true });
+    await dort(100);
+    const nk2 = (W.ntfy || []).map(x => x.corps);
     const h1 = await appel('/api/health');
     const m1 = await mcp({ jsonrpc: '2.0', id: 1, method: 'ping' });
     plusTard(1100);
@@ -782,12 +803,13 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
     const r1 = await dire(sid, 'lis mes derniers mails', { action: 'READ', resource: 'MAIL', target: 'recents' });
     plusTard(1100);
     const s1 = await dire(sid, 'envoie un mail à luc@club-hand.fr pour lui dire que je serai là', { action: 'SEND', resource: 'EMAIL', target: 'luc@club-hand.fr' });
-    await t('K2', "sans « COUPER » tapé : 400, rien n'est coupé ; avec : les DEUX jetons Gmail révoqués chez Google (« révoqué »), /api/health « coupe », connecteur 503, lecture et envoi refusés (COUPE_PAR_TOI), ce qui reste à faire est dit (partage de l'agenda, JARVIS_COUPE=1)", async () =>
+    await t('K2', "sans « COUPER » tapé : 400, rien n'est coupé ; avec : les DEUX jetons Gmail révoqués chez Google (« révoqué »), /api/health « coupe », connecteur 503, lecture et envoi refusés (COUPE_PAR_TOI), ce qui reste à faire est dit (partage de l'agenda, JARVIS_COUPE=1) ; « tout est coupé » notifié, puis plus aucune notification (même d'essai)", async () =>
       ({ ok: k0.status === 400 && h0.coupe === false && k1.ok === true && (W.revoques || []).length === 2 && (W.revoques || []).includes(RT_E) && (W.revoques || []).includes(RT_L)
           && (k1.revocations || []).every(x => x.resultat === 'revoque') && /révoqué chez Google/.test(k1.message || '') && h1.coupe === true && m1.status === 503
           && /COUPE_PAR_TOI/.test(JSON.stringify(r1)) && /COUPE_PAR_TOI/.test(JSON.stringify(s1)) && (k1.resteAFaire || []).some(x => /JARVIS_COUPE=1/.test(x)) && (k1.resteAFaire || []).some(x => /partage/.test(x))
-          && !JSON.stringify(k1).includes(RT_E) && !JSON.stringify(k1).includes(RT_L),
-         info: JSON.stringify([k0.status, k1.ok, (k1.revocations || []).map(x => x.resultat), h1.coupe, m1.status, r1.motif, s1.motif]) }));
+          && !JSON.stringify(k1).includes(RT_E) && !JSON.stringify(k1).includes(RT_L)
+          && nk.length === 1 && /tout est coupé/.test(nk[0]) && ke.ok === false && ke.code === 'COUPE_PAR_TOI' && nk2.length === 1,
+         info: JSON.stringify([k0.status, k1.ok, (k1.revocations || []).map(x => x.resultat), h1.coupe, m1.status, r1.motif, s1.motif, nk, ke.code, nk2.length]) }));
   }
 
   performance.now = vraiPerf; Date.now = vraiNow;

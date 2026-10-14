@@ -1,8 +1,8 @@
 # JARVIS — consignes pour Claude (dépôt public : aucun secret, aucune adresse privée)
 
-## État (branche `Racine`, après fusion de la PR v4.12.1)
-- Passerelle **v4.12.1** (avant : v4.12.0) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
-- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.4, `jarvis-mcp.js` 1.1, `jarvis-verite.js` 1.7, `jarvis-analyse.js` 1.3, vigilance 5.29.5 (+ « dis-lui »).
+## État (branche `Racine`, après fusion de la PR v4.15)
+- Passerelle **v4.15.0** (avant : v4.12.1 ; v4.13 et v4.14 livrées dans la même PR) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
+- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.6, `jarvis-mcp.js` 1.2, `jarvis-verite.js` 1.7, `jarvis-analyse.js` 1.5, `jarvis-veille.js` 1.0, `jarvis-domaines.js` 1.0, `jarvis-appli.js` 1.1, vigilance 5.29.5 (+ « dis-lui »).
 - v4.9.1 : « Ouvrir dans Mail » (mailto:), demande double dite, historique 12 échanges, pages `/confidentialite` et `/conditions`.
 - v4.10 : « qu'est-ce que j'ai à gérer ? » (agenda + conversations + notes, sans IA), conversations entières, réponse dans la conversation, créneau vérifié contre l'agenda, rappels, sauvegarde des souvenirs (fichier).
 - v4.10.1 : fils Gmail regroupés (objet normalisé + même correspondant, 4 au plus), DMARC (1er en-tête Authentication-Results), offres d'agenda retirées, interface allégée sur l'instance privée (« Tout afficher »), lecture 4 par 4, « Repartir au vert », carte périmée relue, « à gérer » dans le point du jour.
@@ -12,6 +12,9 @@
 - v4.12 B : alerte « adresse vue dans un mail » : adresse retapée par la personne mais vue dans un contenu reçu → carte qui cite l'extrait d'origine, avant toute suite.
 - v4.12 C : démo publique lisible en 10 s : promesse, bouton « Voir un mail piégé bloqué », parcours en 3 écrans (vraie tentative, « Essaie toi-même »), jargon dans « Détails techniques » (replié), lien vidéo si `JARVIS_DEMO_VIDEO` (https, démo seulement). SMS (SPEC D) non codé.
 - v4.12.1 (vu en ligne le 7 oct) : liste d'agenda + conflits écrits par le serveur (modèle non appelé pour « j'ai quoi samedi ») ; alerte forte « transmission vers une adresse tierce » ; l'adresse d'abord (liste, alerte), le contenu ensuite ; demande en attente (« Que doit dire l'e-mail ? », « À qui ? », « Quel titre ? », « À quelle heure ? » : message suivant, 2 min) ; pièce jointe dite tout de suite ; « dis-lui que … » ; « tu as promis « … » » ; un seul « Envoyé » ; `/mcp` sans `WWW-Authenticate`, sondes sans clé non comptées ; marqueur ⛔ / ◐ / ✅ en tête de chaque réponse d'outil ; onglet « Contrôle » (Claude fait / JARVIS protège).
+- v4.13 : règles sur le mail ENTIER (64 Ko ; au-delà « analyse incomplète ») ; textes d'alerte justes ; pas d'avertissement pour une adresse de la liste ; instance privée claire façon iOS ; **gravité** (blanc / vert / orange / rouge) calculée par le serveur ; bulles Toi / Claude / JARVIS ; onglets à icônes ; « À gérer » à 2 boutons + « … » ; « Envoie un mail » seul → « À qui ? » sans modèle.
+- v4.14 : onglet « Agenda » (`GET /api/agenda`, semaine gouvernée, sans IA ; « + » écrit la phrase dans Discuter) ; « Tout couper » (`POST /api/couper`, COUPER tapé : révocation des jetons Gmail chez Google, coupure en mémoire ; `JARVIS_COUPE=1`).
+- v4.15 : notifications ntfy (`JARVIS_NTFY`, phrases fixes) ; surveillance des sources et de l'expiration (`JARVIS_CLE_API_EXPIRE`, `POST /veille` avec `JARVIS_CLE_SURVEILLANCE`) ; âge des domaines (RDAP) et vrai lien (HTML) ; « Signaler » ; `JARVIS_MCP_ORIGINES` (Mistral) ; défi public sur la démo (`JARVIS_DEFI_CONTACT`, `JARVIS_DEFI_HONNEUR`) ; `render.yaml` + `README.md` (bouton « Déployer ») ; `GET /api/installation` (Réglages → Installation).
 - Render déploie `Racine` seulement « After CI Checks Pass ».
 - Deux services, même code :
   - démo publique (sans `JARVIS_CLE_ACCES`) : **jamais** de variable Gmail, agenda, élévation ni connecteur (`JARVIS_DEMO_VIDEO` seulement) ;
@@ -32,7 +35,10 @@
 | `jarvis-gmail.js` | Gmail du compte d'essai : envoi (liste fermée), réponse dans une conversation (fil revérifié), lecture des e-mails et des conversations ; deux jetons séparés. |
 | `jarvis-analyse.js` | Analyse des conversations par règles, sans IA : réponse attendue, échéances, engagements, relances, PJ manquante, versions différentes, créneaux, mail suspect ; chaque résultat avec sa preuve et sa certitude. |
 | `jarvis-mcp.js` | Connecteur Claude (MCP), module pur : JSON-RPC, schémas des 3 outils, contrôles d'entrée, clé, origine, compteurs globaux, marqueur ⛔ / ◐ / ✅ (1.1). |
-| `jarvis-appli.js` | Manifeste web et icônes (écran d'accueil). |
+| `jarvis-appli.js` | Manifeste web et icônes (écran d'accueil) ; manifeste clair sur l'instance privée (1.1). |
+| `jarvis-veille.js` | Notifications ntfy (phrases fixes, limites), expiration déclarée, règle pure du défi. |
+| `jarvis-domaines.js` | Âge d'un domaine par RDAP (.com .net .org .fr), hôtes fixes, mémoire 24 h. |
+| `render.yaml`, `README.md` | Bouton « Déployer sur Render » (Blueprint : secrets demandés, clés générées). |
 | `confidentialite.html`, `conditions.html` | Pages publiques exigées par Google (appli OAuth en Production). |
 | `jarvis-manifeste.js` + `MANIFESTE.json` | Empreintes SHA-256 des fichiers qui tournent ; CI refuse un dépôt non conforme. |
 | `tests-*.js` | Une suite par version ; `tests-vXY.js` = les tests de la version XY. |
@@ -62,6 +68,12 @@
 - « Contrôle » (v4.12.1) : instance privée seulement, derrière la clé ; 50 lignes en mémoire ; jamais « Claude a refusé » ; aucun contenu de mail hors l'extrait d'alerte (relu dans le magasin des alertes, jamais gardé dans la ligne).
 - Démo publique : aucun mot de jargon (plancher, sceau, ancre, rayon, G1…G5, noyau, CONTENT_DERIVED) dans le texte visible hors « Détails techniques » ; son modèle reçoit la promesse, jamais « inviolable » (phrase retirée par le serveur, et c'est dit).
 - Fermé par défaut : une variable mal réglée désactive l'outil et `/health` le dit ; jamais de repli silencieux vers la simulation.
+- Règles d'analyse d'un mail (v4.13) : sur le texte ENTIER (64 Ko, gardé à part par identifiant, `GM.pourAnalyse`), sécurité sur tout le message cité compris ; le modèle, la page, le connecteur et les traces n'ont que l'extrait ; une preuve ou une adresse hors de l'extrait n'est jamais citée au connecteur ; au-delà de 64 Ko ou d'un HTML trop long : « analyse incomplète », jamais « rien de suspect ».
+- Gravité (v4.13) : calculée par le SERVEUR (`gravite()`, table figée) à partir de ses codes, jamais du texte du modèle ni d'un contenu lu ; le plus grave l'emporte ; motif inconnu sur une action d'écriture = rouge ; une simulation n'est jamais verte ; « rien de suspect » n'est jamais vert.
+- Notifications (v4.15) : seulement des phrases écrites dans `jarvis-veille.js` (un nombre ou une source d'une liste fermée) ; jamais un contenu, une adresse, un objet ou un nom ; 1 par type et par heure, 20 par jour.
+- Coupure (v4.14) : `/api/couper` révoque chez Google et coupe en mémoire ; ce qui ne se coupe pas d'ici est dit ; `JARVIS_COUPE=1` coupe dès le démarrage. Coupé : plus aucune notification ne sort, sauf « tout est coupé ».
+- Âge d'un domaine (v4.15) : alerte MOYENNE (moins de 30 jours), jamais « suspect » seule ; un échec RDAP n'affirme rien ; jamais un grand service. Vrai lien : alerte FORTE.
+- Installation (v4.15) : `/api/installation` ne montre que des états et des noms de variables, jamais une valeur.
 - Aucun secret (clé, jeton, client OAuth, code) dans un commit, un journal, une capture, un message ou une réponse d'API.
 
 ## Méthode (depuis v4.9.1)
@@ -88,6 +100,8 @@
 - Cible, ressource, titre ou permission venus du modèle, d'un contenu lu ou d'un souvenir au lieu de la frappe ou du serveur.
 - Repli silencieux : échec affiché comme « rien », simulation au lieu d'erreur.
 - Unicode : sosies, caractères invisibles, adresse déformée par la dictée.
+- Regex sur un contenu externe non borné (temps quadratique : « <a <a <a … » prenait 110 s) : lire linéairement, borner chaque recherche, et dire « incomplet » au-delà.
+- Limite atteinte (taille, nombre) affichée comme « rien » au lieu d'« incomplet ».
 
 ## Économie de quota (Alsid est sur Claude Pro)
 - Ne jamais lire en entier `server.js` (~270 Ko), `jarvis-5.28.3.js` (~185 Ko), `index.html` (~175 Ko), `jarvis-plus-5.29.js` (~90 Ko) : `grep -n`, puis lecture par plages de lignes.

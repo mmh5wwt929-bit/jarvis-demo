@@ -3746,6 +3746,7 @@ const CLE_VEILLE = (() => {
 const VEILLE_EXTERNE = { appels: [] };
 function notifier(type, x) {
   if (!NOTIF || !NOTIF.actif) return Promise.resolve({ ok: false, code: 'INACTIF' });
+  if (COUPE.actif && type !== 'COUPE') return Promise.resolve({ ok: false, code: 'COUPE_PAR_TOI' });   /* [S130] coupé : plus rien ne sort, sauf « tout est coupé » */
   return NOTIF.envoyer(type, x).catch(() => ({ ok: false, code: 'ECHEC' }));
 }
 /* la cle Anthropic, sans rien couter : la liste des modeles */
@@ -3854,7 +3855,10 @@ const DEFI = (() => {
 function noterTapees(s, texte) {
   if (!DEFI || !s) return;
   s.tapees = s.tapees || new Set();
-  for (const a of String(texte || '').match(/[^\s<>()«»"';,]+@[^\s<>()«»"';,]+/g) || []) s.tapees.add(cleMail(a.replace(/[.:!?]+$/, '')));
+  for (const a of String(texte || '').match(/[^\s<>()«»"';,]+@[^\s<>()«»"';,]+/g) || []) {
+    const c = cleMail(a.replace(/[.:!?]+$/, ''));
+    if (s.tapees.size < 500 || c === DEFI.adresse) s.tapees.add(c);   /* borne ; l'adresse du defi est toujours retenue */
+  }
 }
 function defiReussi(s, sessionId, att) {
   if (!DEFI || !att || !VE.defiGagne({ adresseDefi: DEFI.adresse, tapees: s.tapees, action: att.action, cible: att.target })) return null;
@@ -4015,6 +4019,8 @@ const serveur = http.createServer((req, res) => {
       mail: MAIL_ENVOI ? 'actif' : MAIL_ENVOI_MOTIF ? 'erreur-config' : 'inactif', mailMotif: MAIL_ENVOI_MOTIF,   /* [S68] */
       boite: MAIL_LECTURE ? 'actif' : MAIL_LECTURE_MOTIF ? 'erreur-config' : 'inactif', boiteMotif: MAIL_LECTURE_MOTIF,   /* [S69] */
       mcp: { etat: etatMcp(), appelsHeure: MCP_GARDE.appelsHeure(), motif: MCP_CONFIG.motif },   /* [S103] jamais un contenu */
+      ...(CLE_ACCES ? { notifications: NOTIF && NOTIF.actif ? 'actif' : NOTIF && NOTIF.motif ? 'erreur-config' : 'inactif', notificationsMotif: NOTIF ? NOTIF.motif : null,   /* [S131] */
+        surveillance: CLE_VEILLE.etat, mcpOrigines: { nombre: MCP_ORIGINES.origines.length, motif: MCP_ORIGINES.motif } } : {}),   /* [S134] mal reglee : dit ici, jamais une valeur */
       elevation: ELEVATION_MAL_CONFIGUREE ? 'erreur-config' : !ELEVATION || !ELEVATION.actif ? 'inactif'   /* [S35] */
         : [ELEVATION.faceId ? 'faceid' : null, ELEVATION.codeSecours ? 'code' : null,
            CODE_ILLISIBLE ? 'code-refuse' : null, CLES_ILLISIBLES ? 'cles-illisibles' : null].filter(Boolean).join('+'),
