@@ -484,10 +484,12 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
     Pp.w.eval('afficherGerer')(GER);
     const gP = derniere(Pp, '.gerer'), secs = gP ? [...gP.querySelectorAll('details.gerer-section')] : [];
     const itL = gP ? [...gP.querySelectorAll('.gerer-item')].find(x => /Répondre à Luc/.test(x.textContent)) : null, blocS = gP ? gP.querySelector('details.suspects') : null;
-    await t('I5', "« à gérer » allégé : sections repliables avec le nombre ; un point = une ligne + ses boutons, la preuve au toucher ; les suspects dans un bloc replié « ⚠ 2 mails suspects »", async () =>
+    /* v4.13 [S127] (SPEC point 6) : la preuve est VISIBLE (raison courte + phrase citée), chaque suspect visible en rouge (plus de bloc
+     * « ⚠ N mails suspects »), une seule ligne en bas ; le reste inchangé (sections repliables avec le nombre, l'action principale) */
+    await t('I5', "« à gérer » allégé (v4.13) : sections repliables avec le nombre ; un point = son titre, sa preuve citée, ses boutons (2 au plus, le reste derrière « … ») ; chaque suspect visible ; une seule ligne en bas", async () =>
       ({ ok: secs.length === 2 && /Agenda \(1\)/.test(secs[0].querySelector('summary').textContent) && /Mails \(3\)/.test(secs[1].querySelector('summary').textContent)
-          && !!itL && !/Pouvez-vous confirmer/.test(visible(itL)) && /Répondre à Luc/.test(visible(itL)) && !!itL.querySelector(':scope > .gerer-actions [data-gerer="repondre"]')
-          && !!blocS && !blocS.open && /⚠ 2 mails suspects/.test(blocS.querySelector('summary').textContent) && !/URGENT|Colis/.test(visible(gP)),
+          && !!itL && /Pouvez-vous confirmer/.test(visible(itL)) && /Répondre à Luc/.test(visible(itL)) && !!itL.querySelector(':scope > .auj-actions [data-gerer="repondre"]')
+          && !blocS && /URGENT/.test(visible(gP)) && /Colis/.test(visible(gP)) && gP.querySelectorAll('.points-pied').length === 1,
          info: gP ? visible(gP).slice(0, 150) : 'pas de carte' }));
     const LONG = 'Bonjour,\n' + 'Voici le programme complet du tournoi de samedi avec tous les horaires des matchs. '.repeat(8);
     Pp.w.eval('afficherConversation')({ ok: true, fil: JF(1), objet: 'Tournoi', suspect: false, transparence: 'Affiché par le serveur, pas de l\'IA.',

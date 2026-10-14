@@ -475,6 +475,102 @@ button.ligne-repliee{display:block;width:100%;text-align:left;background:none;bo
   .corps,.titre-defense,.entete-detail .mesures,.marque-detail{padding-left:16px;padding-right:16px}
   details.bloc>summary::after{padding:0 16px}
 }
+
+/* =====================================================================================
+ * [S125] v4.13 INSTANCE PRIVEE : CLAIR, FACON iOS. Le fond de Discuter (page + en-tete)
+ * suit la GRAVITE calculee par le SERVEUR (body[data-gravite]) ; la demo garde :root.
+ * Contraste : chaque couleur de texte >= 4,5:1 sur chacun des 4 fonds (teste).
+ * ===================================================================================== */
+body.prive,html.instance-privee body{--encre:#FFFFFF;--ardoise:#F2F2F7;--regle:#E3E3E8;--texte:#1C1C1E;--lumiere:#1C1C1E;--sourd:#5E5E63;
+  --signal:#0A66D6;--sur:#17633A;--retenu:#8A4B00;--refus:#B3261E;--fond-gravite:#FFFFFF;--claude:#E9E9EB;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+html.prive,html.instance-privee{background:#FFFFFF}
+html.prive[data-gravite="vert"]{background:#EEF8F0}html.prive[data-gravite="orange"]{background:#FFF6E8}html.prive[data-gravite="rouge"]{background:#FDEEEE}
+body.prive[data-onglet="discuter"][data-gravite="vert"]{--fond-gravite:#EEF8F0}
+body.prive[data-onglet="discuter"][data-gravite="orange"]{--fond-gravite:#FFF6E8}
+body.prive[data-onglet="discuter"][data-gravite="rouge"]{--fond-gravite:#FDEEEE}
+body.prive[data-onglet="discuter"].g-flash{--fond-gravite:#F9D3D1}
+/* point 2 : le document ne defile pas ; l'en-tete couvre la zone de l'heure avec son propre fond */
+html.prive{padding:0;height:100%;overflow:hidden}
+body.prive{height:100%;height:100dvh;overflow:hidden;padding-bottom:0;background:var(--fond-gravite);transition:background-color .4s ease}
+body.prive header{position:sticky;top:0;z-index:40;padding-top:env(safe-area-inset-top,0px);background:var(--fond-gravite);border-bottom-color:var(--regle);
+  transition:background-color .4s ease;padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px)}
+body.prive main{flex:1;min-height:0;background:var(--fond-gravite);display:flex;flex-direction:column}
+body.prive main>.colonne{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:none;background:#FFFFFF}
+body.prive #conversation{height:auto;background:var(--fond-gravite);transition:background-color .4s ease;overflow:hidden}
+body.prive #fil{overscroll-behavior:none}
+body.prive .onglets{position:static;flex:none;order:4;background:#F9F9FB;border-top:1px solid var(--regle);padding:4px 6px calc(4px + env(safe-area-inset-bottom,0px))}
+@media (prefers-reduced-motion:reduce){body.prive,body.prive header,body.prive #conversation{transition:none}}
+/* la pastille : le MOT de la gravite toujours ecrit (jamais la couleur seule) */
+.g-mot{display:none}
+body.prive .pastille .point,body.prive .pastille .plancher-val{display:none}
+body.prive .pastille .g-mot{display:inline;font-weight:600;font-size:13px;white-space:nowrap}
+body.prive .pastille{background:#F2F2F7;color:#3A3A3C;border:none;min-height:32px}
+body.prive .pastille::after{color:inherit}
+body.prive[data-gravite="vert"] .pastille{background:#D5F0DC;color:#17633A}
+body.prive[data-gravite="orange"] .pastille{background:#FFE6C2;color:#8A4B00}
+body.prive[data-gravite="rouge"] .pastille{background:#F9D3D1;color:#B3261E}
+.g-plancher{font-size:13px;color:var(--refus);padding:0 20px 8px}
+body.prive .bouton-vert{border-color:var(--regle);color:var(--signal);background:#FFFFFF}
+/* boutons : principal plein bleu, secondaire gris ; 44 px */
+body.prive button{background:#F2F2F7;border:none;color:var(--texte);border-radius:12px;min-height:44px;padding:10px 16px}
+body.prive button.primaire,body.prive a.bouton.primaire{background:#0A66D6;color:#FFFFFF}
+body.prive button.danger{background:#F2F2F7;color:#B3261E}
+body.prive button.lien,body.prive button.ligne-repliee,body.prive button.lire-tout,body.prive button.auj-texte,body.prive .lien-sante{background:none;min-height:0;border-radius:0}
+body.prive button.lien{color:var(--signal)}
+@media(hover:hover){body.prive button.primaire:hover:not(:disabled){background:#0857B8;color:#FFFFFF}}
+body.prive input,body.prive select,body.prive textarea{background:#FFFFFF;border-color:#D1D1D6;border-radius:12px;color:var(--texte)}
+/* point 4 : qui parle se voit */
+body.prive .tour{max-width:min(62ch,88%)}
+body.prive .tour.moi .qui{display:none}
+body.prive .tour.moi .quoi{background:#0A66D6;color:#FFFFFF;border:none;border-radius:18px;padding:9px 14px}
+body.prive .tour.claude .quoi{background:var(--claude);border:none;border-radius:18px;padding:9px 14px;color:#1C1C1E}
+body.prive .tour.jarvis .quoi,body.prive .tour.jarvis>.decision,body.prive .tour.jarvis>.alerte-adresse{background:#FFFFFF;border:1px solid #E3E3E8;border-radius:14px;padding:11px 13px}
+body.prive .tour.jarvis .qui,body.prive .tour.claude .qui{font-size:12px;font-weight:600;color:#3A3A3C;display:flex;align-items:center;gap:5px}
+body.prive .tour.jarvis .qui svg{width:13px;height:13px;flex:none}
+.qui svg{display:none}body.prive .qui svg{display:inline-block}
+body.prive .decision{border-left-width:1px}
+body.prive .decision.refuse{border-color:#F9D3D1}body.prive .decision.attente{border-color:#FFE6C2}body.prive .decision.autorise{border-color:#E3E3E8}
+body.prive .retenue{background:#FFF6E8;border-color:#FFE6C2}body.prive .retenue p{color:#8A4B00}
+body.prive .elevation{background:#F2F7FF;border-color:#C9DDF7}body.prive .elevation .etat-elev,body.prive .reformuler .etat-carte{color:#8A4B00}
+body.prive .alerte-adresse mark{background:#F9D3D1}
+body.prive #micro.ecoute{background:#B3261E;color:#FFFFFF}
+body.prive .porte{background:rgba(242,242,247,.96)}
+/* point 5 : onglets avec icones ; la saisie arrondie, Envoyer rond avec une fleche */
+.onglets svg,.ico-envoyer,.ico-micro{display:none}
+body.prive .onglets button{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:48px;padding:6px 2px;font-size:11px;background:none;color:#5E5E63;border-radius:10px}
+body.prive .onglets button svg{display:block;width:24px;height:24px}
+body.prive .onglets button[aria-current="page"]{color:#0A66D6;background:none;font-weight:600}
+body.prive .saisie{background:var(--fond-gravite);border-top:1px solid var(--regle);padding:8px 12px;transition:background-color .4s ease}
+body.prive .saisie .rang{align-items:flex-end}
+body.prive #msg{border-radius:20px;padding:10px 14px;min-height:44px}
+body.prive #envoyer{width:44px;height:44px;min-width:44px;padding:0;border-radius:50%;display:flex;align-items:center;justify-content:center}
+body.prive #envoyer .txt-envoyer{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+body.prive #envoyer .ico-envoyer{display:block;width:22px;height:22px}
+body.prive #micro{width:44px;height:44px;min-width:44px;padding:0;border-radius:50%;font-size:0}
+body.prive #micro .ico-micro{display:block;width:22px;height:22px;margin:auto}
+/* point 6 : « à gérer » allege : pas de barre verte a gauche ; la raison courte et la preuve visibles */
+body.prive .auj-point,body.prive .gerer-item{border-left:none;border-top:1px solid var(--regle);padding:10px 0 8px;margin:0}
+.point-titre{font-size:14.5px;line-height:1.4;margin:0}.auj-point.fort .point-titre{color:var(--refus)}
+.point-raison{font-size:13px;color:var(--refus);margin:3px 0 0}
+.point-preuve{font-size:13px;color:var(--sourd);margin:3px 0 0;overflow-wrap:anywhere}
+.points-pied{font-size:12px;color:var(--sourd);margin-top:10px}
+details.plus{display:inline-block;position:relative}
+details.plus>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;min-width:44px;min-height:44px;border-radius:12px;background:#F2F2F7;font-weight:700}
+details.plus>summary::-webkit-details-marker{display:none}
+details.plus[open]>.plus-menu{display:flex}
+.plus-menu{display:none;flex-direction:column;gap:6px;margin-top:6px}
+/* point 7 : Controle en clair : plus de lisere ni d'anneaux animes ; l'etat donne la gravite */
+body.prive[data-onglet="controle"]::after{display:none}
+body.prive .ctl-noyau{display:none}
+body.prive[data-onglet="controle"] header{background:var(--fond-gravite);border-bottom-color:var(--regle)}
+body.prive[data-onglet="controle"][data-ctl="attend"]{--fond-gravite:#FFF6E8}
+body.prive[data-onglet="controle"][data-ctl="coupe"]{--fond-gravite:#FDEEEE}
+body.prive[data-onglet="controle"].ctl-flash{--fond-gravite:#F9D3D1}
+body.prive[data-onglet="controle"] #controle{background:var(--fond-gravite)}
+body.prive .ctl-tete{background:#FFFFFF;border:1px solid var(--regle)}
+body.prive .ctl-etat{color:#3A3A3C}
+body.prive[data-ctl="attend"] .ctl-etat{color:#8A4B00}body.prive[data-ctl="coupe"] .ctl-etat{color:#B3261E}
 </style>
 </head>
 <body data-onglet="aujourdhui">
@@ -483,11 +579,12 @@ button.ligne-repliee{display:block;width:100%;text-align:left;background:none;bo
   <div class="bandeau">
     <div class="marque">JARVIS</div>
     <button class="pastille" id="pastille" type="button" aria-expanded="false" aria-controls="enteteDetail"
-      aria-label="Plancher de confiance : toucher pour le détail"><i class="point b3" id="pPoint"></i><span class="plancher-val n3" id="pVal">intention directe</span></button>
+      aria-label="Plancher de confiance : toucher pour le détail"><i class="point b3" id="pPoint"></i><span class="plancher-val n3" id="pVal">intention directe</span><span class="g-mot" id="gMot" role="status" aria-live="polite">En veille</span></button>
     <button class="bouton-vert" id="repartirVert" type="button" hidden title="Nouvelle session : efface l'historique de cette conversation (ici et sur le serveur) ; garde tes souvenirs."
       aria-label="Repartir au vert : nouvelle session. Efface l'historique de la conversation, garde tes souvenirs.">Repartir au vert</button>
   </div>
   <div class="entete-detail" id="enteteDetail" hidden>
+    <p class="g-plancher prive-seul" id="gPlancher" hidden>Contenu externe lu : une action sensible exigera ta frappe.</p>
     <div class="entete-titre">Détails techniques</div>
     <p class="accroche">La couche de sécurité d'un assistant personnel : avant chaque action, elle vérifie d'où vient l'intention.</p>
     <div class="plancher">
@@ -519,8 +616,8 @@ button.ligne-repliee{display:block;width:100%;text-align:left;background:none;bo
     <div class="saisie">
       <div class="rang">
         <textarea id="msg" rows="1" placeholder="Écris à JARVIS…"></textarea>
-        <button id="micro" type="button" hidden aria-label="Dicter (toucher pour parler, toucher pour arrêter ; le message part à la fin de la dictée)" title="Dicter : le message part à la fin de la dictée">🎤</button>
-        <button class="primaire" id="envoyer">Envoyer</button>
+        <button id="micro" type="button" hidden aria-label="Dicter (toucher pour parler, toucher pour arrêter ; le message part à la fin de la dictée)" title="Dicter : le message part à la fin de la dictée"><span class="txt-micro">🎤</span><svg class="ico-micro" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21"/></svg></button>
+        <button class="primaire" id="envoyer" aria-label="Envoyer"><span class="txt-envoyer">Envoyer</span><svg class="ico-envoyer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></svg></button>
       </div>
       <div class="rang" id="rangManuel" hidden>
         <select id="action" aria-label="Action imposée">
@@ -543,6 +640,7 @@ button.ligne-repliee{display:block;width:100%;text-align:left;background:none;bo
     <details class="bloc prive-seul" id="blocAffichage">
       <summary><h2>Affichage <span class="mono" id="etatAffichage"></span></h2></summary>
       <div class="corps">
+        <p class="pdj-note" id="gPlancherReglages">Rien d'externe lu dans cette conversation.</p>
         <p><label><input type="checkbox" id="toutAfficher"> Tout afficher</label></p>
         <p><button type="button" id="basculeManuelReglages">Imposer l'action à la main (démonstration)</button></p>
         <p class="pdj-note">Sur ton instance, JARVIS n'affiche d'abord que l'essentiel : le verdict, les alertes fortes, l'e-mail à relire, l'adresse à retaper, Face ID et les boutons. Codes, risque, signaux d'information et preuves restent à un toucher (« + détail »). Coché : tout est déplié, comme sur la démo publique (ce navigateur seulement).</p>
@@ -677,10 +775,10 @@ button.ligne-repliee{display:block;width:100%;text-align:left;background:none;bo
   </section>
 </main>
 <nav class="onglets prive-seul" id="onglets" aria-label="Vues">
-  <button type="button" data-onglet="controle">Contrôle</button>
-  <button type="button" data-onglet="aujourdhui" aria-current="page">Aujourd'hui</button>
-  <button type="button" data-onglet="discuter">Discuter</button>
-  <button type="button" data-onglet="reglages">Réglages</button>
+  <button type="button" data-onglet="controle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 9.5C8 19.2 5 15.5 5 11V6l7-3z"/></svg><span>Contrôle</span></button>
+  <button type="button" data-onglet="aujourdhui" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="5" width="16" height="15" rx="2.5"/><path d="M4 9.5h16M8.5 3v4M15.5 3v4"/></svg><span>Aujourd'hui</span></button>
+  <button type="button" data-onglet="discuter"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 5h14a2 2 0 012 2v8a2 2 0 01-2 2h-7l-4.5 3.5V17H5a2 2 0 01-2-2V7a2 2 0 012-2z"/></svg><span>Discuter</span></button>
+  <button type="button" data-onglet="reglages"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>Réglages</span></button>
 </nav>
 
 <div class="porte" id="porteCle" hidden role="dialog" aria-modal="true" aria-labelledby="titreCle">
@@ -758,12 +856,49 @@ let toutPage = null;   /* le choix fait dans CETTE page (si le navigateur ne gar
 function toutAfficher() { if (toutPage !== null) return toutPage; try { return localStorage.getItem(TOUT_AFFICHER) === '1'; } catch (e) { return false; } }
 function appliquerAffichage(prive) {
   if (prive !== undefined) document.body.classList.toggle('prive', !!prive);
+  if (prive !== undefined) {   /* [S125] [S126] v4.13 clair ; le pied dans Reglages ; « vert » veut dire « fait, vérifié » */
+    document.documentElement.classList.toggle('prive', !!prive);
+    const mt = document.querySelector('meta[name="theme-color"]'); if (mt) mt.setAttribute('content', prive ? '#FFFFFF' : '#161b22');
+    const rv = $('repartirVert');
+    if (rv) { rv.textContent = prive ? 'Nouvelle conversation' : 'Repartir au vert';
+      rv.setAttribute('aria-label', prive ? "Nouvelle conversation : nouvelle session. Efface l'historique de la conversation, garde tes souvenirs."
+        : "Repartir au vert : nouvelle session. Efface l'historique de la conversation, garde tes souvenirs."); }
+    const pied = document.querySelector('footer');
+    if (prive && pied && $('defense') && pied.parentElement !== $('defense')) $('defense').appendChild(pied);
+    if (prive && !document.body.dataset.gravite) Gravite.blanc();
+  }
   const tout = toutAfficher(), p = document.body.classList.contains('prive'), a = p && !tout;
   document.body.classList.toggle('allege', a);
   const c = $('toutAfficher'); if (c) c.checked = tout;
   const e = $('etatAffichage'); if (e) e.textContent = p ? (a ? 'essentiel' : 'tout') : '';
   if (!a) for (const d of document.querySelectorAll('#fil details.plie')) d.open = true;   /* les cartes deja la se deplient */
 }
+/* [S123] v4.13 LA GRAVITE, recue du SERVEUR (d.gravite, d.graviteMotif) : la page n'en deduit jamais
+ * une autre (aucune couleur tiree d'un texte). Le fond de Discuter la montre ; la pastille ecrit le MOT.
+ * Elle reste jusqu'au message suivant (blanc des l'envoi) ou au changement d'etat de la carte. */
+const Gravite = (() => {
+  const VALIDES = ['blanc', 'vert', 'orange', 'rouge'];
+  const MOTS = { blanc: 'En veille', vert: 'Fait, vérifié', orange: 'Attend ton geste' };
+  const ROUGES = { COUPE: 'Coupé', SUSPECT: 'Mail suspect', ALERTE_ADRESSE: 'Adresse à vérifier' };
+  let flashT = null;
+  const calme = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+  function appliquer(g, motif) {
+    const v = VALIDES.includes(g) ? g : 'blanc';
+    const mot = v === 'rouge' ? (ROUGES[motif] || 'Coupé') : MOTS[v];
+    document.body.dataset.gravite = v; document.documentElement.dataset.gravite = v;
+    const e = $('gMot'); if (e) e.textContent = mot;
+    if (v === 'rouge' && !calme()) {   /* l'arrivee d'un rouge : flash d'une seconde, puis rouge pale */
+      if (flashT) clearTimeout(flashT);
+      document.body.classList.add('g-flash');
+      flashT = setTimeout(() => document.body.classList.remove('g-flash'), 1000);
+    }
+    return v;
+  }
+  return { appliquer, depuis(d) { if (d && typeof d === 'object' && Object.prototype.hasOwnProperty.call(d, 'gravite')) appliquer(d.gravite, d.graviteMotif); },
+    blanc() { appliquer('blanc'); }, valeur() { return document.body.dataset.gravite || 'blanc'; } };
+})();
+/* les routes des gestes de Discuter : leur gravite est appliquee (pas les lectures d'Aujourd'hui ni de Reglages) */
+const ROUTES_GRAVITE = /^\/api\/(chat|confirmer|finaliser|annuler|reformuler|compenser|mail\/retaper|mail\/fil|mail\/repondre|claude\/retaper|claude\/evenement|gerer\/evenement|alerte\/vue|agenda\/preparer)$/;
 /* le detail replie (instance allegee) ; ailleurs, tel quel */
 const plie = (h) => !h ? '' : allege() ? '<details class="plie"><summary>détail</summary>' + h + '</details>' : h;
 const pluriel = (n, un, plusieurs) => n + ' ' + (n > 1 ? plusieurs : un);
@@ -1035,6 +1170,7 @@ async function api(chemin, corps, dejaRenouvele, dejaReveille) {
     throw new Error('le serveur ne se réveille pas, réessaie dans une minute');
   }
   const d = await r.json();
+  if (ROUTES_GRAVITE.test(chemin) || (chemin === '/api/gerer' && document.body.dataset.onglet === 'discuter')) Gravite.depuis(d);   /* [S123] */
   if (d && d.erreur === 'SESSION_INCONNUE' && !dejaRenouvele) {
     if (sid === utilise) { sid = null; await assurerSession(); sessionRenouvelee(); }
     return api(chemin, corps, true, dejaReveille);
@@ -1053,6 +1189,8 @@ function majEtat(d) {
     b.className = 'b' + p.n;
     if ($('pPoint')) $('pPoint').className = 'point b' + p.n;   /* [v4.7] */
     if ($('repartirVert')) $('repartirVert').hidden = p.n !== 1;   /* [S92] pastille rouge : repartir au vert en un toucher */
+    if ($('gPlancher')) $('gPlancher').hidden = p.n !== 1;   /* [S125] le plancher reste lisible au toucher sur la pastille */
+    if ($('gPlancherReglages')) $('gPlancherReglages').textContent = p.n === 1 ? 'Contenu externe lu dans cette conversation : une action sensible exigera ta frappe.' : 'Rien d\'externe lu dans cette conversation.';
     const inf = d.influences || [];
     $('pOrigine').textContent = inf.length
       ? p.aide + ' Origine : ' + inf.map(i => i.source).join(', ')
@@ -1214,11 +1352,14 @@ function separerNotes(texte) {
   }
   return { corps: lignes.join('\n').replace(/\s+$/, ''), notes };
 }
+/* [S126] v4.13 point 4 : qui parle se voit. L'auteur vient du CHEMIN de code (le parametre qui),
+ * jamais du texte : JARVIS = carte blanche avec le bouclier, Claude = bulle grise, toi = bulle bleue */
+const BOUCLIER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 9.5C8 19.2 5 15.5 5 11V6l7-3z"/></svg>';
 function tour(qui, texte, moi, riche) {
   const d = document.createElement('div');
-  d.className = 'tour' + (moi ? ' moi' : '');
+  d.className = 'tour' + (moi ? ' moi' : qui === 'JARVIS' ? ' jarvis' : qui === 'Claude' ? ' claude' : '');
   const sep = riche ? separerNotes(texte) : { corps: texte, notes: [] };
-  d.innerHTML = '<div class="qui">' + esc(qui) + '</div><div class="quoi' + (riche ? ' riche' : '') + '">'
+  d.innerHTML = '<div class="qui">' + (qui === 'JARVIS' ? BOUCLIER : '') + esc(qui) + '</div><div class="quoi' + (riche ? ' riche' : '') + '">'
     + (riche ? md(sep.corps) : esc(texte)) + sep.notes.map(n => '<p class="note-jarvis">' + esc(n) + '</p>').join('') + '</div>';
   $('fil').appendChild(d);
   $('fil').scrollTop = $('fil').scrollHeight;
@@ -1397,7 +1538,11 @@ function rendreDecision(d) {
       : detailA) + '</div>';
     const blocA = tour('JARVIS', '', false);
     blocA.querySelector('.quoi').outerHTML = hA;
-    if (d.reponse) tour('Claude', d.reponse, false, true);
+    /* [S126] v4.13 la liste ecrite par le serveur : « JARVIS » ; la partie filtree du modele : « Claude » (vu le 8 oct, 23:15) */
+    if (typeof d.listeServeur === 'string') {
+      if (d.listeServeur) tour('JARVIS', d.listeServeur, false, true);
+      if (d.suiteModele) tour('Claude', d.suiteModele, false, true);
+    } else if (d.reponse) tour(a.ecritPar === 'serveur' ? 'JARVIS' : 'Claude', d.reponse, false, a.ecritPar !== 'serveur');
     $('fil').scrollTop = $('fil').scrollHeight;
     return;
   }
@@ -1678,6 +1823,7 @@ function perimerCarte(boite, texte) {
   if (p) p.textContent = texte || "Carte périmée : la conversation a continué depuis. Redemande ton action si tu la veux toujours.";
 }
 function perimerTout() {
+  if (Gravite.valeur() === 'orange') Gravite.blanc();   /* [S123] une carte perimee n'attend plus rien */
   for (const b of document.querySelectorAll('#fil .reformuler'))
     if (!b.dataset.perimee && !b.dataset.utilisee) perimerCarte(b);
   for (const b of document.querySelectorAll('#fil button[data-finaliser]')) {
@@ -1743,11 +1889,11 @@ const Voix = (() => {
     rec = new SR(); rec.lang = 'fr-FR'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
     const base = $('msg').value.trim() ? $('msg').value.trim() + ' ' : '';
     rec.onresult = (e) => { let x = ''; for (const r of e.results) x += r[0].transcript; $('msg').value = base + x; dicte = true; };
-    rec.onend = () => { ecoute = false; $('micro').classList.remove('ecoute'); $('micro').textContent = '🎤';
+    rec.onend = () => { ecoute = false; $('micro').classList.remove('ecoute'); $('micro').querySelector('.txt-micro').textContent = '🎤';
       if (dicte && $('msg').value.trim() && !$('envoyer').disabled) envoyer(); };   /* [S66] */
     rec.onerror = (e) => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed')
       tour('JARVIS', 'Micro refusé : autorise-le pour ce site (Réglages → Safari → Micro), ou utilise la dictée du clavier.', false); };
-    try { rec.start(); ecoute = true; $('micro').classList.add('ecoute'); $('micro').textContent = '■'; } catch (e) { ecoute = false; }
+    try { rec.start(); ecoute = true; $('micro').classList.add('ecoute'); $('micro').querySelector('.txt-micro').textContent = '■'; } catch (e) { ecoute = false; }
   }
   return { init, basculer, arreter, dicte: () => dicte, oublier: () => { dicte = false; } };
 })();
@@ -1807,6 +1953,7 @@ async function envoyer() {
    * couche ne le traite pas comme une frappe (un son peut venir d'ailleurs). */
   const voix = Voix.dicte(); Voix.arreter(); Voix.oublier();
   $('envoyer').disabled = true;
+  Gravite.blanc();   /* [S123] retour au blanc des l'envoi */
   perimerTout();   /* [S40] le serveur fait de meme a la reception du message */
   tour('Toi', (voix ? '🎤 ' : '') + m, true);
   $('msg').value = ''; $('msg').style.height = '';   /* [v4.7] le champ reprend sa hauteur */
@@ -1858,6 +2005,41 @@ function boutonsGerer(it, compact) {
     + (k ? '<button type="button" class="traite" data-traite="fait" data-point="' + k + '">Fait</button><button type="button" class="traite" data-traite="plustard" data-point="' + k + '">Plus tard</button>' : '')   /* [S102] */
     + '</div>';
 }
+/* [S127] v4.13 point 6 : UN point « à gérer », le meme rendu dans Aujourd'hui et dans Discuter (instance allegee).
+ * Visibles : le titre, la raison courte (le « Pourquoi » jusqu'au premier « : »), la preuve (la phrase citee).
+ * Sous « + détail » : le « Pourquoi » complet et la certitude. Deux boutons au plus ; le reste derriere « … ». */
+const raisonCourte = (p) => { const x = String(p || ''); const i = x.indexOf(' : '); return (i > 0 ? x.slice(0, i) : x).slice(0, 160); };
+const TEXTE_PIED_POINTS = 'Repéré par des règles, sans IA. Rien ne part sans ton geste.';
+function pointGerer(it) {
+  const j = jetonFil(it.fil), k = Traites.valide(it.cle) ? it.cle : '';
+  const suspect = it.suspect === true || it.type === 'suspect';
+  const source = ['agenda', 'note', 'conflit'].includes(it.type);
+  const raison = suspect && it.preuve ? raisonCourte(it.preuve) : '';
+  const citation = suspect ? it.citation : source ? '' : it.preuve;
+  const btn = (a) => a === 'fait' || a === 'plustard'
+    ? (k ? '<button type="button" class="traite" data-traite="' + a + '" data-point="' + k + '">' + (a === 'fait' ? 'Fait' : 'Plus tard') + '</button>' : '')
+    : j ? '<button type="button" data-gerer="' + a + '" data-fil="' + esc(j) + '"' + (a === 'creneau' ? ' data-index="' + it.creneau + '"' : '') + '>' + ACTIONS_GERER[a] + '</button>' : '';
+  /* l'action principale : jamais repondre / rappel / creneau sur un suspect [S89] */
+  /* une promesse (« tu as promis ») : « Me le rappeler » d'abord (SPEC v4.13 point 6) */
+  const ordre = it.type === 'engagement' ? ['rappel', 'creneau', 'repondre'] : ['creneau', 'repondre', 'rappel'];
+  const possibles = suspect ? [] : ordre.filter(a => (it.actions || []).includes(a) && (a !== 'creneau' || (Number.isInteger(it.creneau) && it.creneau >= 0)));
+  const principal = possibles[0] || 'voir';
+  /* derrière « … » : la conversation (où sont les autres gestes), « Plus tard », « Signaler » pour un suspect */
+  const autres = (principal === 'voir' ? [] : ['voir']).concat(['plustard'], suspect ? ['signaler'] : []);
+  const visibles = [btn(principal), btn('fait')].filter(Boolean);
+  const menu = autres.map(a => a === 'signaler' ? (typeof boutonSignaler === 'function' ? boutonSignaler() : '') : btn(a)).filter(Boolean);
+  const detail = (suspect && it.preuve ? '<p class="preuve">Pourquoi : ' + esc(it.preuve) + '</p>' : source && it.preuve ? '<p class="preuve">Source : ' + esc(it.preuve) + '</p>' : '')
+    + (it.certitude && it.type !== 'erreur' ? '<p class="certitude">' + esc(CERTITUDE[it.certitude] || '') + '</p>' : '');
+  return '<div class="gerer-item auj-point' + (suspect || it.type === 'conflit' || it.type === 'erreur' ? ' fort' : '') + '" data-cle="' + esc(String(it.texte || '').slice(0, 200))
+    + '" data-objet="' + esc(String(it.objet || '').slice(0, 200)) + '"' + (k ? ' data-point="' + k + '"' : '') + '>'
+    + '<p class="point-titre">' + esc(it.texte) + '</p>'   /* « Voir la conversation » est un bouton à part (visible ou dans « … ») */
+    + (raison ? '<p class="point-raison">' + esc(raison) + '</p>' : '')
+    + (citation ? '<p class="point-preuve">« ' + esc(String(citation).slice(0, 200)) + ' »</p>' : '')
+    + (detail ? '<details class="plie"><summary>détail</summary>' + detail + '</details>' : '')
+    + (visibles.length || menu.length ? '<div class="rang auj-actions">' + visibles.join('')
+      + (menu.length ? '<details class="plus"><summary aria-label="Plus d\'options">…</summary><div class="plus-menu">' + menu.join('') + '</div></details>' : '') + '</div>' : '')
+    + '</div>';
+}
 function afficherGerer(r) {
   if (!r || !Array.isArray(r.sections)) return tour('JARVIS', (r && (r.message || r.resume)) || "« À gérer » indisponible.", false);
   if (!r.sections.length) return tour('JARVIS', r.resume || 'Rien à lire ici.', false);
@@ -1877,15 +2059,14 @@ function afficherGerer(r) {
   if (allege()) {
     /* [S90] sections repliables (avec le nombre) ; un point = une ligne + ses boutons ; la preuve au toucher ;
      * les mails suspects regroupés dans un bloc replié « ⚠ N mails suspects » */
-    const point = (it) => '<div class="' + classe(it) + '"' + cle(it) + '>' + (it.preuve || it.certitude ? '<details class="point"><summary>' + esc(it.texte) + '</summary>' + preuveH(it) + '</details>' : '<p>' + esc(it.texte) + '</p>') + boutonsGerer(it) + '</div>';
+    /* [S127] v4.13 le meme point qu'« Aujourd'hui » ; une seule ligne en bas */
     h = '<div class="decision ' + couleur + ' gerer"><div class="plan">À gérer — ' + esc(r.date || '') + ' <span class="code">' + esc(r.resume || '') + '</span></div>'
       + r.sections.map(sec => {
-        const tous = sec.items || [], suspects = tous.filter(it => it.type === 'suspect'), autres = tous.filter(it => it.type !== 'suspect');
+        const tous = sec.items || [];
         return '<details class="gerer-section" open><summary><b>' + esc(sec.titre) + '</b> <span class="code">(' + esc(compte(tous)) + ')</span></summary>'
-          + (suspects.length ? '<details class="suspects"><summary>⚠ ' + esc(pluriel(suspects.length, 'mail suspect', 'mails suspects')) + ' : ne réponds pas, ne paie rien, ne clique pas</summary>' + suspects.map(point).join('') + '</details>' : '')
-          + autres.map(point).join('') + '</details>';
+          + tous.map(it => it.vide || it.type === 'erreur' ? '<p class="' + (it.type === 'erreur' ? 'auj-erreur' : 'pdj-vide') + '">' + esc(it.texte) + '</p>' : pointGerer(it)).join('') + '</details>';
       }).join('')
-      + plie('<p class="pdj-note">' + esc(r.regle || '') + '</p>') + '</div>';
+      + '<p class="points-pied">' + TEXTE_PIED_POINTS + '</p>' + '</div>';
   } else h = '<div class="decision ' + couleur + ' gerer"><div class="plan">À gérer — ' + esc(r.date || '') + ' <span class="code">' + esc(r.resume || '') + '</span></div>'
     + r.sections.map(sec => '<div class="gerer-section"><b>' + esc(sec.titre) + '</b>' + (sec.items || []).map(it =>
         '<div class="' + classe(it) + '"' + cle(it) + '><p>' + esc(it.texte) + '</p>' + preuveH(it) + boutonsGerer(it) + '</div>').join('') + '</div>').join('')
@@ -2004,7 +2185,8 @@ async function repartirAuVert(bouton) {
   if (acc) $('fil').appendChild(acc);
   $('chaine').innerHTML = '<div class="vide">La chaîne se construira ici.</div>';
   majEtat({ plancher: 'USER_DIRECT', influences: [], ledger: { consumed: 0, allocated: 100 } });
-  tour('JARVIS', "Reparti au vert : nouvelle session. Effacé : l'historique de cette conversation, ici et sur le serveur (et les contenus lus). Gardé : tes souvenirs (« Ce que JARVIS retient de toi »).", false);
+  Gravite.blanc();
+  tour('JARVIS', (document.body.classList.contains('prive') ? 'Nouvelle conversation' : 'Reparti au vert') + " : nouvelle session. Effacé : l'historique de cette conversation, ici et sur le serveur (et les contenus lus). Gardé : tes souvenirs (« Ce que JARVIS retient de toi »).", false);
   if (bouton) bouton.disabled = false;
 }
 /* un geste sur une conversation (voir, rappel, créneau, répondre) ; rejoué une fois après relecture */
@@ -2708,19 +2890,9 @@ const Auj = {
     h.push('<div class="auj-titre2">À traiter · ' + (points.length ? points.length : r.incomplet ? '?' : '0') + '</div>');
     if (!points.length) h.push('<p class="pdj-vide">' + esc(r.incomplet ? "Lecture incomplète : rien n'est garanti." : 'Rien à traiter.')
       + (r.masques ? ' ' + esc(pluriel(r.masques, 'point marqué', 'points marqués')) + ' « fait » ou « plus tard ».' : '') + '</p>');
-    for (const it of points.slice(0, 5)) {
-      const j = jetonFil(it.fil), k = Traites.valide(it.cle) ? it.cle : '';
-      const suspect = it.suspect === true || it.type === 'suspect';
-      const act = suspect ? null : ['creneau', 'repondre', 'rappel'].find(a => (it.actions || []).includes(a) && (a !== 'creneau' || (Number.isInteger(it.creneau) && it.creneau >= 0)));
-      h.push('<div class="gerer-item auj-point' + (suspect || it.type === 'conflit' ? ' fort' : '') + '" data-cle="' + esc(String(it.texte || '').slice(0, 200))
-        + '" data-objet="' + esc(String(it.objet || '').slice(0, 200)) + '"' + (k ? ' data-point="' + k + '"' : '') + '>'
-        + (j ? '<button type="button" class="auj-texte" data-gerer="voir" data-fil="' + esc(j) + '" title="Voir la conversation">' + esc(it.texte) + '</button>' : '<p>' + esc(it.texte) + '</p>')
-        + '<div class="rang auj-actions">'
-        + (act && j ? '<button type="button" data-gerer="' + act + '" data-fil="' + esc(j) + '"' + (act === 'creneau' ? ' data-index="' + it.creneau + '"' : '') + '>' + ACTIONS_COURTES[act] + '</button>' : '')
-        + (k ? '<button type="button" class="traite" data-traite="fait" data-point="' + k + '">Fait</button><button type="button" class="traite" data-traite="plustard" data-point="' + k + '">Plus tard</button>' : '')
-        + '</div></div>');
-    }
+    for (const it of points.slice(0, 5)) h.push(pointGerer(it));   /* [S127] le meme point que Discuter */
     if (points.length > 5) h.push('<button type="button" class="lien" data-voir-gerer="1">Tout voir (' + points.length + ')</button>');
+    if (points.length) h.push('<p class="points-pied">' + TEXTE_PIED_POINTS + '</p>');
     zone.innerHTML = h.join('');
   }
 };

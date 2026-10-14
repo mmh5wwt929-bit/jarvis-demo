@@ -429,6 +429,8 @@ function analyser(fil, o = {}) {
   const repondu = (i) => Number.isInteger(i) && i < monDernier;
   if (r.suspect) item('suspect', 1, 'Mail suspect — « ' + r.objet + ' » : ne réponds pas, ne paie rien, ne clique pas.', (r.alertes.find(x => x.poids === 'fort') || {}).texte, 'deduction', ['mail'],
     idDe((r.alertes.find(x => x.poids === 'fort') || {}).message));
+  /* [S127] v4.13 la phrase citee qui prouve l'alerte (elle reste une donnee) */
+  if (r.suspect) r.aGerer[r.aGerer.length - 1].citation = (r.alertes.find(x => x.poids === 'fort') || {}).preuve || null;
   /* [S120] la fin d'un mail n'a pas ete lue (au-dela de 64 Ko) : jamais « rien » */
   if (!r.suspect && r.incomplet) item('incomplet', 1, 'Mail trop long — « ' + r.objet + " » : la fin n'a pas été lue par les règles ; lis-le toi-même avant d'agir.", null, 'fait', ['mail'], idDe(r.incompletMessage));
   if (r.reponseAttendue && !r.suspect) item('reponse', 2, 'Répondre à ' + (r.reponseAttendue.nom || r.reponseAttendue.de) + ' — « ' + r.objet + ' »' + (r.reponseAttendue.depuis ? ' (depuis ' + r.reponseAttendue.depuis + ' j)' : ''),

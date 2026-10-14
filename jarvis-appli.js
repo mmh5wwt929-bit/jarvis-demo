@@ -14,7 +14,7 @@
  * ========================================================================== */
 const zlib = require('zlib');
 
-const VERSION = '1.0';
+const VERSION = '1.1';
 const TAILLES = Object.freeze([180, 192, 512]);
 const FOND = [0x0d, 0x11, 0x17];     /* --encre */
 const BLEU = [0x58, 0xa6, 0xff];     /* --signal */
@@ -108,8 +108,10 @@ function icone(taille) {
 const ICONES = Object.freeze({ '/icone-180.png': 180, '/icone-192.png': 192, '/icone-512.png': 512,
   '/apple-touch-icon.png': 180, '/apple-touch-icon-precomposed.png': 180 });
 const TEXTE_MANIFESTE = JSON.stringify(MANIFESTE);
-function fichier(chemin) {
-  if (chemin === '/manifest.webmanifest') return { type: 'application/manifest+json; charset=utf-8', corps: Buffer.from(TEXTE_MANIFESTE, 'utf8') };
+/* [1.1] v4.13 l'instance privee est claire : fond et barre blancs (la demo garde le sombre) */
+const TEXTE_MANIFESTE_PRIVE = JSON.stringify({ ...MANIFESTE, background_color: '#FFFFFF', theme_color: '#FFFFFF' });
+function fichier(chemin, o = {}) {
+  if (chemin === '/manifest.webmanifest') return { type: 'application/manifest+json; charset=utf-8', corps: Buffer.from(o && o.prive ? TEXTE_MANIFESTE_PRIVE : TEXTE_MANIFESTE, 'utf8') };
   if (Object.prototype.hasOwnProperty.call(ICONES, chemin)) return { type: 'image/png', corps: icone(ICONES[chemin]) };
   return null;
 }
