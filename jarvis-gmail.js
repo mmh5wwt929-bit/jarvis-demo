@@ -268,7 +268,7 @@ const nettoyer = (v, max) => String(v == null ? '' : v)
  * aucun JSON, aucune trace ne l'emporte ; « analyseIncomplete » si la fin depasse 64 Ko. */
 function avecTexteRegles(o, plein, max) {
   Object.defineProperty(o, 'texteRegles', { value: plein.slice(0, max), enumerable: false });
-  o.analyseIncomplete = plein.length > max;
+  o.analyseIncomplete = plein.length > max || !!(o.liens && o.liens.incomplet);   /* [S133] liens non tous lus aussi */
   return Object.freeze(o);
 }
 function texteDe(payload) {
@@ -298,12 +298,17 @@ function hoteDe(href) {
   try { const u = new URL(/^www\./i.test(href) ? 'https://' + href : href); return /^https?:$/.test(u.protocol) && u.hostname ? u.hostname.toLowerCase().replace(/\.$/, '') : null; }
   catch { return null; }
 }
+/* Toutes les balises sont lues (pas seulement les 10 premieres : 10 liens anodins devant ne cachent pas un lien
+ * trompeur) ; on garde les trompeurs d'abord. Au-dela de 1 Mo de HTML ou de 2 000 balises : « incomplet »
+ * (propriete non enumerable), et l'analyse dit « analyse incomplete », jamais « rien de suspect ». */
+const LIENS_HTML_MAX = 1000000, LIENS_BALISES_MAX = 2000;
 function liensRecus(html, texte) {
-  const out = [], vus = new Set();
-  const h = String(html || '').slice(0, 300000), hl = h.toLowerCase();
-  let i = 0, n = 0;
-  while (out.length < 10 && n < 500) {
-    const a = hl.indexOf('<a', i); if (a < 0) break; n++;
+  const trompeurs = [], autres = [], vus = new Set();
+  const brut = String(html || ''), h = brut.slice(0, LIENS_HTML_MAX), hl = h.toLowerCase();
+  let i = 0, n = 0, incomplet = brut.length > LIENS_HTML_MAX;
+  for (;;) {
+    const a = hl.indexOf('<a', i); if (a < 0) break;
+    if (++n > LIENS_BALISES_MAX) { incomplet = true; break; }
     const r = hl.slice(a, a + 4001).indexOf('>'), fin = r < 0 ? -1 : a + r;   /* une balise de 4 000 caracteres au plus */
     if (fin < 0 || !/^<a[\s>]/.test(hl.slice(a, a + 3))) { i = a + 2; continue; }
     const tag = h.slice(a, fin + 1);
@@ -317,14 +322,17 @@ function liensRecus(html, texte) {
     const dA = (RE_DOMAINE_AFFICHE.exec(affiche) || [])[1];
     const eA = dA ? enregistrable(dA) : null, eH = enregistrable(hote);
     const k = hote + '|' + affiche; if (vus.has(k)) continue; vus.add(k);
-    out.push(Object.freeze({ hote, affiche: nettoyer(affiche, 80) || null, trompeur: !!(eA && eH && eA !== eH) }));
+    const l = Object.freeze({ hote, affiche: nettoyer(affiche, 80) || null, trompeur: !!(eA && eH && eA !== eH) });
+    if (l.trompeur) { if (trompeurs.length < 10) trompeurs.push(l); } else if (autres.length < 10) autres.push(l);
   }
+  const out = trompeurs.concat(autres).slice(0, 10);
   for (const m of String(texte || '').slice(0, 65536).matchAll(/\b(?:https?:\/\/|www\.)[^\s<>"'«»‹›]{1,500}/gi)) {
     if (out.length >= 10) break;
     const hote = hoteDe(m[0].replace(/[.,;:!?)\]]+$/, ''));
     if (!hote || out.some(x => x.hote === hote)) continue;
     out.push(Object.freeze({ hote, affiche: null, trompeur: false }));
   }
+  Object.defineProperty(out, 'incomplet', { value: incomplet, enumerable: false });
   return Object.freeze(out);
 }
 const entete = (m, nom) => { const h = ((m.payload || {}).headers || []).find(x => x && String(x.name).toLowerCase() === nom); return h ? String(h.value || '') : ''; };

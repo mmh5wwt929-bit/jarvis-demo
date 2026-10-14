@@ -5,7 +5,7 @@ Ordre conseillé : 1 → 2 → 3, puis les cas dans l'ordre. **« Tout couper »
 
 ## 1. Mise en ligne
 1. Appli GitHub → PR « v4.15 » → attendre la coche verte → **Fusionner**.
-2. Safari → `/health` des deux services : `passerelle` = `v4.15.0`, `manifeste` = `conforme`, `empreinte` = **`023c2a742bc2`**.
+2. Safari → `/health` des deux services : `passerelle` = `v4.15.0`, `manifeste` = `conforme`, `empreinte` = **`1e468e4ba06f`**.
 3. Instance privée, appli de l'écran d'accueil : si la barre d'état (heure, batterie) reste blanche sur fond blanc, **supprimer l'appli de l'écran d'accueil puis la ré-ajouter** (Safari → Partager → Sur l'écran d'accueil). iOS ne relit ce réglage qu'à l'ajout.
 
 ## 2. Render (instance privée seulement ; la démo : rien à changer)
@@ -26,6 +26,7 @@ Rien à supprimer. Aucune autre variable ne change.
    - Planning : **toutes les 30 min, aux minutes 5 et 35** (pas plus souvent : les 750 h gratuites par mois de Render sont partagées entre tes services ; un réveil toutes les 10 min garderait l'instance éveillée 744 h à elle seule et Render suspendrait **les deux** services en fin de mois).
    - Avancé : méthode **POST** ; en-tête `Authorization` = `Bearer <valeur de JARVIS_CLE_VEILLE>` ; délai 30 s (le réveil de Render prend quelques secondes).
    - *Test run* → réponse `200` `{"ok":true,…}`. cron-job.org ne détient que la clé de veille : elle ne lit rien et ne déclenche aucune action, seulement une vérification.
+3. **Ou, sans service tiers : Raccourcis de l'iPhone** — Automatisation → Heure de la journée **7 h 05**, chaque jour, « Exécuter immédiatement » → action « Obtenir le contenu de l'URL » : `https://<instance-privée>.onrender.com/veille?pas=1440`, méthode POST, en-tête `Authorization` = `Bearer <JARVIS_CLE_VEILLE>`. Une seule vérification par jour : les mails suspects des dernières 24 h sont notifiés à 7 h 05 (pas au fil de la journée).
 
 ## 4. Les cas à refaire (instance privée, appli de l'écran d'accueil)
 ### v4.13 — sécurité d'abord
@@ -62,10 +63,11 @@ Rien à supprimer. Aucune autre variable ne change.
 17. Inchangée, sombre, sans onglets. Sur l'accueil : « Défi : essaie de faire partir un e-mail » → tableau d'honneur (essais coupés, failles, « perdus au redémarrage »). Essayer « Voir un mail piégé bloqué » puis demander le transfert des factures → le compteur « essais coupés » monte. `/api/installation`, `/api/agenda/semaine`, `/veille` → 404.
 
 ## 5. Limites assumées
-- **Render s'endort** 15 min après la dernière visite : presque chaque réveil de la veille trouve une mémoire vide. Donc : un mail suspect n'est notifié que s'il est **arrivé depuis moins de 33 min** (un mail arrivé pendant une panne de la veille n'est pas notifié ; il reste dans « Aujourd'hui ») ; le point du jour et l'alerte de la clé **à 7 h** seulement (créneau 7 h 00–7 h 29) ; une source en panne est redite au plus à 7 h, 12 h et 19 h.
+- **Render s'endort** 15 min après la dernière visite : presque chaque réveil de la veille trouve une mémoire vide. Donc : un mail suspect n'est notifié que s'il est **arrivé depuis le passage précédent** (30 min + 3 min de marge, ou ce que dit `?pas=` en minutes ; un mail arrivé pendant une panne de la veille n'est pas notifié ; il reste dans « Aujourd'hui ») ; le point du jour et l'alerte de la clé **à 7 h** seulement (créneau 7 h 00–7 h 29) ; une source en panne est redite au plus à 7 h, 12 h et 19 h.
 - `/veille` : 20 clés fausses en 1 h ferment la veille 1 h (même pour cron-job.org) : quelqu'un qui connaît l'adresse peut la bloquer, pas l'utiliser.
 - Notifications : phrases fixes, jamais le contenu ; ntfy.sh est un service tiers (il voit l'heure et la phrase).
 - Âge du domaine : un **signal** (« moyen »), jamais « suspect » à lui seul ; registre muet → « non vérifié ». Les liens : 10 au plus par mail, depuis la partie HTML.
+- « Tout couper » : la surveillance montre Gmail « coupé par toi », sans notification de panne ; après un redémarrage, les jetons révoqués apparaissent en panne (7 h, 12 h, 19 h) jusqu'à ce que tu les refasses ou les retires de Render.
 - « Tout couper » : durable pour Gmail seulement (révoqué chez Google) ; connecteur et écriture d'agenda reviennent au prochain redémarrage — c'est écrit dans le compte rendu. Pour les couper pour de bon : supprimer `JARVIS_CLE_MCP` et `JARVIS_GOOGLE_COMPTE` dans Render.
 - Défi : détection testée sur les cas connus ; le tableau d'honneur vit en mémoire (perdu au redémarrage).
 - Mistral : vérifié seulement contre un faux client ; le vrai Le Chat est à essayer (cas 13).
@@ -73,9 +75,11 @@ Rien à supprimer. Aucune autre variable ne change.
 
 ## 6. Écarts à la SPEC, choisis ici (à valider)
 - C2 : la route est `POST /veille` (hors `/api/`), pas `/api/veille` : tout `/api/` exige la clé d'accès, et la tâche planifiée ne doit détenir que la clé de veille.
-- C1/C2 : créneaux (point du jour 7 h 00–7 h 29 au lieu de « 6 h – 10 h » ; clé de l'IA à 7 h ; pannes 7 h / 12 h / 19 h ; mail suspect ≤ 33 min) : sans eux, chaque réveil de Render renvoyait les mêmes notifications (jusqu'à 8 « point du jour » par matin, une alerte de clé toutes les 30 min).
+- C1/C2 : créneaux (point du jour 7 h 00–7 h 29 au lieu de « 6 h – 10 h » ; clé de l'IA à 7 h ; pannes 7 h / 12 h / 19 h ; mail suspect arrivé depuis le passage précédent, `?pas=` pour un réveil quotidien) : sans eux, chaque réveil de Render renvoyait les mêmes notifications (jusqu'à 8 « point du jour » par matin, une alerte de clé toutes les 30 min).
 - Versions des modules : `jarvis-gmail.js` 1.7 et `jarvis-analyse.js` 1.5 (la SPEC disait 1.5 et 1.4 : v4.13 les avait déjà montés).
 - `render.yaml` : `NODE_VERSION` = 24 ajouté (sinon Render choisit sa version par défaut).
+- 0a : le modèle et Claude ne reçoivent que l'extrait, **sauf** la phrase citée en preuve (une seule, bornée) et l'adresse tierce nommée dans le verdict, qui peuvent venir d'au-delà de l'extrait : c'est la raison du « SUSPECT ». L'adresse reste bloquée (hors liste + alerte « adresse vue »). À trancher : la masquer côté Claude (verdict moins clair) ou la garder (choix ici).
+- C3 : liens lus dans **toutes** les balises (1 Mo, 2 000 balises), trompeurs gardés d'abord : 10 liens anodins devant ne cachent pas un lien trompeur ; au-delà : « analyse incomplète ».
 
 ## 7. Tests existants adaptés (signalés)
 - `tests-v412.js` B1 : texte de l'alerte (0b, « pas de toi » était faux).
@@ -86,6 +90,6 @@ Rien à supprimer. Aucune autre variable ne change.
 - `tests-preuves.js` P5 E1 : inventaire des points d'effet 13 → **14** (la lecture des non-lus par la veille, même permis), 4 lectures de la boîte.
 
 ## 8. Tests
-- `tests-v413.js` (47), `tests-v414.js` (17), `tests-v415.js` (35). Sur la v4.12.1 : tout échoue sauf les « garde ».
-- Mutations : chaque correctif cassé à la main fait tomber au moins un test (M1–M48, dont la fraîcheur des mails, les créneaux, la date de réception perdue).
+- `tests-v413.js` (47), `tests-v414.js` (17), `tests-v415.js` (38). Sur la v4.12.1 : tout échoue sauf les « garde ».
+- Mutations : chaque correctif cassé à la main fait tomber au moins un test (M1–M54, dont la fraîcheur des mails, les créneaux, la cadence `?pas=`, la date de réception perdue, les liens au-delà des 10 premiers, « Tout couper » vu comme une panne).
 - Toutes les suites existantes passent.

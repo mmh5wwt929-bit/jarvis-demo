@@ -2102,7 +2102,7 @@ const Veille = (() => {
     if (v.cleIaExpire) h.push('<p>Clé de l\'IA : expire le ' + esc(v.cleIaExpire) + (v.dernier && v.dernier.cleIa ? ' (' + esc(v.dernier.cleIa.jours < 0 ? 'expirée' : 'dans ' + pluriel(v.dernier.cleIa.jours, 'jour', 'jours')) + ')' : '') + '.</p>');
     else h.push('<p class="pdj-note">Date d\'expiration de la clé de l\'IA inconnue : ajoute JARVIS_CLE_IA_EXPIRE (AAAA-MM-JJ) dans Render pour être prévenu à J−7, J−3, J−1.</p>');
     if (v.dernier) h.push('<p>Dernière vérification : ' + esc(v.dernier.heure) + ' (' + esc(v.dernier.declencheur === 'toucher' ? 'ton toucher' : 'veille') + ')</p><ul class="veille-sources">'
-      + v.dernier.sources.map(x => '<li class="' + (x.ok ? 'ok' : 'ko') + '">' + (x.ok ? '✓ ' : '⚠ ') + esc(x.nom) + (x.ok ? '' : ' : ne répond pas' + (x.code ? ' (' + esc(x.code) + ')' : '')) + '</li>').join('') + '</ul>'
+      + v.dernier.sources.map(x => '<li class="' + (x.ok ? 'ok' : 'ko') + '">' + (x.ok ? '✓ ' : '⚠ ') + esc(x.nom) + (x.ok ? '' : x.code === 'TOUT_COUPE' ? ' : coupé par toi (« Tout couper »)' : ' : ne répond pas' + (x.code ? ' (' + esc(x.code) + ')' : '')) + '</li>').join('') + '</ul>'
       + (v.dernier.suspects ? '<p class="auj-erreur">⚠ ' + esc(pluriel(v.dernier.suspects, 'mail non lu suspect', 'mails non lus suspects')) + '.</p>' : ''));
     else h.push('<p class="pdj-vide">Pas encore de vérification depuis le réveil du serveur.</p>');
     if (v.notification) h.push('<p class="pdj-note">Dernière notification : ' + esc(v.notification.heure) + ' — ' + (v.notification.ok ? 'partie' : 'pas partie (' + esc(v.notification.resultat || '') + ')') + '.</p>');

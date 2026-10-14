@@ -3781,12 +3781,13 @@ function notifier(code, x) {
 /* LE SOMMEIL DE RENDER : le service gratuit s'endort 15 min apres la derniere visite ; une veille toutes les 30 min
  * trouve donc presque toujours un processus NEUF (memoire vide). Pour ne pas repeter la meme notification a chaque reveil,
  * la decision ne depend pas que de la memoire :
- *  - mail suspect : arrive (date de reception de Gmail) depuis 33 min au plus (30 min de cadence + 3 min de reveil), et pas deja
- *    signale par ce processus ; un mail arrive pendant une panne de la veille n'est pas notifie (il reste dans « Aujourd'hui ») ;
+ *  - mail suspect : arrive (date de reception de Gmail) depuis la cadence + 3 min au plus (cadence : « ?pas= » en minutes dans
+ *    l'adresse de la veille, 10 a 1440, 30 par defaut), et pas deja signale par ce processus ; un mail arrive pendant une panne de
+ *    la veille n'est pas notifie (il reste dans « Aujourd'hui ») ;
  *  - point du jour et cle de l'IA : seulement dans le creneau 7 h 00 – 7 h 29 (heure de l'instance), une fois par jour ;
  *  - panne : au passage « repond » -> « ne repond plus » dans un processus eveille ; processus neuf : seulement dans les
  *    creneaux 7 h, 12 h et 19 h (30 min), soit 3 fois par jour au plus tant qu'elle dure. */
-const VEILLE_CADENCE = Object.freeze({ fraicheurMs: 33 * 60000, matin: Object.freeze([7]), pannes: Object.freeze([7, 12, 19]), creneauMin: 30 });
+const VEILLE_CADENCE = Object.freeze({ pasMin: 30, margeMin: 3, matin: Object.freeze([7]), pannes: Object.freeze([7, 12, 19]), creneauMin: 30 });
 const dansCreneau = (loc, heures) => heures.includes(loc.h) && loc.mi < VEILLE_CADENCE.creneauMin;
 const SURVEILLANCE = { ts: null, sources: [], cleIa: null, suspects: 0, matin: null, etats: {}, signales: new Set(), matinJour: null, cleIaVue: null, enCours: false };
 let SESSION_VEILLE = null;
@@ -3827,7 +3828,10 @@ async function veiller(o = {}) {
       if (ECRITURE) sources.push({ id: 'agendaJarvis', ok: !!(lu && lu.ok) && !nonLu.has('JARVIS'), code: nonLu.has('JARVIS') ? 'NON_LU' : lu && !lu.ok ? lu.code : null });
       SURVEILLANCE.matinEvts = lu && lu.ok ? lu.evenements.length : null;
     }
-    if (MAIL) {
+    if (MAIL && COUPURE) {   /* coupe par toi : ce n'est pas une panne, rien n'est notifie (l'etat le dit) */
+      if (MAIL.envoiActif) sources.push({ id: 'gmailEnvoi', ok: false, code: 'TOUT_COUPE', coupe: true });
+      if (MAIL.lectureActive) sources.push({ id: 'gmailLecture', ok: false, code: 'TOUT_COUPE', coupe: true });
+    } else if (MAIL) {
       let d = null; try { d = await MAIL.diagnostic(); } catch { d = null; }
       const et = d && d.etapes ? d.etapes : null;
       const vu = (k) => !!(et && Array.isArray(et) ? et.some(x => x && x.etape === k && x.ok) : d && d.ok);
@@ -3837,6 +3841,7 @@ async function veiller(o = {}) {
     const ia = await iaRepond();
     sources.push({ id: 'ia', ok: ia.ok, code: ia.code });
     for (const x of sources) {
+      if (x.coupe) continue;
       const avant = SURVEILLANCE.etats[x.id];
       /* une panne : dite au passage de « ok » a « ko » ; sans memoire (processus neuf), seulement dans les creneaux */
       if (!x.ok && (avant === true || (avant === undefined && dansCreneau(loc, VEILLE_CADENCE.pannes)))) notifier('PANNE', x.id);
@@ -3867,7 +3872,7 @@ async function veiller(o = {}) {
           if (!an.suspect) continue;
           suspects++;
           const k = crypto.createHash('sha256').update('jarvis-signale|' + m.id).digest('hex').slice(0, 24);
-          const frais = !(m.recuLe > 0) || now - m.recuLe <= VEILLE_CADENCE.fraicheurMs;   /* date de reception inconnue : signale (mieux un double qu'un oubli) */
+          const frais = !(m.recuLe > 0) || now - m.recuLe <= ((Number.isInteger(o.pas) ? o.pas : VEILLE_CADENCE.pasMin) + VEILLE_CADENCE.margeMin) * 60000;   /* date de reception inconnue : signale (mieux un double qu'un oubli) */
           if (frais && !SURVEILLANCE.signales.has(k)) { SURVEILLANCE.signales.add(k); nouveau = true; if (SURVEILLANCE.signales.size > 500) SURVEILLANCE.signales.delete(SURVEILLANCE.signales.values().next().value); }
         }
         if (nouveau) notifier('SUSPECT');
@@ -3891,7 +3896,7 @@ const vueSurveillance = () => ({ veille: VEILLE_CONFIG.etat, ntfy: NTFY.etat, nt
   dernier: SURVEILLANCE.ts ? { ts: new Date(SURVEILLANCE.ts).toISOString(), heure: horaire(SURVEILLANCE.ts), declencheur: SURVEILLANCE.declencheur, sources: SURVEILLANCE.sources,
     cleIa: SURVEILLANCE.cleIa, suspects: SURVEILLANCE.suspects } : null,
   notification: NOTIFS.derniere ? { heure: horaire(NOTIFS.derniere.ts), code: NOTIFS.derniere.code, ok: NOTIFS.derniere.ok, resultat: NOTIFS.derniere.resultat } : null,
-  memoire: "Render s'endort entre deux passages : un mail suspect n'est notifié que s'il est arrivé depuis moins de 33 min ; le point du jour et la clé de l'IA à 7 h ; une panne au plus à 7 h, 12 h et 19 h." });
+  memoire: "Render s'endort entre deux passages : un mail suspect n'est notifié que s'il est arrivé depuis le passage précédent (30 min par défaut, « ?pas= » sinon) ; le point du jour et la clé de l'IA à 7 h ; une panne au plus à 7 h, 12 h et 19 h." });
 const VEILLE_GARDE = { dernier: 0, echecs: [] };
 
 /* ==========================================================================
@@ -3920,7 +3925,8 @@ function vueInstallation() {
       faire: 'Dans Claude : Réglages → Connecteurs → ajouter « ' + ref + '/mcp », en-tête « Authorization: Bearer <JARVIS_CLE_MCP> ».', ouvrir: 'blocClaude' },
     { id: 'ntfy', nom: 'Notifications (ntfy)', etat: etatDe(NTFY.etat === 'actif', NTFY.etat === 'erreur-config'), variable: 'JARVIS_NTFY', faire: "Appli ntfy, un sujet secret de 20 caractères ou plus, puis « https://ntfy.sh/<sujet> ».", ouvrir: 'blocVeille' },
     { id: 'veille', nom: 'Surveillance', etat: etatDe(VEILLE_CONFIG.etat === 'actif', VEILLE_CONFIG.etat === 'erreur-config'), variable: 'JARVIS_CLE_VEILLE',
-      faire: 'Une tâche planifiée gratuite (cron-job.org) : POST « ' + ref + "/veille » toutes les 30 min, en-tête « Authorization: Bearer <JARVIS_CLE_VEILLE> ».", ouvrir: 'blocVeille' },
+      faire: 'Une tâche planifiée gratuite (cron-job.org) : POST « ' + ref + "/veille » toutes les 30 min, en-tête « Authorization: Bearer <JARVIS_CLE_VEILLE> ». "
+        + "Ou une automatisation Raccourcis de l'iPhone, chaque jour à 7 h 05 : POST « " + ref + "/veille?pas=1440 », même en-tête.", ouvrir: 'blocVeille' },
     { id: 'config', nom: 'Configuration attendue', etat: verdictConfig() === 'ok' ? 'actif' : verdictConfig() === 'non-declaree' ? 'absent' : 'a-corriger', variable: 'JARVIS_CONFIG_ATTENDUE',
       faire: 'Ce qui doit être actif ici, par exemple « ' + ([...modulesActifs()].join(',') || 'agenda,faceid,code') + ' » : /health dit « ok » ou « écart ».' }];
   return { lignes: L.map(x => ({ ...x, faire: x.etat === 'actif' && x.id !== 'acces' && x.id !== 'mcp' && x.id !== 'veille' ? null : x.faire })),
@@ -4179,7 +4185,9 @@ const serveur = http.createServer((req, res) => {
     if (t - VEILLE_GARDE.dernier < 10 * 60000) return json(200, { ok: true, deja: true, prochaine: Math.ceil((VEILLE_GARDE.dernier + 600000 - t) / 1000) });
     VEILLE_GARDE.dernier = t;
     req.resume();
-    return veiller().then(r => json(200, { ok: !!r.ok, ts: new Date().toISOString() }), () => json(500, { ok: false }));
+    const pasLu = String(u.query.pas || '');
+    const pas = /^\d{1,4}$/.test(pasLu) ? Math.min(1440, Math.max(10, Number(pasLu))) : VEILLE_CADENCE.pasMin;   /* la cadence du declencheur, en minutes */
+    return veiller({ pas }).then(r => json(200, { ok: !!r.ok, ts: new Date().toISOString() }), () => json(500, { ok: false }));
   }
 
   /* [S13] instance protegee : toute l'API derriere la cle, /health et la page restent publics */

@@ -1,10 +1,10 @@
 {
   "format": 1,
   "passerelle": "v4.15.0",
-  "empreinte": "023c2a742bc2",
+  "empreinte": "1e468e4ba06f",
   "fichiers": {
-    "server.js": "9adef611f531b1c3bdc99c9ec8d3ead36b0e219731f8015e027ad45fc12a0da1",
-    "index.html": "f201c67f22667392e6a18574d5b5f7d3ba356f06e19ab92c4c551f99ddfcd21b",
+    "server.js": "52f96c51654b546643941a0285d2111fc9279e57be5cbb3f7e7a6596b3b3898c",
+    "index.html": "5a81e3b24498c9c047bca8740343d67c808fe83ed82fa18bd7b3715c4efcb60f",
     "package.json": "570aeab2c5dd22edfcaab8f1c8e97c273d60a3d813fd5cc9c2d8adc35964845d",
     "jarvis-5.28.3.js": "0eb75bec3cdfab34fbc44f7c0360f6c2357451489702fc14c347890b35c58350",
     "jarvis-plus-5.29.js": "5d5a15289b5c120f13ddf8f2c6c076f4a20d03058d584f399cfb34a53aedb331",
@@ -16,7 +16,7 @@
     "jarvis-manifeste.js": "79ecd80b1a36e667371429c653bd9c2dc00b13f84709b661360b215ff17522ef",
     "jarvis-verite.js": "7681505ee563d63163326e65e15c798f4469aef60d4122f80c1d1752cbb22098",
     "jarvis-appli.js": "6837ea3f426f2be648badf9b3f2a4033f1c84418a29610be1e75d52c2e6c6d1d",
-    "jarvis-gmail.js": "e3914a7f0416f1efb2a884603c60c644d6b604ea297f56afc5489c197e118f9f",
+    "jarvis-gmail.js": "867b3f19a98f9e7aee4ce9b04a4fc8545ca7268f402b8f135f9af425087a7b8b",
     "confidentialite.html": "d18c00908fa80082aa0783f9a9f4f944201c86c8ad12a845415add81e327dbf6",
     "conditions.html": "123615b2d2774c44f68cbb8a86a63cc4f77b72906b1990fda6e0ee0401a37afc",
     "jarvis-analyse.js": "c3c5034f21ca1ae265b031eb6fe90529fa3d11d83e90de0f84768563e314e32a",
