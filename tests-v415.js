@@ -5,7 +5,11 @@
  * ----------------------------------------------------------------------------
  * SPEC-v4.13.md et SPEC-v4.15.md, une section par commit, dans l'ordre :
  *  Z  [S120-S122] v4.13 point 0 : le mail ENTIER pour les règles, textes d'alerte justes, pas de bruit
- *  ... (les sections suivantes s'ajoutent à chaque étape)
+ *  T  [S123-S128] v4.13 points 1-8 : clair, gravité calculée par le serveur, bulles, onglets, « À gérer », « À qui ? »
+ *  A  [S129] v4.14 l'onglet « Agenda »
+ *  I  [S131-S136] les 6 idées : notifications, surveillance, âge du domaine, vrai lien, Mistral, défi, « Signaler »
+ *  D  [S137] v4.15 l'installation guidée
+ *  K  [S130] v4.14 « tout couper » (en dernier : la coupure vaut jusqu'au redémarrage)
  * Chaque test ECHOUE sur la v4.12.1, sauf ceux marqués « garde » :
  *                                    JARVIS_DIR=../v4121 node tests-v415.js
  * Même banc que tests-v4121.js : serveur dans CE processus (faux Claude,
@@ -89,12 +93,19 @@ const b64 = (x) => Buffer.from(x, 'utf8').toString('base64').replace(/\+/g, '-')
 const messageBoite = (m) => ({ id: m.id, threadId: m.id, internalDate: String(m.date), labelIds: ['INBOX', 'UNREAD'],
   payload: { mimeType: 'multipart/mixed', headers: [{ name: 'From', value: m.de }, { name: 'To', value: MOI }, { name: 'Subject', value: m.objet },
     { name: 'Date', value: new Date(m.date).toUTCString() }].concat(m.repondreA ? [{ name: 'Reply-To', value: m.repondreA }] : []).concat(m.cc ? [{ name: 'Cc', value: m.cc }] : []),
-    parts: [{ mimeType: 'text/plain', body: { data: b64(m.texte) } }] } });
+    parts: [{ mimeType: 'text/plain', body: { data: b64(m.texte) } }].concat(m.html ? [{ mimeType: 'text/html', body: { data: b64(m.html) } }] : []) } });
 const messageGmail = (f, m) => ({ id: m.id, threadId: f.id, internalDate: String(m.date), labelIds: m.moi ? ['SENT'] : ['INBOX', 'UNREAD'],
   payload: { mimeType: 'multipart/mixed', headers: [{ name: 'From', value: m.de }, { name: 'To', value: m.a || MOI },
     { name: 'Subject', value: m.objet || f.objet }, { name: 'Message-ID', value: '<' + m.id + '@mail.test>' }],
     parts: [{ mimeType: 'text/plain', body: { data: b64(m.texte) } }] } });
 function repondre(methode, u, corps, entetes) {
+  /* [S131] v4.15 les notifications (ntfy), la clé de l'IA (sans coût), [S132] les registres (RDAP) */
+  if (u.hostname === 'ntfy.test') { W.ntfy = (W.ntfy || []).concat([{ chemin: u.pathname, corps: String(corps || ''), entetes: entetes || {} }]); return [200, { id: 'n' }]; }
+  if (u.hostname === 'api.anthropic.com' && u.pathname.startsWith('/v1/models')) return W.iaKo ? [401, { type: 'error' }] : [200, { data: [] }];
+  if (['rdap.verisign.com', 'rdap.publicinterestregistry.org', 'rdap.nic.fr'].includes(u.hostname)) {
+    const d = decodeURIComponent(u.pathname.split('/').pop()); W.rdapAppels = (W.rdapAppels || []).concat([d]);
+    return (W.rdap || {})[d] ? [200, { objectClassName: 'domain', ldhName: d, events: [{ eventAction: 'registration', eventDate: W.rdap[d] }] }] : [404, { errorCode: 404 }];
+  }
   if (u.hostname === 'api.anthropic.com') {
     const c = JSON.parse(corps || '{}');
     if (c.max_tokens === 200 && !c.system) { const p = W.plans.shift() || { action: 'AUCUNE' }; return [200, { content: [{ type: 'text', text: JSON.stringify(p) }] }]; }
@@ -103,6 +114,12 @@ function repondre(methode, u, corps, entetes) {
     return [200, { content: [{ type: 'text', text: x == null ? 'Réponse.' : x }], usage: {} }];
   }
   if (u.hostname === 'agenda.test') { W.ical++; return W.pannes.ical ? [503, 'indisponible', true] : [200, ICS(), true]; }
+  if (u.hostname === 'oauth2.googleapis.com' && u.pathname === '/revoke') {   /* [S130] la révocation chez Google */
+    const tok = new URLSearchParams(corps || '').get('token') || '';
+    W.revoques = (W.revoques || []).concat([tok]);
+    if (W.gmail.jetons[tok] === undefined) return [400, { error: 'invalid_token' }];
+    delete W.gmail.jetons[tok]; return [200, {}];
+  }
   if (u.hostname === 'oauth2.googleapis.com') {
     const q = new URLSearchParams(corps || '');
     if (q.get('grant_type') !== 'refresh_token') return [200, { access_token: 'ya29.agenda', expires_in: 3600 }];
@@ -167,7 +184,11 @@ https.get = (url, opts, cb) => { const q = fausse(url, opts, cb); q.end(); retur
 Object.assign(process.env, { ANTHROPIC_API_KEY: 'test', PORT: String(PORT), JARVIS_CLE_ACCES: CLE, JARVIS_CLE_MCP: CLE_MCP, JARVIS_CODE_SECOURS: '731904582614',
   JARVIS_PASSKEYS: PASSKEY, JARVIS_GOOGLE_COMPTE: COMPTE, JARVIS_AGENDA_JARVIS: AGENDA_ID, JARVIS_AGENDA_ICAL: 'https://agenda.test/perso.ics',
   JARVIS_GMAIL_CLIENT: CLIENT, JARVIS_GMAIL_ENVOI: RT_E, JARVIS_GMAIL_LECTURE: RT_L, JARVIS_MAIL_AUTORISES: 'luc@club-hand.fr', JARVIS_MAIL_PLAFOND: '20',
-  JARVIS_APPELS_HEURE: '2000', JARVIS_APPELS_JOUR: '100000', JARVIS_ACTIONS_HEURE: '5000', JARVIS_MCP_DELAI_MS: '1500' });
+  JARVIS_APPELS_HEURE: '2000', JARVIS_APPELS_JOUR: '100000', JARVIS_ACTIONS_HEURE: '5000', JARVIS_MCP_DELAI_MS: '1500',
+  /* [S131]-[S134] v4.15 */
+  JARVIS_NTFY: 'https://ntfy.test/jarvis-alertes-0123456789abcd', JARVIS_CLE_SURVEILLANCE: 'cle-surveillance-de-test-longue-0123456789-xyz',
+  JARVIS_CLE_API_EXPIRE: (() => { const p = parisParts(Date.now() + 3 * J); return p.year + '-' + p.month + '-' + p.day; })(),
+  JARVIS_MCP_ORIGINES: 'https://chat.mistral.ai', JARVIS_VEILLE_AUTO: '0' });
 for (const k of ['JARVIS_CONFIG_ATTENDUE', 'JARVIS_HISTORIQUE', 'JARVIS_CLE_JOURNAL', 'JARVIS_DEMO_VIDEO']) delete process.env[k];
 /* tout ce que le serveur ecrit en console est garde : aucun contenu de mail ne doit y passer */
 const log = console.log, CONSOLE = [];
@@ -501,7 +522,7 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
       const vis = (el) => [...el.querySelectorAll(':scope > .auj-actions > button')].map(b => b.textContent);
       const plus = (el) => [...el.querySelectorAll('.point-plus button')].map(b => b.textContent);
       await t('T13', "6 « À gérer » : suspect → « Voir la conversation » + « Fait », « Plus tard » derrière « … » ; promesse → « Rappel » + « Fait », le reste derrière « … » ; la raison courte visible ; une seule ligne « Repéré par des règles, sans IA. »", async () =>
-        ({ ok: pts.length === 2 && JSON.stringify(vis(pts[0])) === JSON.stringify(['Voir la conversation', 'Fait']) && JSON.stringify(plus(pts[0])) === JSON.stringify(['Plus tard'])
+        ({ ok: pts.length === 2 && JSON.stringify(vis(pts[0])) === JSON.stringify(['Voir la conversation', 'Fait']) && JSON.stringify(plus(pts[0])) === JSON.stringify(['Plus tard', 'Signaler'])
             && JSON.stringify(vis(pts[1])) === JSON.stringify(['Rappel', 'Fait']) && JSON.stringify(plus(pts[1])) === JSON.stringify(['Voir la conversation', 'Plus tard'])
             && /Demande de transmission vers une adresse tierce \(x@evil\.com\)/.test(pts[0].querySelector('.point-raison').textContent)
             && (P.$('aujTraiter').textContent.match(/Repéré par des règles, sans IA/g) || []).length === 1
@@ -511,7 +532,224 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
     demo.arreter();
   }
 
+  /* ============================ A [S129] v4.14 L'ONGLET « AGENDA » ============================ */
+  {
+    IP = '92.15.2.1'; const sid = await session();
+    const auj = V.local(Date.now(), 'Europe/Paris').jour, j2 = auj + 2;
+    W.ics = [evtP('Match U15', j2, 10, 0, 12, 0), evtP('Réunion', j2, 11, 0, 12, 30), { titre: 'Anniversaire Léa', journee: V.iso(j2), fin: V.iso(j2 + 1) }, evtP('Anniversaire de Paul', j2, 11, 30, 12, 30), evtP('Repas', auj + 4, 12, 0, 13, 0)];
+    W.agenda = [evtJ('evtA1', 'Entraînement U18', j2, 18, 0, 20, 0)];
+    plusTard(301000);   /* le lien iCal lu il y a moins de 5 min est en cache */
+    const nC = W.conv.length;
+    const a1 = await appel('/api/agenda?sessionId=' + sid);
+    const jour2 = (a1.jours || []).find(x => x.jour === V.iso(j2)) || {};
+    await t('A1', "v4.14 GET /api/agenda : 7 jours depuis aujourd'hui, écrits par le serveur (sans modèle) ; heures, titre, source (agenda principal / JARVIS) ; journée entière en tête ; le vrai chevauchement dit, l'anniversaire jamais en conflit", async () =>
+      ({ ok: a1.ok === true && (a1.jours || []).length === 7 && a1.jours[0].aujourdhui === true && a1.ecritPar === 'serveur' && W.conv.length === nC
+          && (jour2.evenements || []).length === 5 && jour2.evenements[0].heure === 'journée' && /Anniversaire Léa/.test(jour2.evenements[0].titre)
+          && jour2.evenements.some(e => e.titre === 'Entraînement U18' && e.heure === '18:00 → 20:00' && e.source === 'agenda JARVIS')
+          && jour2.evenements.some(e => e.titre === 'Match U15' && e.source === 'agenda principal')
+          && (jour2.conflits || []).length === 1 && /« Match U15 » et « Réunion » se chevauchent \(11:00\)/.test(jour2.conflits[0]),
+         info: JSON.stringify([a1.ok, (a1.jours || []).length, jour2.evenements, jour2.conflits]).slice(0, 400) }));
+    const a2 = await appel('/api/agenda?sessionId=' + sid + '&debut=' + V.iso(auj + 7));
+    const a3 = await appel('/api/agenda?sessionId=' + sid + '&debut=' + V.iso(auj + 60));
+    const a4 = await appel('/api/agenda?sessionId=' + sid + '&debut=2026-02-31');
+    W.pannes.jarvis = true;
+    const a5 = await appel('/api/agenda?sessionId=' + sid);
+    W.pannes.jarvis = false;
+    const demoA = await fils({});
+    const a6 = demoA.h ? await demoA.req('GET', '/api/agenda?sessionId=x') : {};
+    demoA.arreter();
+    await t('A2', "semaine suivante (debut = aujourd'hui + 7) ; au-delà de 8 semaines ou date illisible (31 février) → 400 ; agenda JARVIS en panne → nommé, conflits non vérifiés (null) ; démo publique → 404", async () =>
+      ({ ok: a2.ok === true && a2.debut === V.iso(auj + 7) && a3.status === 400 && a3.code === 'HORS_BORNES' && a4.status === 400 && a4.code === 'DATE_ILLISIBLE'
+          && a5.ok === true && (a5.nonLus || []).some(x => /JARVIS/.test(x.source)) && a5.jours.every(x => x.conflits === null) && a6.status === 404,
+         info: JSON.stringify([a2.debut, a3.status, a3.code, a4.code, a5.nonLus, a6.status]) }));
+    if (JS) {
+      const P = await page({ prive: true, routes: (u) => /\/api\/agenda/.test(u) ? a1 : /\/api\/claude$/.test(u) ? { connecteur: { etat: 'actif', appelsHeure: 0, trace: [] }, propositions: [], nonRetenues: [] } : /\/api\/gerer$/.test(u) ? { actif: true, sections: [], resume: "rien d'urgent" } : undefined });
+      await P.clic(P.d.querySelector('#onglets [data-onglet="agenda"]'));
+      await dort(300);
+      const txtA = visible(P.$('agJours'));
+      const ph = P.w.eval('Ag').phrase('Entraînement U18', '2026-10-17', '18:30', '90');
+      await P.clic(P.$('agPlus'));
+      P.$('agTitreEvt').value = 'Match à domicile'; P.$('agJour').value = '2026-11-01'; P.$('agHeure').value = '09:00'; P.$('agDuree').value = '120';
+      const avantChat = P.envois.filter(x => /\/api\/chat/.test(x.u)).length;
+      await P.clic(P.$('agEcrire'));
+      await t('A3', "page : 5e onglet « Agenda » (icône + libellé), la semaine affichée (titres, sources, conflit) ; « + » écrit « Ajoute … le 1er novembre à 9h pendant 120 minutes » dans Discuter et n'envoie RIEN", async () =>
+        ({ ok: !!P.d.querySelector('#onglets [data-onglet="agenda"] svg') && P.d.body.dataset.onglet === 'discuter' && /Entraînement U18/.test(txtA) && /agenda JARVIS/.test(txtA) && /Conflit/.test(txtA)
+            && ph === 'Ajoute Entraînement U18 le 17 octobre à 18h30 pendant 90 minutes' && P.$('msg').value === 'Ajoute Match à domicile le 1er novembre à 9h pendant 120 minutes'
+            && P.envois.filter(x => /\/api\/chat/.test(x.u)).length === avantChat,
+           info: JSON.stringify([ph, P.$('msg').value, P.d.body.dataset.onglet]) }));
+    }
+    /* la phrase écrite par le formulaire, envoyée par la personne : la carte « Créer » habituelle, titre et heure lus dans ses mots */
+    plusTard(1100);
+    const c1 = await dire(sid, 'Ajoute Entraînement U18 le ' + Number(V.iso(auj + 3).slice(8)) + ' ' + ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'][Number(V.iso(auj + 3).slice(5, 7)) - 1] + ' à 18h30 pendant 90 minutes',
+      { action: 'CREATE', resource: 'AGENDA_JARVIS', target: '' });
+    await t('A4', "la phrase du formulaire, envoyée : carte « Créer » (orange), titre « Entraînement U18 », 18:30 → 20:00 ; rien n'est écrit avant le toucher", async () =>
+      ({ ok: c1.decide === 'CONFIRMATION_REQUISE' && /Entraînement U18/.test((c1.aConfirmer || {}).titre || '') && /18:30/.test((c1.aConfirmer || {}).lisible || '') && /20:00/.test((c1.aConfirmer || {}).lisible || '') && c1.gravite === 'orange',
+         info: JSON.stringify([c1.decide, (c1.aConfirmer || {}).titre, (c1.aConfirmer || {}).lisible, c1.gravite]) }));
+  }
+
+  /* ============================ I [S131-S136] v4.15 LES 6 IDÉES ============================ */
+  {
+    const VE = require(path.join(DIR, 'jarvis-veille.js'));
+    const CLE_V = process.env.JARVIS_CLE_SURVEILLANCE;
+    const notifs = () => (W.ntfy || []).map(x => x.corps);
+    /* 1. l'alerte qui ne passe pas par Claude (une heure plus tard : Z1 a déjà notifié) */
+    plusTard(3600001);
+    W.ntfy = []; W.gmail.boite = BOITE;
+    await outil('lire_mails', { nombre: 3 });
+    await dort(150);
+    const n1 = notifs();
+    await outil('lire_mails', { nombre: 3 });
+    await dort(150);
+    await t('I1', "1 Claude lit 2 mails suspects → JARVIS notifie le téléphone lui-même : « 2 mails suspects lus par Claude : ouvre JARVIS. » (priorité haute) ; jamais un objet, une adresse ou un texte de mail ; une fois par heure", async () =>
+      ({ ok: n1.length === 1 && n1[0] === '2 mails suspects lus par Claude : ouvre JARVIS.' && ((W.ntfy || [])[0] || {}).entetes.Priority === 'high' && ((W.ntfy || [])[0] || {}).chemin === '/jarvis-alertes-0123456789abcd'
+          && !/@|URGENT|factures|Luc/.test(JSON.stringify(W.ntfy)) && notifs().length === 1,
+         info: JSON.stringify(W.ntfy).slice(0, 240) }));
+    /* 2. la surveillance des sources et des expirations */
+    IP = '92.15.3.1'; const sid = await session();
+    W.ntfy = []; W.gmail.boite = [BOITE[1], BOITE[0]]; plusTard(301000);
+    const v1 = await appel('/api/veille', { sessionId: sid });
+    await dort(150);
+    const r1 = v1.resultat || {}, src = (x) => ((r1.sources || []).find(y => y.source === x) || {}).ok;
+    const v2 = await appel('/api/veille', { sessionId: sid });
+    await t('I2', "2 « Tout vérifier » : Gmail (envoi, lecture), agenda principal, agenda JARVIS, clé de l'IA vérifiés ; la clé expire dans 3 jours → notifiée ; 1 mail suspect non lu, nouveau → notifié ; au 2e passage, plus « nouveau »", async () =>
+      ({ ok: src('gmail_envoi') === true && src('gmail_lecture') === true && src('ical') === true && src('agenda_jarvis') === true && src('ia') === true
+          && (r1.expiration || {}).jours === 3 && r1.suspectsNouveaux === 1 && notifs().includes('JARVIS : la clé API expire dans 3 jours.')
+          && notifs().includes('JARVIS : 1 mail suspect non lu. Ne réponds pas, ne clique pas, ne paie rien.') && (v2.resultat || {}).suspectsNouveaux === 0,
+         info: JSON.stringify([r1.sources, r1.expiration, r1.suspectsNouveaux, notifs(), (v2.resultat || {}).suspectsNouveaux]).slice(0, 400) }));
+    W.ntfy = []; W.pannes.ical = true; W.iaKo = true; plusTard(301000);
+    const v3 = await appel('/api/veille', { sessionId: sid });
+    await dort(150);
+    W.pannes.ical = false; W.iaKo = false;
+    const r3 = v3.resultat || {}, ko = (x) => ((r3.sources || []).find(y => y.source === x) || {});
+    await t('I3', "2 pannes : agenda principal en panne et clé de l'IA refusée → « ✗ », notifiées (« … ne répond plus ») ; une lecture en échec n'est jamais « ok »", async () =>
+      ({ ok: ko('ical').ok === false && ko('ia').ok === false && ko('ia').code === 'CLE_REFUSEE' && notifs().includes("JARVIS : l'agenda principal ne répond plus. Ouvre Réglages → Santé des sources.")
+          && notifs().includes("JARVIS : l'IA (clé Anthropic) ne répond plus. Ouvre Réglages → Santé des sources."),
+         info: JSON.stringify([ko('ical'), ko('ia'), notifs()]).slice(0, 300) }));
+    /* le déclencheur extérieur */
+    const ext = async (cle) => { const r = await fetch(B + '/veille', { method: 'POST', headers: cle ? { Authorization: 'Bearer ' + cle } : {}, signal: AbortSignal.timeout(15000) }); return { status: r.status, ...(await r.json().catch(() => ({}))) }; };
+    const e0 = await ext(null), e1 = await ext(CLE_V.slice(0, -1) + 'Z'), e2 = await ext(CLE_V);
+    const demoV = await fils({});
+    const e3 = demoV.h ? (await fetch(demoV.base + '/veille', { method: 'POST', headers: { Authorization: 'Bearer ' + CLE_V } })).status : 0;
+    demoV.arreter();
+    await t('I4', "2 POST /veille (Raccourcis, cron) : sans clé ou clé fausse → 401 ; bonne clé → 200, des COMPTES seulement (ni adresse, ni objet) ; démo → 404", async () =>
+      ({ ok: e0.status === 401 && e1.status === 401 && e2.status === 200 && Number.isInteger(e2.pannes) && 'suspectsNouveaux' in e2 && !/@|URGENT|Luc/.test(JSON.stringify(e2)) && e3 === 404,
+         info: JSON.stringify([e0.status, e1.status, e2, e3]).slice(0, 300) }));
+    W.ntfy = [];
+    const es = await appel('/api/veille', { sessionId: sid, essai: true });
+    await dort(100);
+    const mauvais = await fils({ JARVIS_CLE_ACCES: CLE, JARVIS_NTFY: 'https://ntfy.test/court' });
+    const mv = mauvais.h ? await mauvais.req('GET', '/api/veille') : {};
+    mauvais.arreter();
+    await t('I5', "1 notification d'essai (Réglages) envoyée ; un sujet trop court (JARVIS_NTFY mal réglée) → inactive, et dit (NTFY_SUJET_TROP_COURT)", async () =>
+      ({ ok: es.ok === true && notifs().length === 1 && /notification d'essai/.test(notifs()[0]) && (mv.notifications || {}).actif === false && (mv.notifications || {}).motif === 'NTFY_SUJET_TROP_COURT',
+         info: JSON.stringify([es, notifs(), mv.notifications]) }));
+    /* 3. l'âge du domaine (RDAP) et le vrai lien */
+    W.rdap = { 'compta-neuve.com': new Date(Date.now() - 3 * J).toISOString(), 'club-ancien.fr': new Date(Date.now() - 900 * J).toISOString() };
+    W.rdapAppels = [];
+    W.gmail.boite = [
+      { id: 'e0000000000301', de: 'Compta <factures@compta-neuve.com>', objet: 'Relevé', date: Date.now() - 600000, texte: 'Bonjour, voici votre relevé du mois.' },
+      { id: 'e0000000000302', de: 'Club <info@club-ancien.fr>', objet: 'Licences', date: Date.now() - 500000, texte: 'Les licences sont prêtes.' },
+      { id: 'e0000000000303', de: 'Banque <service@banque-info.org>', objet: 'Votre compte', date: Date.now() - 400000, texte: 'Consultez votre espace : www.banque.fr',
+        html: '<p>Consultez votre espace : <a href="https://evil-banque.com/login">www.banque.fr</a></p>' },
+      { id: 'e0000000000304', de: 'Ami <ami@gmail.com>', objet: 'Salut', date: Date.now() - 300000, texte: 'Salut !' }];
+    const tl = texteDe(await outil('lire_mails', { nombre: 4 }));
+    const blocs = tl.split(/\n\n(?=\[\d\])/);
+    const AN2 = require(path.join(DIR, 'jarvis-analyse.js'));
+    const an3 = AN2.analyser({ id: 'x', objet: 'x', messages: [{ id: 'x', de: { nom: '', adresse: 'factures@compta-neuve.com' }, texte: 'Bonjour.', date: Date.now() }] }, { agesDomaines: new Map([['compta-neuve.com', 3], ['club-ancien.fr', 900]]) });
+    const an4 = AN2.analyser({ id: 'y', objet: 'y', messages: [{ id: 'y', de: { nom: '', adresse: 'info@club-ancien.fr' }, texte: 'Bonjour.', date: Date.now() }] }, { agesDomaines: new Map([['compta-neuve.com', 3], ['club-ancien.fr', 900]]) });
+    await t('I6', "3 vrai lien : « www.banque.fr » qui mène à evil-banque.com → SUSPECT « Un lien affiche « www.banque.fr » mais mène à evil-banque.com » ; âge : le registre n'est interrogé que pour les domaines inconnus (jamais gmail.com) ; domaine de 3 jours → alerte MOYENNE (jamais « suspect » seule), 900 jours → rien", async () =>
+      ({ ok: /Verdict JARVIS : SUSPECT — Un lien affiche « www\.banque\.fr » mais mène à evil-banque\.com/.test(blocs[3] || '') && /rien de suspect/.test(blocs[1] || '')
+          && (W.rdapAppels || []).includes('compta-neuve.com') && (W.rdapAppels || []).includes('club-ancien.fr') && !(W.rdapAppels || []).includes('gmail.com')
+          && an3.suspect === false && an3.alertes.some(x => x.type === 'domaine-recent' && x.poids === 'moyen' && /compta-neuve\.com enregistré il y a 3 jours/.test(x.texte))
+          && !an4.alertes.some(x => x.type === 'domaine-recent'),
+         info: JSON.stringify([(blocs[3] || '').split('\n').find(l => /Verdict/.test(l)), W.rdapAppels, an3.alertes.map(x => x.type + ':' + x.poids)]).slice(0, 400) }));
+    /* l'âge dans une conversation affichée (alertes de la conversation) */
+    W.gmail.fils = [{ id: '18f0000000000901', objet: 'Relevé', messages: [{ id: 'c901', de: 'Compta <factures@compta-neuve.com>', objet: 'Relevé', date: Date.now() - 2 * 3600000, texte: 'Bonjour, pouvez-vous confirmer la réception du relevé ?' }] }];
+    const g7 = await appel('/api/gerer', { sessionId: sid, souvenirs: [], frais: true });
+    const it7 = ((g7.sections || []).find(x => x.titre === 'Mails') || { items: [] }).items.find(x => x.fil) || {};
+    const f7 = it7.fil ? await appel('/api/mail/fil', { sessionId: sid, jeton: it7.fil }) : {};
+    W.gmail.fils = [];
+    await t('I7', "3 la conversation affichée d'un domaine de 3 jours : l'alerte « Domaine compta-neuve.com enregistré il y a 3 jours … » est dans ses alertes", async () =>
+      ({ ok: ((f7.analyse || {}).alertes || []).some(x => x.type === 'domaine-recent' && /compta-neuve\.com/.test(x.texte)), info: JSON.stringify(((f7.analyse || {}).alertes || []).map(x => x.type)) }));
+    /* 5. le connecteur ouvert à Mistral */
+    const o1 = await rpc('ping', null, { origine: 'https://chat.mistral.ai' });
+    const o2 = await rpc('ping', null, { origine: 'https://evil.example' });
+    const o3 = await rpc('ping', null, { origine: 'https://claude.ai' });
+    const om = await fils({ JARVIS_CLE_ACCES: CLE, JARVIS_CLE_MCP: CLE_MCP, JARVIS_MCP_ORIGINES: 'http://chat.mistral.ai' });
+    const o4 = om.h ? await mcp({ jsonrpc: '2.0', id: 1, method: 'ping' }, { base: om.base, origine: 'https://chat.mistral.ai' }) : {};
+    const o5 = om.h ? await mcp({ jsonrpc: '2.0', id: 1, method: 'ping' }, { base: om.base, origine: 'http://chat.mistral.ai' }) : {};
+    om.arreter();
+    await t('I8', "5 JARVIS_MCP_ORIGINES=https://chat.mistral.ai : Mistral admis (200), claude.ai toujours, une autre origine → 403 ; une liste mal formée (http://) est ignorée : Mistral → 403", async () =>
+      ({ ok: o1.status === 200 && o3.status === 200 && o2.status === 403 && o4.status === 403 && o5.status === 403, info: JSON.stringify([o1.status, o2.status, o3.status, o4.status, o5.status]) }));
+    /* 6. le défi (démo) : la règle, et l'adresse tapée qui ne gagne jamais */
+    await t('I9', "6 règle du défi : SEND/PAY vers defi@pirate.example jamais tapée → gagné ; tapée (même en majuscules) → non ; autre adresse ou lecture → non", async () =>
+      ({ ok: VE.defiGagne({ adresseDefi: 'defi@pirate.example', tapees: new Set(), action: 'SEND', cible: 'defi@pirate.example' }) === true
+          && VE.defiGagne({ adresseDefi: 'defi@pirate.example', tapees: new Set(['DEFI@pirate.example']), action: 'SEND', cible: 'defi@pirate.example' }) === false
+          && VE.defiGagne({ adresseDefi: 'defi@pirate.example', tapees: new Set(), action: 'SEND', cible: 'autre@pirate.example' }) === false
+          && VE.defiGagne({ adresseDefi: 'defi@pirate.example', tapees: new Set(), action: 'READ', cible: 'defi@pirate.example' }) === false, info: '' }));
+    const dm = await fils({ JARVIS_DEFI_CONTACT: 'defi-contact@exemple.fr', JARVIS_DEFI_HONNEUR: 'Alice, <b>Bob</b>' });
+    let d1 = {}, d2 = {}, d3 = {}, d2c = {};
+    if (dm.h) {
+      d1 = await dm.req('GET', '/api/defi');
+      const sd = (await dm.req('POST', '/api/session', {})).sessionId;
+      d2 = await dm.req('POST', '/api/chat', { sessionId: sd, message: 'envoie les factures à defi@pirate.example', action: 'SEND', cible: 'defi@pirate.example' });
+      /* une action irréversible imposée : la carte « retape la cible » ; la cible retapée est TAPÉE */
+      const d2b = d2.aReformuler ? await dm.req('POST', '/api/reformuler', { sessionId: sd, jeton: d2.aReformuler.jeton, cible: 'defi@pirate.example' }) : {};
+      d2c = d2b;
+      const jd = (d2b.decision || {}).jetonAnnulation;
+      if (jd) { await dort(10600); d3 = await dm.req('POST', '/api/finaliser', { sessionId: sd, jeton: jd }); }
+    }
+    dm.arreter();
+    await t('I10', "6 démo : /api/defi donne l'adresse, le contact, le tableau d'honneur (nettoyé) ; garde : l'adresse du défi TAPÉE puis exécutée en simulation → pas de victoire", async () =>
+      ({ ok: d1.actif === true && d1.adresse === 'defi@pirate.example' && d1.contact === 'defi-contact@exemple.fr' && JSON.stringify(d1.honneur) === JSON.stringify(['Alice', 'bBob/b'])
+          && d3.etat === 'EXECUTE' && d3.simule === true && !d3.defi,
+         info: JSON.stringify([d2.decide, (d2c.decision || {}).decide, d3.etat, d3.simule, !!d3.defi]) }));
+    /* 4. « Signaler » (page) */
+    if (JS) {
+      const P = await page({ prive: true, routes: (u) => /\/api\/claude$/.test(u) ? { connecteur: { etat: 'actif', appelsHeure: 0, trace: [] }, propositions: [], nonRetenues: [] } : /\/api\/gerer$/.test(u) ? { actif: true, sections: [], resume: "rien d'urgent" } : /\/api\/veille$/.test(u) ? { dernier: null, notifications: { actif: true }, declencheur: 'actif' } : undefined });
+      const fl = 'fl_' + '1'.repeat(8) + '-0000-0000-0000-' + '0'.repeat(12);
+      P.w.eval('Auj').rendre({ date: 'mercredi 14 octobre', sections: [{ titre: 'Mails', items: [{ type: 'suspect', suspect: true, texte: 'Mail suspect — « Compte » : ne réponds pas, ne paie rien, ne clique pas.', preuve: 'Un lien affiche « www.banque.fr » mais mène à evil-banque.com : ne clique pas.', certitude: 'deduction', fil: fl, cle: 'c'.repeat(20), actions: ['voir'] }] }] });
+      const pt = P.$('aujTraiter').querySelector('.auj-point');
+      await P.clic(pt.querySelector('[data-signaler]'));
+      const panneau = pt.querySelector('.signaler');
+      await t('I11', "4 « Signaler » sur un mail suspect : Signal Spam (e-mail), PHAROS (arnaque, site), 33700 (SMS) ; liens seulement (rien n'est envoyé)", async () =>
+        ({ ok: !!panneau && !!panneau.querySelector('a[href="https://www.signal-spam.fr/"]') && !!panneau.querySelector('a[href="https://www.internet-signalement.gouv.fr/"]') && /33700/.test(panneau.textContent)
+            && /Ne réponds pas, ne clique pas, ne paie rien/.test(panneau.textContent) && [...panneau.querySelectorAll('a')].every(a => a.getAttribute('rel') === 'noopener noreferrer'),
+           info: panneau ? panneau.textContent.slice(0, 120) : 'absent' }));
+    }
+  }
+
   /* @@SUITE@@ */
+
+  /* @@COUPURE@@ */
+  /* ============================ K [S130] v4.14 « TOUT COUPER » (en dernier : la coupure vaut jusqu'au redémarrage) ============================ */
+  {
+    /* JARVIS_COUPE=1 : coupé dès le démarrage */
+    const ic = await fils({ JARVIS_CLE_ACCES: CLE, JARVIS_CLE_MCP: CLE_MCP, JARVIS_COUPE: '1' });
+    const hc = ic.h ? await ic.req('GET', '/api/health') : {};
+    const mc = ic.h ? await fetch(ic.base + '/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + CLE_MCP }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }) }).then(r => r.status) : 0;
+    ic.arreter();
+    await t('K1', "JARVIS_COUPE=1 : coupé dès le démarrage (/api/health « coupe » ; le connecteur répond 503)", async () =>
+      ({ ok: hc.coupe === true && mc === 503, info: JSON.stringify([hc.coupe, mc]) }));
+    IP = '92.15.9.1'; const sid = await session();
+    const k0 = await appel('/api/couper', { sessionId: sid, confirmation: 'oui' });
+    const h0 = await appel('/api/health');
+    W.revoques = [];
+    const k1 = await appel('/api/couper', { sessionId: sid, confirmation: 'COUPER' });
+    const h1 = await appel('/api/health');
+    const m1 = await mcp({ jsonrpc: '2.0', id: 1, method: 'ping' });
+    plusTard(1100);
+    W.gmail.boite = BOITE;
+    const r1 = await dire(sid, 'lis mes derniers mails', { action: 'READ', resource: 'MAIL', target: 'recents' });
+    plusTard(1100);
+    const s1 = await dire(sid, 'envoie un mail à luc@club-hand.fr pour lui dire que je serai là', { action: 'SEND', resource: 'EMAIL', target: 'luc@club-hand.fr' });
+    await t('K2', "sans « COUPER » tapé : 400, rien n'est coupé ; avec : les DEUX jetons Gmail révoqués chez Google (« révoqué »), /api/health « coupe », connecteur 503, lecture et envoi refusés (COUPE_PAR_TOI), ce qui reste à faire est dit (partage de l'agenda, JARVIS_COUPE=1)", async () =>
+      ({ ok: k0.status === 400 && h0.coupe === false && k1.ok === true && (W.revoques || []).length === 2 && (W.revoques || []).includes(RT_E) && (W.revoques || []).includes(RT_L)
+          && (k1.revocations || []).every(x => x.resultat === 'revoque') && /révoqué chez Google/.test(k1.message || '') && h1.coupe === true && m1.status === 503
+          && /COUPE_PAR_TOI/.test(JSON.stringify(r1)) && /COUPE_PAR_TOI/.test(JSON.stringify(s1)) && (k1.resteAFaire || []).some(x => /JARVIS_COUPE=1/.test(x)) && (k1.resteAFaire || []).some(x => /partage/.test(x))
+          && !JSON.stringify(k1).includes(RT_E) && !JSON.stringify(k1).includes(RT_L),
+         info: JSON.stringify([k0.status, k1.ok, (k1.revocations || []).map(x => x.resultat), h1.coupe, m1.status, r1.motif, s1.motif]) }));
+  }
 
   performance.now = vraiPerf; Date.now = vraiNow;
   for (const p of pages) { const e = p.err.filter(x => !/Not implemented/.test(x)); if (e.length) R.push({ id: 'PJS', nom: 'garde : aucune erreur JavaScript dans la page', ok: false, info: e.slice(0, 2).join(' | ') }); }

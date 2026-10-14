@@ -1,10 +1,10 @@
 {
   "format": 1,
   "passerelle": "v4.15.0",
-  "empreinte": "7bbd13f61ddf",
+  "empreinte": "0bb548abaf4c",
   "fichiers": {
-    "server.js": "40904a054abacad1424f205fbfe55fd86df46c632fb64227cf26623e56bd3d1a",
-    "index.html": "dbb73b0c2fbf432f696b9ad55600612564f028409ec2f712e0669a950f3991d6",
+    "server.js": "6e4dc53659e0b16a11329674f0e2263e1038463cdc8aa835d8a7d0b3de3197ad",
+    "index.html": "4d0b1d23138fac3b42dcb12bafce0ee3c996bd2079f634f89c979a77e45f0bb9",
     "package.json": "570aeab2c5dd22edfcaab8f1c8e97c273d60a3d813fd5cc9c2d8adc35964845d",
     "jarvis-5.28.3.js": "0eb75bec3cdfab34fbc44f7c0360f6c2357451489702fc14c347890b35c58350",
     "jarvis-plus-5.29.js": "5d5a15289b5c120f13ddf8f2c6c076f4a20d03058d584f399cfb34a53aedb331",
@@ -13,13 +13,15 @@
     "jarvis-agenda.js": "93e48c4efe19779e56fbdd2bff15068852985bd9c501966b3f1c48162d6d4d85",
     "jarvis-ecriture.js": "9cc1591623ba92c96e0d7c0a0c9e70a239bb852780c4d3b51781665cde296406",
     "jarvis-elevation.js": "75a3a05bee0071f7a6df73727acc98f3bd3b506eca1a8d598207ac2350637f94",
-    "jarvis-manifeste.js": "7ed980c7fea680a7f3f83ba86c6b3a61766700ccab96d13f1aebb8bcc0225d03",
+    "jarvis-manifeste.js": "3ae56f46acbca7b0ab29f13f74909a49e3eb1fe2fc1bdf0ec3ce98f74ce1a5ba",
     "jarvis-verite.js": "7681505ee563d63163326e65e15c798f4469aef60d4122f80c1d1752cbb22098",
     "jarvis-appli.js": "e4f4f93e734a00ae2f2bd94fe8a3d8332da036c7bcb00f5d5b59b57188724e7a",
-    "jarvis-gmail.js": "869a5e81bbd4562b52a68317ab891f00f646ad05c61300f4695d9b1df3f07451",
+    "jarvis-gmail.js": "07713bacf7e4f97314ff37a784e77e5e351f037a853466eadeb4bf7f4955568a",
     "confidentialite.html": "d18c00908fa80082aa0783f9a9f4f944201c86c8ad12a845415add81e327dbf6",
     "conditions.html": "123615b2d2774c44f68cbb8a86a63cc4f77b72906b1990fda6e0ee0401a37afc",
-    "jarvis-analyse.js": "d20d575a49402fd74255c167ca09c4432e4a1038c475f502c47e8f5e1305395b",
-    "jarvis-mcp.js": "0c5ba4ee8b2b13d8a4e723cdccac3138498b6f2fa54683ae65b82575da497da4"
+    "jarvis-analyse.js": "344f69d0e95e184e2fc35adfde4d6ba469d27c5673bc1537838971a676d37a2e",
+    "jarvis-mcp.js": "dc1aba6a5c79c0b625a451cc89ed9593bf728caa62156ee994d18ec88c4b4ad3",
+    "jarvis-veille.js": "aaeaad9c3cda06b996c8a8c85733b917f2c9a45eafc19e53d068ac0b840a137a",
+    "jarvis-domaines.js": "138b027330d6caae5c29597dc59ed0b41bfc5ec2db2dfd7f5372e6eca14d5aad"
   }
 }

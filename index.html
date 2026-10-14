@@ -407,7 +407,7 @@ body.prive .onglets button[aria-current="page"]{color:var(--lumiere);background:
 body.prive{padding-bottom:var(--haut-onglets)}
 body.prive main{grid-template-columns:minmax(0,1fr)}
 body.prive main>.colonne{display:none}
-body.prive[data-onglet="aujourdhui"] #aujourdhui,body.prive[data-onglet="discuter"] #conversation,body.prive[data-onglet="reglages"] #defense{display:flex}
+body.prive[data-onglet="aujourdhui"] #aujourdhui,body.prive[data-onglet="discuter"] #conversation,body.prive[data-onglet="reglages"] #defense,body.prive[data-onglet="agenda"] #agendaVue{display:flex}
 body.prive:not([data-onglet="reglages"]) footer{display:none}
 body.prive #basculeManuel{display:none}
 body.prive #conversation{height:calc(100vh - var(--haut-entete,0px) - var(--haut-onglets));height:calc(100svh - var(--haut-entete,0px) - var(--haut-onglets))}
@@ -567,6 +567,42 @@ body.prive[data-onglet="controle"][data-ctl="coupe"] #controle,body.prive[data-o
 body.prive[data-onglet="controle"].ctl-flash #controle{background:#F9D3D1}
 body.prive .ctl-tete{background:#F2F2F7;border-color:#E3E3E8}
 @media(prefers-reduced-motion:reduce){body.prive,body.prive header,body.prive #conversation{transition:none}}
+/* [S129] v4.14 l'onglet « Agenda » : la semaine, écrite par le serveur */
+#agendaVue{padding:6px 16px 24px;gap:8px;background:#FFFFFF}
+.ag-tete{display:flex;align-items:center;gap:8px;padding-top:8px}
+.ag-tete h2{font-size:17px;font-weight:600;flex:1}
+.ag-nav{gap:4px}
+.ag-nav button{min-width:44px;font-size:15px}
+body.prive button.ag-plus{width:44px;height:44px;padding:0;border-radius:50%;font-size:24px;line-height:1;flex:none}
+.ag-form select{min-width:7.5em}
+.ag-periode{font-size:13px;color:var(--sourd)}
+.ag-jour{border-bottom:1px solid var(--regle);padding:10px 0}
+.ag-jour h3{font-size:14px;font-weight:600;margin-bottom:4px;text-transform:capitalize}
+.ag-jour.aujourdhui h3{color:var(--signal)}
+.ag-evt{display:grid;grid-template-columns:7.5em minmax(0,1fr);gap:8px;font-size:14.5px;padding:3px 0}
+.ag-evt .h{color:var(--sourd);font-variant-numeric:tabular-nums}
+.ag-evt .src{display:block;font-size:12px;color:var(--sourd)}
+.ag-vide{font-size:13.5px;color:var(--sourd)}
+.ag-conflit{font-size:13.5px;color:var(--refus);margin-top:4px}
+.ag-form{display:flex;flex-direction:column;gap:8px;background:#F2F2F7;border-radius:14px;padding:12px}
+.ag-form label{font-size:13px;color:var(--sourd);display:flex;flex-direction:column;gap:4px}
+.ag-form .rang{gap:8px;flex-wrap:wrap}
+/* [S130] « tout couper » */
+#blocCouper .corps p{margin-bottom:8px}
+#coupeReste{margin:8px 0 0 18px;font-size:13.5px}
+#coupeBouton{white-space:nowrap}
+/* [S131] la santé des sources */
+.veille-liste{list-style:none;margin:8px 0 0;padding:0;font-size:14px}
+.veille-liste li{padding:5px 0;border-bottom:1px solid var(--regle)}
+.veille-liste .ok{color:var(--sur)}
+.veille-liste .ko{color:var(--refus)}
+/* [S136] « Signaler » */
+.signaler{background:#F2F2F7;border-radius:12px;padding:10px 12px;margin-top:6px;font-size:13.5px}
+.signaler ul{margin:6px 0 0 18px}
+/* [S135] le défi (démo) */
+.defi{margin-top:12px;border:1px dashed var(--regle);border-radius:10px;padding:10px 12px;font-size:13.5px}
+.defi b{color:var(--lumiere)}
+.defi-gagne{border:2px solid var(--sur);border-radius:12px;padding:12px}
 </style>
 </head>
 <body data-onglet="aujourdhui">
@@ -606,6 +642,7 @@ body.prive .ctl-tete{background:#F2F2F7;border-color:#E3E3E8}
       <div class="tour" id="accueil">
         <div class="qui">JARVIS</div>
         <div class="quoi"><strong class="promesse">Un mail piégé ne peut pas faire agir ton assistant à ta place.</strong><span class="promesse-ligne">JARVIS se place entre l'assistant et tes outils : ce qu'un mail demande n'est jamais traité comme une demande de ta part.</span></div>
+        <div class="defi demo-seul" id="defi" hidden></div>
         <div class="accueil-actions demo-seul"><button class="primaire" id="jtLancer" type="button">Voir un mail piégé bloqué</button><a class="lien-video" id="lienVideo" hidden target="_blank" rel="noopener noreferrer">Voir la vidéo (vrai Gmail, vraie appli Claude)</a></div>
         <div class="accueil-actions perso-seul"><button class="primaire" id="aGerer" type="button">Qu'est-ce que j'ai à gérer ?</button></div>
       </div>
@@ -634,6 +671,28 @@ body.prive .ctl-tete{background:#F2F2F7;border-color:#E3E3E8}
   <!-- ─────────── instrumentation ─────────── -->
   <section class="colonne" id="defense">
     <div class="titre-defense">Défense, réglages et preuves</div>
+    <!-- [S131] v4.15 SANTÉ DES SOURCES ET NOTIFICATIONS -->
+    <details class="bloc prive-seul" id="blocVeille">
+      <summary><h2>Santé des sources <span class="mono" id="etatVeille"></span></h2></summary>
+      <div class="corps">
+        <p>JARVIS vérifie ses sources (Gmail, agendas, clé de l'IA) et les mails non lus suspects. Avec <b>JARVIS_NTFY</b>, il te prévient sur le téléphone, sans passer par Claude : une phrase courte, jamais le contenu d'un mail.</p>
+        <div class="rang"><button type="button" class="primaire" id="veilleVerifier">Tout vérifier</button><button type="button" id="veilleEssai">Notification d'essai</button></div>
+        <p id="veilleMessage" role="status" aria-live="polite"></p>
+        <ul id="veilleListe" class="veille-liste"></ul>
+        <p class="pdj-note" id="veilleNote"></p>
+      </div>
+    </details>
+    <!-- [S130] v4.14 « TOUT COUPER » -->
+    <details class="bloc prive-seul" id="blocCouper">
+      <summary><h2>Tout couper <span class="mono" id="etatCoupe"></span></h2></summary>
+      <div class="corps">
+        <p>En cas de doute (téléphone perdu, clé qui a pu fuiter, comportement bizarre) : JARVIS <b>révoque chez Google</b> les deux jetons Gmail, puis coupe jusqu'au prochain redémarrage l'agenda JARVIS et le connecteur. Pour rallumer, il faudra de nouveaux jetons Gmail.</p>
+        <div class="rang"><input id="coupeConfirm" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="tape COUPER" aria-label="Tape COUPER pour confirmer">
+          <button type="button" class="danger" id="coupeBouton">Tout couper</button></div>
+        <p id="coupeMessage" role="status" aria-live="polite"></p>
+        <ul id="coupeReste"></ul>
+      </div>
+    </details>
     <details class="bloc prive-seul" id="blocAffichage">
       <summary><h2>Affichage <span class="mono" id="etatAffichage"></span></h2></summary>
       <div class="corps">
@@ -769,10 +828,28 @@ body.prive .ctl-tete{background:#F2F2F7;border-color:#E3E3E8}
     <div id="aujTraiter"><p class="pdj-vide">Je lis ta boîte et ton agenda…</p></div>
     <p class="pdj-note auj-note">Écrit par le serveur, sans IA, en lecture seule. « Fait » et « Plus tard » masquent un point sur ce téléphone ; rien n'est envoyé ni écrit sans ton geste.</p>
   </section>
+  <!-- ─────────── [S129] v4.14 AGENDA (instance privée) : la semaine, écrite par le serveur ─────────── -->
+  <section class="colonne prive-seul" id="agendaVue" aria-labelledby="agTitre">
+    <div class="ag-tete"><h2 id="agTitre">Agenda</h2>
+      <div class="rang ag-nav"><button type="button" class="lien" id="agPrec" aria-label="Semaine précédente">‹</button><button type="button" class="lien" id="agAuj">Aujourd'hui</button><button type="button" class="lien" id="agSuiv" aria-label="Semaine suivante">›</button></div>
+      <button type="button" class="primaire ag-plus" id="agPlus" aria-label="Ajouter un événement" aria-expanded="false" aria-controls="agForm">+</button></div>
+    <p class="ag-periode" id="agPeriode"></p>
+    <div class="ag-form" id="agForm" hidden>
+      <label>Titre<input id="agTitreEvt" maxlength="60" autocomplete="off" placeholder="ex. Entraînement U18"></label>
+      <div class="rang"><label>Jour<input id="agJour" type="date"></label><label>Heure<input id="agHeure" type="time" value="18:00"></label>
+        <label>Durée<select id="agDuree"><option value="30">30 min</option><option value="60" selected>1 h</option><option value="90">1 h 30</option><option value="120">2 h</option><option value="180">3 h</option></select></label></div>
+      <p class="pdj-note">JARVIS écrit ta demande dans Discuter ; tu la relis, tu l'envoies, puis tu touches « Créer ». Rien n'est créé avant.</p>
+      <div class="rang"><button type="button" id="agAnnulerForm">Annuler</button><button type="button" class="primaire" id="agEcrire">Écrire la demande</button></div>
+      <p class="etat-carte" id="agFormMessage"></p>
+    </div>
+    <div id="agJours"><p class="pdj-vide">Je lis ton agenda…</p></div>
+    <p class="pdj-note" id="agNote">Écrit par le serveur, sans IA, en lecture seule.</p>
+  </section>
 </main>
 <nav class="onglets prive-seul" id="onglets" aria-label="Vues">
   <button type="button" data-onglet="controle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 19 5.6v5.2c0 4.4-3 7.6-7 9.2-4-1.6-7-4.8-7-9.2V5.6z"/></svg><span>Contrôle</span></button>
   <button type="button" data-onglet="aujourdhui" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/></svg><span>Aujourd'hui</span></button>
+  <button type="button" data-onglet="agenda"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4M7.5 13h2M11 13h2M14.5 13h2M7.5 16.5h2M11 16.5h2"/></svg><span>Agenda</span></button>
   <button type="button" data-onglet="discuter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v10.5H9.5L5 19.5V16H4z"/></svg><span>Discuter</span></button>
   <button type="button" data-onglet="reglages"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>Réglages</span></button>
 </nav>
@@ -973,11 +1050,12 @@ const Ctl = (() => {
 })();
 /* [S102] une vue a la fois sur l'instance privee : Aujourd'hui / Discuter / Reglages ([S115] + Contrôle) */
 function montrer(onglet) {
-  if (!['controle', 'aujourdhui', 'discuter', 'reglages'].includes(onglet)) return;
+  if (!['controle', 'aujourdhui', 'agenda', 'discuter', 'reglages'].includes(onglet)) return;
   document.body.dataset.onglet = onglet;
   for (const b of document.querySelectorAll('#onglets [data-onglet]')) { if (b.dataset.onglet === onglet) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
   if (onglet === 'discuter') { const f = $('fil'); if (f) f.scrollTop = f.scrollHeight; }
   if (onglet === 'aujourdhui' && document.body.classList.contains('prive') && Date.now() - Auj.charge > 120000) Auj.charger(false);
+  if (onglet === 'agenda' && document.body.classList.contains('prive') && Date.now() - Ag.charge > 120000) Ag.charger();   /* [S129] */
   if (onglet === 'controle') { Gravite.pastille({ veille: 'blanc', attend: 'orange', coupe: 'rouge' }[document.body.dataset.ctl] || 'blanc', 'COUPE'); Ctl.demarrer(); }
   else { Ctl.arreter(); Gravite.remettre(); }   /* [S115] [S128] */
   try { window.scrollTo(0, 0); } catch (e) {}
@@ -1785,6 +1863,9 @@ async function finaliserJeton(jeton) {
     if (r.trace) ajouterTrace(r.trace);
     return;
   }
+  if (r.etat === 'EXECUTE' && r.defi && r.defi.gagne) {   /* [S135] le défi réussi : dit en clair, le code à envoyer */
+    setTimeout(() => { const b = tour('JARVIS', '', false); b.querySelector('.quoi').outerHTML = '<div class="decision defi-gagne"><div class="plan">🏆 Défi réussi</div><p>' + esc(r.defi.message || '') + '</p></div>'; }, 0);
+  }
   if (r.etat === 'EXECUTE') {
     const fait = FAIT_SIMULE[acteDe(jeton)] || 'Fait (simulation)';   /* [S78] */
     clore(jeton, fait, true);
@@ -2389,6 +2470,37 @@ document.addEventListener('click', async (ev) => {
   if (t.dataset.voirGerer) { await gererTout(t, false); return; }
   /* [S92] « Repartir au vert » : la session est fermée côté serveur, une neuve s'ouvre ; les souvenirs restent */
   if (t.id === 'repartirVert') { await repartirAuVert(t); return; }
+  /* [S129] l'onglet Agenda */
+  if (t.id === 'agPrec' || t.id === 'agSuiv') { Ag.decaler(t.id === 'agPrec' ? -1 : 1); return; }
+  if (t.id === 'agAuj') { Ag.debut = null; Ag.charger(); return; }
+  if (t.id === 'agPlus' || t.id === 'agAnnulerForm') {
+    const f = $('agForm'), ouvre = t.id === 'agPlus' && f.hidden;
+    f.hidden = !ouvre; $('agPlus').setAttribute('aria-expanded', ouvre ? 'true' : 'false');
+    if (ouvre && !$('agJour').value) $('agJour').value = (Ag.debut && Ag.debut > new Date().toISOString().slice(0, 10)) ? Ag.debut : new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+    return;
+  }
+  if (t.id === 'agEcrire') {
+    const ph = Ag.phrase($('agTitreEvt').value, $('agJour').value, $('agHeure').value, $('agDuree').value);
+    if (!ph) { $('agFormMessage').textContent = 'Il manque le titre, le jour ou l\'heure.'; return; }
+    $('msg').value = ph; $('agForm').hidden = true; $('agTitreEvt').value = ''; $('agFormMessage').textContent = '';
+    montrer('discuter'); try { $('msg').focus(); } catch (e) {}
+    return;
+  }
+  if (t.id === 'coupeBouton') { await toutCouper(); return; }
+  if (t.id === 'veilleVerifier' || t.id === 'veilleEssai') {   /* [S131] */
+    t.disabled = true; $('veilleMessage').textContent = t.id === 'veilleEssai' ? 'Envoi…' : 'Je vérifie…';
+    let r = null; try { r = await api('/api/veille', t.id === 'veilleEssai' ? { essai: true } : {}); } catch (e) { r = null; }
+    t.disabled = false;
+    if (t.id === 'veilleEssai') $('veilleMessage').textContent = r && r.ok ? 'Notification envoyée : regarde ton téléphone.' : 'Pas envoyée (' + ((r && r.code) || 'erreur') + ') : vérifie JARVIS_NTFY.';
+    else { afficherVeille(r); try { afficherVeille(await api('/api/veille')); afficherVeille(r); } catch (e) { /* rien */ } }
+    return;
+  }
+  if (t.dataset.signaler) {   /* [S136] */
+    const it = t.closest('.gerer-item'); if (!it) return;
+    const deja = it.querySelector('.signaler');
+    if (deja) deja.remove(); else it.insertAdjacentHTML('beforeend', TEXTE_SIGNALER);
+    return;
+  }
   if (t.id === 'gravPastille') {   /* [S123] le plancher reste lisible au toucher */
     const dt = $('gravDetail'); if (!dt) return;
     const ouvre = dt.hidden;
@@ -2785,7 +2897,8 @@ function pointCompact(it) {
   const pourquoi = suspect ? String(it.preuve || '') : '';
   const raison = pourquoi ? pourquoi.split(' : ')[0].split(' :')[0] : '';
   const preuve = !suspect && it.preuve ? (it.type === 'agenda' || it.type === 'note' || it.type === 'conflit' ? 'Source : ' + it.preuve : '« ' + it.preuve + ' »') : '';
-  const btn = (a) => a === 'fait' || a === 'plustard'
+  const btn = (a) => a === 'signaler' ? '<button type="button" data-signaler="1">Signaler</button>'
+    : a === 'fait' || a === 'plustard'
     ? '<button type="button" class="traite" data-traite="' + a + '" data-point="' + k + '">' + (a === 'fait' ? 'Fait' : 'Plus tard') + '</button>'
     : '<button type="button" data-gerer="' + a + '" data-fil="' + esc(j) + '"' + (a === 'creneau' ? ' data-index="' + it.creneau + '"' : '') + '>' + (a === 'voir' ? ACTIONS_GERER.voir : ACTIONS_COURTES[a] || ACTIONS_GERER[a]) + '</button>';
   const actes = [];
@@ -2793,9 +2906,9 @@ function pointCompact(it) {
     /* toutes les actions permises (un suspect : « Voir » seulement), la principale d'abord ; « Voir » ensuite */
     const ordre = it.type === 'engagement' || it.type === 'promesse' ? ['rappel', 'repondre', 'creneau'] : it.type === 'creneau' ? ['creneau', 'repondre', 'rappel'] : ['repondre', 'rappel', 'creneau'];
     const permises = suspect ? [] : ordre.filter(a => (it.actions || []).includes(a) && (a !== 'creneau' || (Number.isInteger(it.creneau) && it.creneau >= 0)));
-    actes.push(...(permises.length ? [permises[0], 'voir', ...permises.slice(1)] : ['voir']));
+    actes.push(...(permises.length ? [permises[0], 'voir'] : ['voir']));   /* l'action principale (selon le type) et « Voir » : 2 au plus, comme avant */
   }
-  const visibles = [actes[0]].filter(Boolean).concat(k ? ['fait'] : []), caches = actes.slice(1).concat(k ? ['plustard'] : []);
+  const visibles = [actes[0]].filter(Boolean).concat(k ? ['fait'] : []), caches = actes.slice(1).concat(k ? ['plustard'] : []).concat(suspect ? ['signaler'] : []);   /* [S136] */
   const det = (pourquoi && pourquoi !== raison) || it.certitude ? '<details class="plie"><summary>détail</summary>' + (pourquoi ? '<p class="preuve">Pourquoi : ' + esc(pourquoi) + '</p>' : '')
     + (it.certitude && it.type !== 'erreur' ? '<p class="certitude">' + esc(CERTITUDE[it.certitude] || '') + '</p>' : '') + '</details>' : '';
   return '<div class="gerer-item auj-point' + (suspect || it.type === 'conflit' ? ' fort' : '') + '" data-cle="' + esc(String(it.texte || '').slice(0, 200))
@@ -2854,6 +2967,92 @@ const Claude = {
     return h.join('');
   }
 };
+/* [S129] v4.14 L'ONGLET « AGENDA » : la semaine lue par le serveur (gouvernée, sans IA) ;
+ * « + » écrit la phrase dans Discuter — la personne l'envoie elle-même (sa frappe), puis touche « Créer ». */
+const MOIS_FR = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+const isoPlus = (iso, n) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso || ''); if (!m) return null; const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + n)); return d.toISOString().slice(0, 10); };
+const Ag = {
+  charge: 0, debut: null,
+  async charger() {
+    if (!document.body.classList.contains('prive') || !$('agJours')) return;
+    Ag.charge = Date.now();
+    $('agJours').innerHTML = '<p class="pdj-vide">Je lis ton agenda…</p>';
+    let r = null;
+    try { r = await api('/api/agenda' + (Ag.debut ? '?debut=' + encodeURIComponent(Ag.debut) : '')); } catch (e) { r = { ok: false, message: 'La passerelle est injoignable : ' + e.message }; }
+    if (r && limiteAtteinte(r)) return;
+    Ag.rendre(r);
+  },
+  rendre(r) {
+    const z = $('agJours'); if (!z) return;
+    if (!r || !r.ok) { z.innerHTML = '<p class="auj-erreur">⚠ ' + esc((r && r.message) || 'Agenda non lu.') + '</p>'; return; }
+    Ag.debut = r.debut;
+    $('agPeriode').textContent = 'Du ' + (r.jours[0] || {}).libelle + ' au ' + (r.jours[r.jours.length - 1] || {}).libelle;
+    const h = [];
+    for (const x of r.nonLus || []) h.push('<p class="auj-erreur">⚠ ' + esc("L'" + x.source + " n'a pas pu être lu (" + x.code + ') : ce qui suit ne le compte pas, conflits non vérifiés.') + '</p>');
+    for (const j of r.jours) {
+      h.push('<div class="ag-jour' + (j.aujourdhui ? ' aujourdhui' : '') + '"><h3>' + esc(j.libelle) + (j.aujourdhui ? ' · aujourd\'hui' : '') + '</h3>'
+        + (j.evenements.length ? j.evenements.map(e => '<div class="ag-evt"><span class="h">' + esc(e.heure) + '</span><span>' + esc(e.titre) + '<span class="src">' + esc(e.source) + '</span></span></div>').join('')
+          : '<p class="ag-vide">Rien.</p>')
+        + (j.conflits || []).map(c => '<p class="ag-conflit">⚠ Conflit : ' + esc(c) + '</p>').join('') + '</div>');
+    }
+    z.innerHTML = h.join('');
+    if (r.note && $('agNote')) $('agNote').textContent = r.note;
+  },
+  decaler(n) { Ag.debut = isoPlus(Ag.debut || null, 7 * n) || null; Ag.charger(); },
+  /* la phrase, comme on la taperait : « Ajoute Entraînement le 17 octobre à 18h30 pendant 90 minutes » */
+  phrase(titre, jourIso, heure, duree) {
+    const t = String(titre || '').replace(/[«»"<>@]/g, ' ').replace(/\s+/g, ' ').trim();
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(jourIso || ''), hm = /^(\d{2}):(\d{2})$/.exec(heure || '');
+    if (!t || !m || !hm) return null;
+    const d = Number(duree) || 60;
+    return 'Ajoute ' + t + ' le ' + Number(m[3]) + (Number(m[3]) === 1 ? 'er' : '') + ' ' + MOIS_FR[Number(m[2]) - 1] + ' à ' + Number(hm[1]) + 'h' + (hm[2] !== '00' ? hm[2] : '') + ' pendant ' + d + ' minutes';
+  }
+};
+/* [S131] v4.15 « Santé des sources » : le serveur vérifie, la page affiche (texte échappé) */
+const NOMS_VEILLE = { gmail_lecture: 'Lecture Gmail', gmail_envoi: 'Envoi Gmail', ical: 'Agenda principal', agenda_jarvis: 'Agenda JARVIS', ia: 'IA (clé Anthropic)' };
+function afficherVeille(d) {
+  const l = $('veilleListe'); if (!l) return;
+  const r = d && (d.resultat || d.dernier);
+  const h = [];
+  if (r) {
+    for (const x of r.sources || []) h.push('<li class="' + (x.ok ? 'ok' : 'ko') + '">' + (x.ok ? '✓ ' : '✗ ') + esc(NOMS_VEILLE[x.source] || x.source) + (x.ok ? '' : ' — ' + esc(x.code || 'en panne')) + '</li>');
+    if (r.expiration) h.push('<li class="' + (r.expiration.jours > 7 ? 'ok' : 'ko') + '">' + esc(r.expiration.jours < 0 ? 'Clé API expirée (' + r.expiration.date + ')' : 'Clé API : expire dans ' + r.expiration.jours + ' j (' + r.expiration.date + ')') + '</li>');
+    else h.push('<li>Clé API : date d\'expiration non déclarée (JARVIS_CLE_API_EXPIRE)</li>');
+    if (r.nonLus !== null && r.nonLus !== undefined) h.push('<li>' + esc(pluriel(Number(r.nonLus) || 0, 'mail non lu vérifié', 'mails non lus vérifiés') + ' · ' + pluriel(Number(r.suspectsNouveaux) || 0, 'nouveau suspect', 'nouveaux suspects')) + '</li>');
+    $('etatVeille').textContent = (r.sources || []).every(x => x.ok) ? 'ok' : 'panne';
+    $('veilleMessage').textContent = 'Vérifié à ' + (r.quand || '?') + (r.notifications ? ' · ' + pluriel(r.notifications, 'notification envoyée', 'notifications envoyées') : '') + '.';
+  }
+  l.innerHTML = h.join('');
+  const n = d && d.notifications;
+  if (n || d && d.declencheur) $('veilleNote').textContent = 'Notifications : ' + (n && n.actif ? 'actives' : n && n.motif ? 'mal réglées (' + n.motif + ')' : 'inactives (JARVIS_NTFY)')
+    + ' · déclencheur extérieur : ' + (d.declencheur === 'actif' ? 'actif (POST /veille)' : d.declencheur === 'erreur-config' ? 'mal réglé (JARVIS_CLE_SURVEILLANCE)' : 'inactif') + '.';
+}
+/* [S136] « Signaler » : les canaux officiels ; JARVIS n'envoie rien */
+const TEXTE_SIGNALER = '<div class="signaler"><b>Ne réponds pas, ne clique pas, ne paie rien.</b><ul>'
+  + '<li>Un e-mail : <a href="https://www.signal-spam.fr/" target="_blank" rel="noopener noreferrer">Signal Spam</a></li>'
+  + '<li>Une arnaque ou un site : <a href="https://www.internet-signalement.gouv.fr/" target="_blank" rel="noopener noreferrer">PHAROS</a></li>'
+  + '<li>Un SMS : transfère-le au 33700</li></ul></div>';
+/* [S135] le défi (démo) : l'adresse, le contact, le tableau d'honneur */
+async function chargerDefi() {
+  if (document.body.classList.contains('prive') || !$('defi')) return;
+  let d = null; try { d = await api('/api/defi'); } catch (e) { d = null; }
+  if (!d || !d.actif) return;
+  $('defi').innerHTML = '<b>Défi :</b> fais envoyer (en simulation) un mail à <span class="mono">' + esc(d.adresse) + '</span> sans jamais taper cette adresse toi-même.'
+    + ' Tableau d\'honneur : ' + (Array.isArray(d.honneur) && d.honneur.length ? esc(d.honneur.join(', ')) : 'personne pour l\'instant.');
+  $('defi').hidden = false;
+}
+/* [S130] « tout couper » : COUPER tapé, puis le serveur révoque et coupe ; il dit ce qui reste à faire */
+async function toutCouper() {
+  const m = $('coupeMessage'), l = $('coupeReste');
+  if (($('coupeConfirm').value || '').trim() !== 'COUPER') { m.textContent = "Tape COUPER (en majuscules) pour confirmer. Rien n'a été coupé."; return; }
+  $('coupeBouton').disabled = true;
+  let r = null;
+  try { r = await api('/api/couper', { confirmation: 'COUPER' }); } catch (e) { r = { ok: false, message: 'La passerelle est injoignable : ' + e.message }; }
+  $('coupeBouton').disabled = false;
+  m.textContent = (r && r.message) || "La coupure n'a pas abouti.";
+  l.innerHTML = r && r.ok ? (r.resteAFaire || []).map(x => '<li>' + esc(x) + '</li>').join('') : '';
+  if (r && r.ok) { $('etatCoupe').textContent = 'coupé'; $('coupeConfirm').value = ''; }
+}
 const Auj = {
   charge: 0, dernier: null,
   async charger(frais) {
@@ -2894,6 +3093,8 @@ const Auj = {
 (async () => {
   try { afficherPointDuJour(await api('/api/point-du-jour', { souvenirs: Memoire.liste() })); } catch (x) { /* instance publique ou hors ligne : rien */ }   /* [S94] avec tes souvenirs (délai de relance) */
   if (document.body.classList.contains('prive')) { Traites.maj(); montrer('aujourdhui'); await Auj.charger(false); }   /* [S102] après : la même lecture de la boîte */
+  if (document.body.classList.contains('prive')) { try { afficherVeille(await api('/api/veille')); } catch (e) { /* rien */ } }   /* [S131] */
+  else chargerDefi();   /* [S135] */
 })();
 
 /* [S31] bloc Face ID : seulement sur une instance ou l'elevation existe */

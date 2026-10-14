@@ -299,8 +299,9 @@ const pasDEffet = (r) => r.decide !== 'EN_ATTENTE' && r.decide !== 'AUTORISE' &&
     const lectures = effets.filter(x => attendus[0].test(x.l)).length;
     /* [v4.10 S80] [S82] [S83] + lecture des conversations et lecture d'agenda pour « a gerer » / creneau : 12 points, 3 lectures d'agenda */
     /* [v4.12 S103] + la lecture de la boite par le connecteur Claude (lire_mails) : 13 points, 3 lectures de la boite (meme permis) */
+    /* [v4.15 S131] + la lecture des mails NON LUS par la surveillance (« Santé des sources », /veille) : 14 points, 4 lectures de la boite (meme permis) */
     const boites = effets.filter(x => attendus[8].test(x.l)).length;
-    return { ok: effets.length === 13 && lectures === 3 && boites === 3 && inconnus.length === 0 && isole && nComp === 1 && nConst === 2, info: effets.length + ' points, boite x' + boites + ', compensation x' + nComp + ', constat x' + nConst + (inconnus.length ? ' ; INCONNUS lignes ' + inconnus.map(x => x.i + 1).join(',') : '') + (isole ? ' ; demo isolee' : ' ; DEMO NON ISOLEE') };
+    return { ok: effets.length === 14 && lectures === 3 && boites === 4 && inconnus.length === 0 && isole && nComp === 1 && nConst === 2, info: effets.length + ' points, boite x' + boites + ', compensation x' + nComp + ', constat x' + nConst + (inconnus.length ? ' ; INCONNUS lignes ' + inconnus.map(x => x.i + 1).join(',') : '') + (isole ? ' ; demo isolee' : ' ; DEMO NON ISOLEE') };
   });
   nouvelleIp(); sid = await session();
   const bizarres = await Promise.all([

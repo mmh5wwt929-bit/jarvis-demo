@@ -22,7 +22,7 @@
  * ========================================================================== */
 const crypto = require('crypto');
 
-const VERSION = '1.1';
+const VERSION = '1.2';
 /* du plus recent au plus ancien : la version demandee si on la connait, sinon la plus recente */
 const PROTOCOLES = Object.freeze(['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05']);
 const ORIGINES = Object.freeze(['https://claude.ai', 'https://claude.com']);
@@ -144,8 +144,22 @@ function cleAcceptee(entete, empreinteAttendue) {
   const egal = crypto.timingSafeEqual(donnee, empreinteAttendue);
   return egal && !!m;
 }
-/* anti DNS-rebinding : un Origin present doit etre celui de Claude */
-const origineAdmise = (o) => o === undefined || ORIGINES.includes(o);
+/* anti DNS-rebinding : un Origin present doit etre celui de Claude, ou un de ceux
+ * declares par JARVIS_MCP_ORIGINES ([S134] v4.15 : Mistral, …), exactement */
+const origineAdmise = (o, autres) => o === undefined || ORIGINES.includes(o) || (Array.isArray(autres) && autres.includes(o));
+/* [S134] JARVIS_MCP_ORIGINES : « https://chat.mistral.ai, https://… » -> { origines, motif }.
+ * Origines https exactes (schema + hote [+ port]), 5 au plus ; une seule mauvaise -> toutes ignorees. */
+function lireOrigines(v) {
+  const t = String(v == null ? '' : v).trim();
+  if (!t) return { origines: Object.freeze([]), motif: null };
+  const liste = t.split(',').map(x => x.trim()).filter(Boolean);
+  if (liste.length > 5) return { origines: Object.freeze([]), motif: 'ORIGINES_TROP_NOMBREUSES' };
+  for (const x of liste) {
+    let u; try { u = new URL(x); } catch { return { origines: Object.freeze([]), motif: 'ORIGINE_ILLISIBLE' }; }
+    if (u.protocol !== 'https:' || u.origin !== x || u.username || u.password) return { origines: Object.freeze([]), motif: 'ORIGINE_ILLISIBLE' };
+  }
+  return { origines: Object.freeze(liste), motif: null };
+}
 
 /* ---- compteurs GLOBAUX (les appels viennent d'IP partagees : pas de blocage par IP) ---- */
 function creerGarde(horloge = Date.now) {
@@ -180,4 +194,4 @@ function dateIso(x) {
 }
 
 module.exports = Object.freeze({ VERSION, PROTOCOLES, ORIGINES, LIMITES, ERR, OUTILS, NOMS_OUTILS, AVERTISSEMENT_LECTURE, MARQUES, CONSIGNE_MARQUEUR, marqueur,   /* [S114] */
-  analyser, negocier, initialiser, validerArguments, reponse, erreur, texte, configCle, empreinte, cleAcceptee, origineAdmise, creerGarde, dateIso, cleInterdite });
+  analyser, negocier, initialiser, validerArguments, reponse, erreur, texte, configCle, empreinte, cleAcceptee, origineAdmise, lireOrigines, creerGarde, dateIso, cleInterdite });

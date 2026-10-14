@@ -60,7 +60,7 @@
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const V = require('./jarvis-verite.js');
 
-const VERSION = '1.4';
+const VERSION = '1.5';
 const JOUR_MS = 86400000;
 const LIMITES = Object.freeze({ messages: 12, texte: 4000, phrases: 60, creneaux: 4, extrait: 160,
   texteSecurite: 65536, phrasesSecurite: 3000 });   /* [S120] v4.13 : la SECURITE lit le message entier */
@@ -74,6 +74,8 @@ const court = (s, n = LIMITES.extrait) => { const x = String(s || '').replace(/\
 const cleAdresse = (a) => String(a || '').trim().toLowerCase();
 const domaineDe = (a) => { const i = cleAdresse(a).lastIndexOf('@'); return i > 0 ? cleAdresse(a).slice(i + 1) : ''; };
 /* phrases de la partie NOUVELLE d'un message (sans l'historique cite « Le … a ecrit : », ni les lignes >) */
+/* [S132] le domaine enregistrable (deux derniers libelles), comme jarvis-domaines.js */
+const enregistrable = (h) => { const l = String(h || '').toLowerCase().replace(/\.$/, '').split('.').filter(Boolean); return l.length >= 2 ? l.slice(-2).join('.') : null; };
 /* [S120] v4.13 0a — les phrases de TOUT le message (64 Ko), cite compris : seulement
  * pour les regles de SECURITE (transmission, consigne, demande sensible). Une
  * consigne placee loin dans le mail, ou entre guillemets, n'echappe plus. */
@@ -303,6 +305,19 @@ function analyser(fil, o = {}) {
       const liens = (String(m.texte || '').match(RE_LIEN) || []).map(l => { try { return new URL(/^www\./i.test(l) ? 'https://' + l : l).hostname.toLowerCase(); } catch { return ''; } }).filter(Boolean);
       const etrangers = [...new Set(liens.filter(h => dom && !h.endsWith(dom)))];
       if (etrangers.length) alerte('liens', 'moyen', etrangers.length + ' lien(s) vers un autre domaine que l\'expéditeur (' + etrangers.slice(0, 3).join(', ') + ') : ne clique qu\'en connaissant l\'expéditeur.', null, m.i);
+      /* [S133] v4.15 LE VRAI LIEN : texte affiché d'un domaine, cible d'un autre (lu dans le HTML par jarvis-gmail.js) */
+      const trompeurs = Array.isArray(m.liensTrompeurs) ? m.liensTrompeurs.slice(0, 5) : [];
+      for (const l of trompeurs) if (l && l.affiche && l.cible)
+        alerte('lien-trompeur', 'fort', 'Un lien affiche « ' + court(l.affiche, 60) + ' » mais mène à ' + court(l.cible, 60) + ' : ne clique pas.', null, m.i);
+      /* [S132] v4.15 L'ÂGE DES DOMAINES (date d'enregistrement lue par le serveur, RDAP) : moins de 30 jours = alerte MOYENNE, jamais « suspect » seule */
+      if (o.agesDomaines instanceof Map) {
+        const doms = new Set([dom].concat(liens, trompeurs.map(l => l && l.cible)).map(enregistrable).filter(Boolean));
+        for (const d of doms) {
+          const j = o.agesDomaines.get(d);
+          if (Number.isInteger(j) && j >= 0 && j < 30)
+            alerte('domaine-recent', 'moyen', 'Domaine ' + d + ' enregistré il y a ' + (j === 0 ? "moins d'un jour" : j + ' jour' + (j > 1 ? 's' : '')) + " : un domaine neuf est souvent monté pour une arnaque ; vérifie l'expéditeur par un autre moyen.", null, m.i);
+        }
+      }
     }
   }
   /* montants differents entre messages differents : a verifier (acompte + solde, ou erreur ?) */

@@ -55,7 +55,7 @@ const https = require('https');
 const crypto = require('crypto');
 const { URL } = require('url');
 
-const VERSION = '1.5';
+const VERSION = '1.6';
 const LIMITES_MAIL = Object.freeze({ delaiMs: 12000, maxOctets: 1024 * 1024, permisMs: 30 * 1000,
   objetMax: 150, texteMax: 3000, autorisesMax: 10, plafondDefaut: 5, plafondMax: 20,
   lusMax: 5, extraitMax: 1200, diagnosticMs: 20000, lectureTotaleMs: 20000,
@@ -271,9 +271,32 @@ function texteDe(payload) {
     if (Array.isArray(p.parts)) for (const x of p.parts.slice(0, 30)) visiter(x, prof + 1);
   };
   visiter(payload, 0);
+  const liens = html !== null ? liensTrompeursDe(html) : [];   /* [S133] v4.15 : dans le HTML, meme si le texte brut existe */
   const brut = plain !== null ? plain : html !== null ? html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>|<\/p>/gi, '\n')
     .replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'") : '';
-  return { texte: brut, piecesJointes: pj };
+  return { texte: brut, piecesJointes: pj, liens };
+}
+/* [S133] v4.15 LE VRAI LIEN : un lien HTML dont le texte AFFICHE est une adresse web
+ * ou un domaine (« banque.fr », « https://www.banque.fr/compte ») mais dont la CIBLE
+ * est un autre domaine enregistrable -> { affiche, cible } (domaines seulement,
+ * minuscules, 5 au plus). Le corps lu ne voit que le texte affiche : sans ceci, la
+ * vraie destination disparaissait avec les balises. */
+const RE_DOMAINE_AFFICHE = /^(?:https?:\/\/)?((?:[a-z0-9-]+\.)+[a-z]{2,24})(?::\d+)?(?:[\/?#]\S*)?$/i;
+const domaineEnregistrable = (h) => { const l = String(h || '').toLowerCase().replace(/\.$/, '').split('.').filter(Boolean); return l.length >= 2 ? l.slice(-2).join('.') : null; };
+function liensTrompeursDe(html) {
+  const out = [], vus = new Set();
+  const decode = (x) => String(x).replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/\s+/g, ' ').trim();
+  for (const m of String(html).slice(0, 1024 * 1024).matchAll(/<a\b[^>]*?\bhref\s*=\s*(["'])([^"']{1,2048})\1[^>]*>([\s\S]{0,600}?)<\/a\s*>/gi)) {
+    if (out.length >= 5) break;
+    const texte = decode(m[3]), a = RE_DOMAINE_AFFICHE.exec(texte);
+    if (!a) continue;
+    let cible = null; try { const u = new URL(decode(m[2])); if (u.protocol === 'http:' || u.protocol === 'https:') cible = u.hostname; } catch { cible = null; }
+    const dA = domaineEnregistrable(a[1]), dC = domaineEnregistrable(cible);
+    if (!dA || !dC || dA === dC || vus.has(dA + '>' + dC)) continue;
+    vus.add(dA + '>' + dC);
+    out.push(Object.freeze({ affiche: a[1].toLowerCase(), cible: String(cible).toLowerCase() }));
+  }
+  return out;
 }
 /* [S120] v4.13 0a — le texte ENTIER (64 Ko au plus) pour les REGLES seulement.
  * Range a cote du mail, jamais DANS le mail : ni JSON.stringify, ni le modele,
@@ -284,11 +307,12 @@ function texteDe(payload) {
  * incomplet : le mail depasse 64 Ko, sa fin n'est pas lue par les regles. */
 const ANALYSE = new Map();
 const ANALYSE_MAX = 400, ANALYSE_MS = 30 * 60 * 1000;
-function retenirAnalyse(objet, brutComplet) {
+function retenirAnalyse(objet, brutComplet, liens) {
   const c = nettoyer(brutComplet, LIMITES_MAIL.analyseMax + 1), id = String(objet && objet.id || '');
   if (!id) return objet;
   ANALYSE.delete(id);
-  ANALYSE.set(id, Object.freeze({ texte: c.slice(0, LIMITES_MAIL.analyseMax), incomplet: c.length > LIMITES_MAIL.analyseMax, ts: Date.now() }));
+  ANALYSE.set(id, Object.freeze({ texte: c.slice(0, LIMITES_MAIL.analyseMax), incomplet: c.length > LIMITES_MAIL.analyseMax, ts: Date.now(),
+    liensTrompeurs: Object.freeze((liens || []).slice(0, 5)) }));   /* [S133] */
   while (ANALYSE.size > ANALYSE_MAX) ANALYSE.delete(ANALYSE.keys().next().value);
   return objet;
 }
@@ -443,8 +467,24 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
     return r;
   }
 
+  /* [S130] v4.14 « TOUT COUPER » : revoque CHEZ GOOGLE les deux jetons (refresh). Une
+   * revocation tient meme si le serveur redemarre ; pour rallumer, il faut de nouveaux
+   * jetons. Le resultat ne contient jamais un jeton : seulement revoque / deja-invalide / echec. */
+  async function revoquer() {
+    const out = [];
+    for (const [nom, rt] of [['envoi', jE], ['lecture', jL]]) {
+      acces[nom] = null;
+      if (!rt) { out.push(Object.freeze({ jeton: nom, resultat: 'absent', code: null })); continue; }
+      const r = await appeler('POST', 'https://oauth2.googleapis.com/revoke', 'token=' + encodeURIComponent(rt), null, 'form');
+      const res = !r.ok ? 'echec' : r.status === 200 ? 'revoque'
+        : r.status === 400 && r.json && /invalid_token|invalid_grant/.test(String(r.json.error || '')) ? 'deja-invalide' : 'echec';
+      out.push(Object.freeze({ jeton: nom, resultat: res, code: r.ok ? 'HTTP_' + r.status : r.code }));
+    }
+    return Object.freeze(out);
+  }
+
   return Object.freeze({
-    VERSION, envoiActif, lectureActive, motifEnvoi, motifLecture, plafond: plafondJour, diagnostic,
+    VERSION, envoiActif, lectureActive, motifEnvoi, motifLecture, plafond: plafondJour, diagnostic, revoquer,
     nbAutorises: liste.length,
     autorise: (a) => envoiActif && adresseValide(a) && liste.includes(cleAdresse(a)),
     restants,
@@ -520,7 +560,7 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
         mails.push(retenirAnalyse(Object.freeze({ id, de: nettoyer(entete(m.json, 'from'), 150), objet: nettoyer(entete(m.json, 'subject'), 200), date: nettoyer(entete(m.json, 'date'), 60),
           texte: brut.slice(0, L.extraitMax), coupe: brut.length > L.extraitMax, piecesJointes: t.piecesJointes,
           nonLu: Array.isArray(m.json.labelIds) && m.json.labelIds.includes('UNREAD'),
-          repondreA: (adressesDe(entete(m.json, 'reply-to'))[0] || {}).adresse || null, cc: adressesDe(entete(m.json, 'cc')).map(x => x.adresse).slice(0, 20) }), t.texte));
+          repondreA: (adressesDe(entete(m.json, 'reply-to'))[0] || {}).adresse || null, cc: adressesDe(entete(m.json, 'cc')).map(x => x.adresse).slice(0, 20) }), t.texte, t.liens));
       }
       return { ok: true, filtre: permis.filtre, mails: Object.freeze(mails), tronque: typeof l.json.nextPageToken === 'string' };
     },
@@ -646,7 +686,7 @@ function convertirFil(id, json, moi) {
       objet: nettoyer(decoderEntete(entete(m, 'subject')), 200), texte: brut.slice(0, LIMITES_MAIL.texteFil), coupe: brut.length > LIMITES_MAIL.texteFil,
       piecesJointes: Object.freeze(piecesDe(m.payload)), messageId: RE_MESSAGE_ID.test(mid) ? mid : null,
       references: referencesDe(m), auth: authDe(m),   /* [S85] [S86] */
-      moi: labels.includes('SENT') || (!!m0 && de.adresse === m0), nonLu: labels.includes('UNREAD') }), nouvelle);
+      moi: labels.includes('SENT') || (!!m0 && de.adresse === m0), nonLu: labels.includes('UNREAD') }), nouvelle, t.liens);
   });
   return Object.freeze({ id, objet: messages.length ? messages[0].objet : '', messages: Object.freeze(messages) });
 }
@@ -655,4 +695,5 @@ module.exports = Object.freeze({ VERSION, creerMail, adresseValide, liensDe, ver
   verifierReponse, adressesDe, decoderEntete, partieNouvelle, convertirFil,   /* [S80] [S81] v4.10 */
   authDe,   /* [S86] v4.10.1 */
   pourAnalyse,   /* [S120] v4.13 0a */
+  liensTrompeursDe,   /* [S133] v4.15 */
   PORTEE_ENVOI, PORTEE_LECTURE, LIMITES_MAIL });
