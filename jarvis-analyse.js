@@ -57,6 +57,10 @@
  *    pas de « Répondre » sur un point qui vient de TON message (engagement,
  *    echeance que tu as donnee).
  *
+ * 1.5 (v4.15) — [S133] alerte FORTE « lien trompeur » (le texte affiche un domaine,
+ *  le lien mene a un autre : liens remis par le module Gmail) ; alerte MOYENNE
+ *  « domaine récent » (o.ages : l'age RDAP de jarvis-domaines.js), jamais suspect seul.
+ *
  * 1.4 (v4.13, 14 oct) — [S120] LES REGLES DE SECURITE LISENT LE MAIL ENTIER
  *  Vu le 8 oct puis sonde le 14 oct : « rien de suspect » pour une consigne
  *  placee (1) apres 1 200 caracteres (le module Gmail ne gardait que
@@ -79,9 +83,10 @@
  *    lue) : jamais « rien de suspect ».
  * ========================================================================== */
 const { separer, normaliser } = require('./jarvis-vigilance.js');
+const { enregistrable: enregistrableA } = require('./jarvis-domaines.js');   /* [S133] */
 const V = require('./jarvis-verite.js');
 
-const VERSION = '1.4';
+const VERSION = '1.5';
 const JOUR_MS = 86400000;
 const LIMITES = Object.freeze({ messages: 12, texte: 4000, phrases: 60, creneaux: 4, extrait: 160,
   texteRegles: 65536, phraseMax: 2000, phraseRecouvre: 300, phrasesRegles: 40000 });   /* [S120] 64 Ko : jamais plus de 32 768 phrases (2 car.) : toutes lues */
@@ -375,6 +380,18 @@ function analyser(fil, o = {}) {
       const liens = (texteRegles(m).texte.match(RE_LIEN) || []).slice(0, 200).map(l => { try { return new URL(/^www\./i.test(l) ? 'https://' + l : l).hostname.toLowerCase(); } catch { return ''; } }).filter(Boolean);
       const etrangers = [...new Set(liens.filter(h => dom && !h.endsWith(dom)))];
       if (etrangers.length) alerte('liens', 'moyen', etrangers.length + ' lien(s) vers un autre domaine que l\'expéditeur (' + etrangers.slice(0, 3).join(', ') + ') : ne clique qu\'en connaissant l\'expéditeur.', null, m.i);
+      /* [S133] v4.15 un lien TROMPEUR : le texte affiche montre un domaine, le lien mene ailleurs */
+      for (const l of (Array.isArray(m.liens) ? m.liens : []).filter(x => x && x.trompeur).slice(0, 2))
+        alerte('lien-trompeur', 'fort', 'Lien trompeur : le texte montre « ' + court(l.affiche, 60) + ' », le lien mène à ' + court(l.hote, 80) + '. Ne clique pas.', null, m.i);
+      /* [S133] un domaine RECENT (expediteur ou lien) : un signal, jamais « suspect » a lui seul */
+      if (o.ages instanceof Map) {
+        const vusD = new Set();
+        for (const [qui, h] of [['expéditeur', dom]].concat((Array.isArray(m.liens) ? m.liens : []).map(x => ['lien', x && x.hote]))) {
+          const e = enregistrableA(h); if (!e || vusD.has(e)) continue; vusD.add(e);
+          const a = o.ages.get(e);
+          if (a && a.ok && a.recent) alerte('domaine-recent', 'moyen', (qui === 'expéditeur' ? "Domaine de l'expéditeur récent : " : 'Lien vers un domaine récent : ') + e + ' (créé le ' + a.creeLe + ', il y a ' + a.jours + ' j) : un signal à vérifier, pas une preuve.', null, m.i);
+        }
+      }
     }
   }
   /* montants differents entre messages differents : a verifier (acompte + solde, ou erreur ?) */

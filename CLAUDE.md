@@ -1,8 +1,11 @@
 # JARVIS — consignes pour Claude (dépôt public : aucun secret, aucune adresse privée)
 
-## État (branche `Racine`, après fusion de la PR v4.12.1)
-- Passerelle **v4.12.1** (avant : v4.12.0) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
-- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.4, `jarvis-mcp.js` 1.1, `jarvis-verite.js` 1.7, `jarvis-analyse.js` 1.3, vigilance 5.29.5 (+ « dis-lui »).
+## État (branche `Racine`, après fusion de la PR v4.15 = v4.13 + v4.14 + v4.15)
+- Passerelle **v4.15.0** (avant : v4.12.1) ; empreinte : voir `MANIFESTE.json`. Node 24 (Render), CI GitHub Actions Node 22 et 24.
+- Noyau `jarvis-5.28.3.js` (**NE JAMAIS MODIFIER**), couche 5.30.3 (`jarvis-plus-5.29.js`), `jarvis-gmail.js` 1.7, `jarvis-mcp.js` 1.2, `jarvis-verite.js` 1.7, `jarvis-analyse.js` 1.5, `jarvis-domaines.js` 1.0, `jarvis-appli.js` 1.1, vigilance 5.29.5 (+ « dis-lui »).
+- v4.13 : règles de sécurité sur le mail ENTIER (64 Ko, citations « > », guillemets, faux « a écrit » compris ; « analyse incomplète » au-delà) ; textes d'alerte vrais ; instance privée claire façon iOS ; **gravité** (rouge/orange/vert/blanc) calculée par le serveur, montrée par le fond de Discuter ; JARVIS / Claude / toi distincts ; onglets à icônes ; « à gérer » = titre + raison + phrase citée + 2 boutons + « … » ; « Envoie un mail » → « À qui ? » sans modèle.
+- v4.14 : onglet **Agenda** (semaine écrite par le serveur, « + Ajouter » → carte « Créer ») ; **Tout couper** (Face ID ou code ; jetons Gmail révoqués chez Google et vérifiés ; connecteur et écriture coupés jusqu'au redémarrage).
+- v4.15 : notifications ntfy (phrases fixes), `/veille` (sources, clé de l'IA, mails non lus, point du matin), âge des domaines (RDAP) et vrais liens (lien trompeur), « Signaler », connecteur ouvert à d'autres origines (`JARVIS_MCP_ORIGINES`, `JARVIS_MCP_NOM`), défi public (démo), `render.yaml` + `INSTALLER.md` + Réglages → Installation.
 - v4.9.1 : « Ouvrir dans Mail » (mailto:), demande double dite, historique 12 échanges, pages `/confidentialite` et `/conditions`.
 - v4.10 : « qu'est-ce que j'ai à gérer ? » (agenda + conversations + notes, sans IA), conversations entières, réponse dans la conversation, créneau vérifié contre l'agenda, rappels, sauvegarde des souvenirs (fichier).
 - v4.10.1 : fils Gmail regroupés (objet normalisé + même correspondant, 4 au plus), DMARC (1er en-tête Authentication-Results), offres d'agenda retirées, interface allégée sur l'instance privée (« Tout afficher »), lecture 4 par 4, « Repartir au vert », carte périmée relue, « à gérer » dans le point du jour.
@@ -31,7 +34,9 @@
 | `jarvis-elevation.js` | Face ID (WebAuthn) et code de secours, liés à UNE transaction. |
 | `jarvis-gmail.js` | Gmail du compte d'essai : envoi (liste fermée), réponse dans une conversation (fil revérifié), lecture des e-mails et des conversations ; deux jetons séparés. |
 | `jarvis-analyse.js` | Analyse des conversations par règles, sans IA : réponse attendue, échéances, engagements, relances, PJ manquante, versions différentes, créneaux, mail suspect ; chaque résultat avec sa preuve et sa certitude. |
-| `jarvis-mcp.js` | Connecteur Claude (MCP), module pur : JSON-RPC, schémas des 3 outils, contrôles d'entrée, clé, origine, compteurs globaux, marqueur ⛔ / ◐ / ✅ (1.1). |
+| `jarvis-mcp.js` | Connecteur Claude (MCP), module pur : JSON-RPC, schémas des 3 outils, contrôles d'entrée, clé, origine (+ `JARVIS_MCP_ORIGINES`), compteurs globaux, marqueur ⛔ / ◐ / ✅ (1.2). |
+| `jarvis-domaines.js` | Âge d'un domaine par RDAP (annuaire IANA → registre), https, 4 s, 256 Ko, cache 24 h, budget 3,5 s : un signal, jamais une preuve. |
+| `render.yaml`, `INSTALLER.md` | Installation en un clic (Blueprint : clés générées par Render, aucune valeur secrète dans le dépôt). |
 | `jarvis-appli.js` | Manifeste web et icônes (écran d'accueil). |
 | `confidentialite.html`, `conditions.html` | Pages publiques exigées par Google (appli OAuth en Production). |
 | `jarvis-manifeste.js` + `MANIFESTE.json` | Empreintes SHA-256 des fichiers qui tournent ; CI refuse un dépôt non conforme. |
@@ -63,6 +68,13 @@
 - Démo publique : aucun mot de jargon (plancher, sceau, ancre, rayon, G1…G5, noyau, CONTENT_DERIVED) dans le texte visible hors « Détails techniques » ; son modèle reçoit la promesse, jamais « inviolable » (phrase retirée par le serveur, et c'est dit).
 - Fermé par défaut : une variable mal réglée désactive l'outil et `/health` le dit ; jamais de repli silencieux vers la simulation.
 - Aucun secret (clé, jeton, client OAuth, code) dans un commit, un journal, une capture, un message ou une réponse d'API.
+- Règles d'analyse d'un mail (v4.13) : sur le texte ENTIER (64 Ko, propriété non énumérable `texteRegles`, citations comprises) ; le modèle, la page et Claude ne voient que l'extrait. Au-delà de 64 Ko : « analyse incomplète », jamais « rien de suspect ». Adresses trouvées par parcours linéaire (jamais une expression quadratique sur un contenu externe).
+- Gravité (v4.13) : calculée par le serveur à partir de ses codes (`gravite()`), jamais du texte du modèle ni d'un contenu lu ; vert = effet réel confirmé par le service, et lui seul ; motif inconnu sur une action d'effet = rouge.
+- Notifications (v4.15) : phrases FIXES seulement (le sujet ntfy est lisible par qui le devine) ; 20/h ; instance privée seulement.
+- `/veille` (v4.15) : hors `/api/`, sa propre clé `JARVIS_CLE_VEILLE` (≥ 32, différente), temps constant, 1 passage / 10 min ; lectures gouvernées dans une session INTERNE ; rien dans le contexte d'un modèle. Render s'endort entre deux passages (processus neuf, mémoire vide) : une notification ne dépend jamais que de la mémoire (mail suspect : reçu depuis ≤ 33 min ; point du jour et clé de l'IA : créneau 7 h 00–7 h 29 ; panne d'un processus neuf : créneaux 7 h, 12 h, 19 h).
+- « Tout couper » (v4.14) : défi lié à `COUPURE|nonce` ; Gmail révoqué chez Google puis vérifié (`invalid_grant`) ; le compte rendu dit ce qui ne tient pas après un redémarrage.
+- Titre tapé (formulaire Agenda) : toujours `titrePropre` (un « | » ou « HEBDO: » ne crée jamais une série).
+- Installation (v4.15) : états et NOMS de variables, jamais une valeur. Défi : démo seulement, aucun texte de visiteur affiché.
 
 ## Méthode (depuis v4.9.1)
 - Travail sur `claude/<version>` ; **jamais de push sur `Racine`** (protégée : PR + CI obligatoires, pas de push forcé).

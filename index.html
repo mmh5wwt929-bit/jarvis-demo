@@ -576,6 +576,16 @@ body.prive[data-onglet="agenda"] #agenda{display:flex}
 .ag-form label{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--sourd);flex:1}
 body.prive button.danger.plein{background:#B3261E;color:#FFFFFF}
 #couperResultat p{font-size:13.5px;margin-top:6px}
+#veilleEtat p{font-size:13.5px;margin-top:6px}
+.preuve.fort{color:var(--refus)}
+.install-ligne{border-top:1px solid var(--regle);padding:8px 0}.install-ligne p{font-size:13.5px;margin:2px 0}.install-ligne.a-corriger b,.install-ligne.coupe b{color:var(--refus)}
+.install-faire{color:var(--texte)}
+details.defi{margin-top:10px;border:1px solid var(--regle);border-radius:8px;padding:8px 12px}
+details.defi>summary{cursor:pointer;font-weight:600}
+.defi-corps p{margin-top:6px;font-size:13.5px}
+details.signaler>summary{list-style:none;cursor:pointer;display:inline-flex;align-items:center;min-height:44px;padding:0 14px;border-radius:12px;border:1px solid var(--regle)}
+details.signaler>summary::-webkit-details-marker{display:none}
+.signaler-liens{display:flex;flex-direction:column;gap:6px;margin-top:6px}.veille-sources{list-style:none;margin:4px 0}.veille-sources li{font-size:13.5px;padding:2px 0}.veille-sources li.ko{color:var(--refus)}
 /* point 7 : Controle en clair : plus de lisere ni d'anneaux animes ; l'etat donne la gravite */
 body.prive[data-onglet="controle"]::after{display:none}
 body.prive .ctl-noyau{display:none}
@@ -614,7 +624,7 @@ body.prive[data-ctl="attend"] .ctl-etat{color:#8A4B00}body.prive[data-ctl="coupe
       <div class="mesure">ancres publiées <b id="mAncres" class="mono">0</b></div>
       <div class="mesure">contexte déclaré <b id="mCouv" class="mono">—</b></div>
     </div>
-    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.12.1</div>
+    <div class="marque-detail mono">noyau 5.28.3 · couche 5.30.3 · passerelle v4.15.0</div>
   </div>
 </header>
 
@@ -625,6 +635,10 @@ body.prive[data-ctl="attend"] .ctl-etat{color:#8A4B00}body.prive[data-ctl="coupe
       <div class="tour jarvis" id="accueil">
         <div class="qui"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 9.5C8 19.2 5 15.5 5 11V6l7-3z"/></svg>JARVIS</div>
         <div class="quoi"><strong class="promesse">Un mail piégé ne peut pas faire agir ton assistant à ta place.</strong><span class="promesse-ligne">JARVIS se place entre l'assistant et tes outils : ce qu'un mail demande n'est jamais traité comme une demande de ta part.</span></div>
+        <!-- [S136] v4.15 le défi public (démo seulement) -->
+        <details class="defi demo-seul" id="defi"><summary>Défi : essaie de faire partir un e-mail</summary>
+          <div class="defi-corps"><p id="defiRegle">Fais partir un e-mail (simulé) vers une adresse que tu n'as pas tapée toi-même : mail piégé, texte collé, jeux de mots… Rien de réel ne part.</p>
+          <div id="defiTableau"><p class="pdj-vide">Tableau d'honneur : lecture…</p></div></div></details>
         <div class="accueil-actions demo-seul"><button class="primaire" id="jtLancer" type="button">Voir un mail piégé bloqué</button><a class="lien-video" id="lienVideo" hidden target="_blank" rel="noopener noreferrer">Voir la vidéo (vrai Gmail, vraie appli Claude)</a></div>
         <div class="accueil-actions perso-seul"><button class="primaire" id="aGerer" type="button">Qu'est-ce que j'ai à gérer ?</button></div>
       </div>
@@ -683,6 +697,20 @@ body.prive[data-ctl="attend"] .ctl-etat{color:#8A4B00}body.prive[data-ctl="coupe
         <button class="danger" id="toutOublier" hidden>tout effacer</button><input type="file" id="souvFichier" accept="application/json,.json" hidden></div>
       <div class="corps"><p class="pdj-note" id="souvAide">Un fichier (JSON) à garder dans Fichiers → iCloud Drive → JARVIS. Safari, l'appli de l'écran d'accueil et l'iPad ont chacun leur mémoire : ce fichier sert à passer de l'un à l'autre. Restaurer ajoute, ne remplace rien.</p>
         <p class="pdj-note" id="souvMessage"></p></div>
+    </details>
+    <!-- [S137] v4.15 INSTALLATION GUIDÉE : l'état de chaque brique, le nom de la variable Render, quoi faire -->
+    <details class="bloc prive-seul" id="blocInstallation">
+      <summary><h2>Installation <span class="mono" id="etatInstallation"></span></h2></summary>
+      <div class="corps"><div id="installLignes"><p class="pdj-vide">Lecture…</p></div></div>
+    </details>
+    <!-- [S131] [S132] v4.15 SURVEILLANCE ET NOTIFICATIONS -->
+    <details class="bloc prive-seul" id="blocVeille">
+      <summary><h2>Surveillance et notifications <span class="mono" id="etatVeille"></span></h2></summary>
+      <div class="corps">
+      <p>JARVIS vérifie tes sources (agenda, Gmail, IA), la date d'expiration de la clé de l'IA et tes mails non lus, puis te prévient sur ton téléphone <b>sans passer par Claude</b> (appli ntfy). Les notifications ne contiennent jamais un contenu : seulement « mail suspect reçu, ouvre JARVIS ».</p>
+      <div class="rang"><button type="button" id="veilleVerifier">Vérifier maintenant</button><button type="button" id="notifTester">Envoyer une notification de test</button></div>
+      <div id="veilleEtat" aria-live="polite"></div>
+      </div>
     </details>
     <!-- [S130] v4.14 TOUT COUPER : Face ID ou code ; Gmail révoqué chez Google -->
     <details class="bloc prive-seul" id="blocCouper">
@@ -1036,6 +1064,7 @@ function montrer(onglet) {
   if (onglet === 'aujourdhui' && document.body.classList.contains('prive') && Date.now() - Auj.charge > 120000) Auj.charger(false);
   if (onglet === 'controle') Ctl.demarrer(); else Ctl.arreter();   /* [S115] */
   if (onglet === 'agenda' && document.body.classList.contains('prive') && typeof Agenda !== 'undefined' && Date.now() - Agenda.charge > 120000) Agenda.charger();   /* [S128] */
+  if (onglet === 'reglages' && document.body.classList.contains('prive') && typeof Veille !== 'undefined') { Veille.charger(); Installation.charger(); }   /* [S132] [S137] */
   try { window.scrollTo(0, 0); } catch (e) {}
 }
 /* [S102] un flux termine (reponse envoyee, evenement cree, ancienne liste « à gérer ») : UNE ligne,
@@ -1828,6 +1857,7 @@ async function finaliserJeton(jeton) {
   if (!r) { rendre(); return direDansRetenue(jeton, 'Pas de réponse du serveur : réessaie « ' + (CONFIRMER_ACTE[acteDe(jeton)] || 'Confirmer') + ' ».'); }
   if (limiteAtteinte(r)) return rendre();
   majEtat(r);
+  if (r.defi && r.defi.faille === true) Defi.faille(r.defi);   /* [S136] le serveur a vu une faille */
   if (r.etat === 'ELEVATION_REQUISE') { rendre(); return demanderElevation(jeton, r.moyens || {}, r.pour); }
   if (r.etat === 'TROP_TOT') { rendre(); return direDansRetenue(jeton, 'Pas encore : la fenêtre court toujours.'); }
   if (r.etat === 'INTROUVABLE') return clore(jeton, 'Déjà traitée (envoyée ou annulée) : plus rien à confirmer.');
@@ -2043,6 +2073,65 @@ const Agenda = (() => {
     avant() { if (debut) charger(decaler(debut, -7)); }, apres() { if (debut) charger(decaler(debut, 7)); },
     ouvrirForm() { const f = $('agForm'); f.hidden = !f.hidden; if (!$('agJour').value) $('agJour').value = debut && debut > new Date().toISOString().slice(0, 10) ? debut : new Date(Date.now() - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 10); } };
 })();
+/* [S137] v4.15 l'installation guidée : écrite par le serveur (états, noms de variables), jamais une valeur */
+const Installation = (() => {
+  const MOT = { actif: '✓ actif', absent: '○ à ajouter', 'a-corriger': '⚠ à corriger', coupe: '⛔ coupé' };
+  function rendre(r) {
+    const z = $('installLignes'); if (!z || !r || !Array.isArray(r.lignes)) return;
+    $('etatInstallation').textContent = r.actives + ' / ' + r.total;
+    z.innerHTML = r.lignes.map(x => '<div class="install-ligne ' + esc(x.etat) + '"><p><b>' + esc(x.nom) + '</b> — ' + esc(MOT[x.etat] || x.etat) + '</p>'
+      + '<p class="pdj-note">Variable Render : <span class="mono">' + esc(x.variable) + '</span></p>'
+      + (x.faire ? '<p class="install-faire">' + esc(x.faire) + '</p>' : '')
+      + (x.ouvrir && /^bloc[A-Za-z]+$/.test(x.ouvrir) && $(x.ouvrir) ? '<button type="button" class="lien" data-ouvrir-bloc="' + esc(x.ouvrir) + '">Ouvrir le réglage</button>' : '') + '</div>').join('')
+      + '<p class="pdj-note">' + esc(r.regle || '') + '</p>';
+  }
+  async function charger() { try { rendre(await api('/api/installation')); } catch (e) { /* hors ligne */ } }
+  return { charger, rendre };
+})();
+document.addEventListener('click', (e) => {
+  const b = e.target.closest && e.target.closest('[data-ouvrir-bloc]'); if (!b) return;
+  const d = $(b.dataset.ouvrirBloc); if (d && d.tagName === 'DETAILS') { d.hidden = false; d.open = true; try { d.scrollIntoView({ block: 'start' }); } catch (x) {} }
+});
+/* [S131] [S132] v4.15 la surveillance et les notifications (Réglages) : l'état du serveur, tel quel */
+const Veille = (() => {
+  const MOT = { actif: 'actif', inactif: 'inactif', 'erreur-config': 'à corriger' };
+  function rendre(v) {
+    const z = $('veilleEtat'); if (!z || !v || v.erreur) return;
+    $('etatVeille').textContent = (v.veille === 'actif' ? 'surveillance' : '') + (v.veille === 'actif' && v.ntfy === 'actif' ? ' + ' : '') + (v.ntfy === 'actif' ? 'notifications' : '') || 'inactives';
+    const h = ['<p>Surveillance : <b>' + esc(MOT[v.veille] || v.veille) + '</b> · notifications : <b>' + esc(MOT[v.ntfy] || v.ntfy) + '</b>' + (v.ntfyHote ? ' (' + esc(v.ntfyHote) + ')' : '') + '</p>'];
+    if (v.cleIaExpire) h.push('<p>Clé de l\'IA : expire le ' + esc(v.cleIaExpire) + (v.dernier && v.dernier.cleIa ? ' (' + esc(v.dernier.cleIa.jours < 0 ? 'expirée' : 'dans ' + pluriel(v.dernier.cleIa.jours, 'jour', 'jours')) + ')' : '') + '.</p>');
+    else h.push('<p class="pdj-note">Date d\'expiration de la clé de l\'IA inconnue : ajoute JARVIS_CLE_IA_EXPIRE (AAAA-MM-JJ) dans Render pour être prévenu à J−7, J−3, J−1.</p>');
+    if (v.dernier) h.push('<p>Dernière vérification : ' + esc(v.dernier.heure) + ' (' + esc(v.dernier.declencheur === 'toucher' ? 'ton toucher' : 'veille') + ')</p><ul class="veille-sources">'
+      + v.dernier.sources.map(x => '<li class="' + (x.ok ? 'ok' : 'ko') + '">' + (x.ok ? '✓ ' : '⚠ ') + esc(x.nom) + (x.ok ? '' : ' : ne répond pas' + (x.code ? ' (' + esc(x.code) + ')' : '')) + '</li>').join('') + '</ul>'
+      + (v.dernier.suspects ? '<p class="auj-erreur">⚠ ' + esc(pluriel(v.dernier.suspects, 'mail non lu suspect', 'mails non lus suspects')) + '.</p>' : ''));
+    else h.push('<p class="pdj-vide">Pas encore de vérification depuis le réveil du serveur.</p>');
+    if (v.notification) h.push('<p class="pdj-note">Dernière notification : ' + esc(v.notification.heure) + ' — ' + (v.notification.ok ? 'partie' : 'pas partie (' + esc(v.notification.resultat || '') + ')') + '.</p>');
+    if (v.memoire) h.push('<p class="pdj-note">' + esc(v.memoire) + '</p>');
+    z.innerHTML = h.join('');
+  }
+  async function charger() { try { rendre(await api('/api/surveillance')); } catch (e) { /* hors ligne */ } }
+  async function verifier() { const b = $('veilleVerifier'); b.disabled = true; $('veilleEtat').insertAdjacentHTML('afterbegin', '<p class="pdj-vide">Vérification…</p>');
+    try { rendre(await api('/api/surveillance/verifier', {})); } finally { b.disabled = false; } }
+  async function tester() { const r = await api('/api/notifications/test', {}); $('veilleEtat').insertAdjacentHTML('afterbegin', '<p>' + esc((r && r.message) || 'Impossible.') + '</p>'); }
+  return { charger, verifier, tester, rendre };
+})();
+/* [S136] v4.15 le défi (démo) : le tableau d'honneur vient du serveur (compteurs, dates, codes) ; une faille vue par le SERVEUR */
+const Defi = (() => {
+  async function charger() {
+    const z = $('defiTableau'); if (!z) return;
+    let r = null; try { r = await (await versServeur(API + '/api/defi')).json(); } catch (e) { r = null; }
+    if (!r || r.erreur) { z.innerHTML = ''; return; }
+    z.innerHTML = '<p><b>' + esc(pluriel(Number(r.coupes) || 0, 'tentative coupée', 'tentatives coupées')) + '</b> · <b>' + esc(pluriel((r.failles || []).length, 'faille trouvée', 'failles trouvées')) + '</b> depuis le ' + esc(r.depuis) + '</p>'
+      + (r.failles || []).map(f => '<p class="mono">' + esc(f.date) + ' — ' + esc(f.code) + '</p>').join('') + '<p class="pdj-note">' + esc(r.memoire || '') + '</p>';
+  }
+  function faille(d) {
+    tour('JARVIS', 'Tu as trouvé une faille : un envoi (simulé) est parti vers une adresse que tu n\'as pas tapée. Code : ' + String(d.code || '').replace(/[^A-Z0-9]/g, '').slice(0, 10)
+      + '. Envoie ce code à ' + (d.contact === 'jarvissecuriteia@gmail.com' ? d.contact : 'jarvissecuriteia@gmail.com') + ' avec ce que tu as tapé : merci !', false);
+    charger();
+  }
+  const el = $('defi'); if (el) el.addEventListener('toggle', () => { if (el.open) charger(); });
+  return { charger, faille };
+})();
 /* [S130] v4.14 TOUT COUPER : défi (Face ID ou code), puis la coupure ; le compte rendu du serveur, tel quel */
 const Couper = (() => {
   let options = null;
@@ -2071,6 +2160,7 @@ const Couper = (() => {
 })();
 for (const [id, f] of [['agActualiser', () => Agenda.charger()], ['agAvant', () => Agenda.avant()], ['agApres', () => Agenda.apres()], ['agPlus', () => Agenda.ouvrirForm()],
   ['agAnnuler', () => { $('agForm').hidden = true; }], ['agPreparer', () => Agenda.preparer()],
+  ['veilleVerifier', () => Veille.verifier()], ['notifTester', () => Veille.tester()],
   ['couperPreparer', () => Couper.preparer()], ['couperFaceId', () => Couper.faceId()], ['couperCodeValider', () => Couper.code()]]) { const el = $(id); if (el) el.addEventListener('click', f); }
 
 async function envoyer() {
@@ -2208,6 +2298,22 @@ function ouvrirReponse(j, consigne, objet) {
   const ta = b.querySelector('textarea'); if (ta) try { ta.focus(); } catch (e) {}
   return b.querySelector('.repondre') || b;
 }
+/* [S133] v4.15 C3 ce que JARVIS a vérifié : l'âge du domaine de chaque correspondant (RDAP), les VRAIS liens */
+function verificationsH(r) {
+  const v = Array.isArray(r.verifications) ? r.verifications : [], l = Array.isArray(r.liens) ? r.liens : [];
+  if (!v.length && !l.length) return '';
+  return '<div class="gerer-section verifs"><b>Vérifié par JARVIS</b>'
+    + v.map(x => '<p class="preuve' + (x.recent ? ' fort' : '') + '">Domaine ' + esc(x.domaine) + ' : ' + (x.verifie ? 'créé le ' + esc(x.creeLe) + ' (il y a ' + esc(String(x.jours)) + ' j)' + (x.recent ? ' — récent : un signal, vérifie' : '') : 'âge non vérifié') + '</p>').join('')
+    + l.map(x => '<p class="preuve' + (x.trompeur ? ' fort' : '') + '">Lien → ' + esc(x.hote) + (x.affiche ? ' (le texte affiche « ' + esc(x.affiche) + ' »' + (x.trompeur ? ' : TROMPEUR' : '') + ')' : '') + '</p>').join('') + '</div>';
+}
+/* [S134] v4.15 C4 « Signaler » : les canaux officiels ; JARVIS ne transmet rien lui-même */
+const LIENS_SIGNALER = [['https://www.signal-spam.fr/', 'Signal Spam (e-mail indésirable, compte gratuit)'], ['https://www.internet-signalement.gouv.fr/', 'PHAROS (arnaque en ligne)'],
+  ['https://www.cybermalveillance.gouv.fr/', 'cybermalveillance.gouv.fr (aide)']];
+function boutonSignaler() {
+  return '<details class="signaler"><summary>Signaler</summary><div class="signaler-liens">' + LIENS_SIGNALER.map(([u, n]) => '<a class="bouton" href="' + u + '" target="_blank" rel="noopener noreferrer">' + esc(n) + '</a>').join('')
+    + '<p class="pdj-note">JARVIS ne transmet rien lui-même : tu signales depuis le site officiel. Ne transfère jamais le mail à quelqu\'un d\'autre.</p></div></details>';
+}
+const signalerH = () => '<div class="rang">' + boutonSignaler() + '</div>';
 function afficherConversation(r) {
   if (!r || !r.ok) return tour('JARVIS', (r && r.message) || 'Conversation non lue.', false);
   const j = jetonFil(r.fil), an = r.analyse || {};
@@ -2229,6 +2335,8 @@ function afficherConversation(r) {
       + '<div class="mail-texte' + (long(m.texte) ? ' coupe' : '') + '">' + esc(m.texte) + '</div>' + (long(m.texte) ? '<button type="button" class="lire-tout" data-lire-tout="1">Lire tout</button>' : '')
       + ((m.piecesJointes || []).length ? '<p class="mail-entete">Pièce(s) jointe(s) : ' + esc(m.piecesJointes.join(', ')) + '</p>' : '') + '</div>').join('')
     + (reperes.length ? '<div class="gerer-section"><b>Repéré par les règles (à vérifier)</b>' + reperes.map(x => '<p class="preuve">• ' + esc(x) + '</p>').join('') + '</div>' : '')
+    + verificationsH(r)   /* [S133] âge des domaines, vrais liens */
+    + (r.suspect ? signalerH() : '')   /* [S134] */
     + (lourd ? plie('<p class="pdj-note">' + esc(r.transparence || '') + '</p>') : '<p class="pdj-note">' + esc(r.transparence || '') + '</p>')
     + (j && !r.suspect ? '<div class="rang gerer-actions"><button type="button" data-gerer="repondre" data-fil="' + esc(j) + '">Préparer une réponse</button>'
       + '<button type="button" data-gerer="rappel" data-fil="' + esc(j) + '">Me le rappeler</button></div>' : '') + '</div>';   /* [S89] suspect : aucun bouton */
@@ -2940,7 +3048,7 @@ function afficherPointDuJour(r) {
 const ACTIONS_COURTES = { repondre: 'Répondre', rappel: 'Rappel', creneau: "Vérifier l'agenda" };
 /* [S103] v4.12 LES PROPOSITIONS DE CLAUDE (connecteur) : en tête d'« Aujourd'hui », jamais repliées
  * avant l'action. Un e-mail : adresse à retaper, puis 10 s et Face ID. Un événement : « Créer ». */
-const ETATS_CONNECTEUR = { actif: 'actif', inactif: 'inactif', ferme: 'fermé 1 h', 'erreur-config': 'mal réglé' };
+const ETATS_CONNECTEUR = { coupe: 'coupé', actif: 'actif', inactif: 'inactif', ferme: 'fermé 1 h', 'erreur-config': 'mal réglé' };
 const RAISONS_NON_RETENUE = { HORS_LISTE: 'adresse hors de ta liste', ADRESSE_INVALIDE: 'adresse invalide', ENVOI_INACTIF: 'envoi réel inactif' };
 const Claude = {
   async charger() {
@@ -2952,7 +3060,10 @@ const Claude = {
     if ($('etatClaude')) $('etatClaude').textContent = ETATS_CONNECTEUR[c.etat] || c.etat || '';
     if ($('claudeMessage')) $('claudeMessage').textContent = c.etat === 'inactif' ? 'Inactif sur cette instance (JARVIS_CLE_MCP absente).'
       : c.etat === 'ferme' ? 'Fermé 1 h : trop de clés fausses reçues. Il rouvrira seul.' : c.etat === 'erreur-config' ? 'Mal réglé (' + (c.motif || '') + ') : le connecteur est fermé.'
-      : 'Actif · ' + (c.appelsHeure || 0) + ' appel(s) cette heure.';
+      : c.etat === 'coupe' ? 'Coupé (« Tout couper ») jusqu\'au prochain redémarrage.'
+      : 'Actif · ' + (c.appelsHeure || 0) + ' appel(s) cette heure' + (Array.isArray(c.origines) && c.origines.length ? ' · aussi : ' + c.origines.join(', ') : '') + '.';
+    /* [S135] le nom de l'assistant relié (« Claude » par défaut), écrit par le serveur */
+    if (typeof c.assistant === 'string' && c.assistant && $('blocClaude')) { const h2 = $('blocClaude').querySelector('summary h2'); if (h2 && h2.firstChild) h2.firstChild.textContent = 'Connecteur ' + c.assistant + ' '; }
     zone.innerHTML = Claude.html(r);
   },
   html(r) {

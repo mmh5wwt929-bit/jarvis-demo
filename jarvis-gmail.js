@@ -46,6 +46,8 @@
  *  - 5 messages au plus de la boite de reception (recents ou non lus), texte
  *    nettoye et borne (1 200 caracteres par message) : un CONTENU EXTERNE,
  *    remis au serveur qui le declare a la couche avant tout modele.
+ * 1.7 (v4.15) : [S133] les VRAIS liens de chaque e-mail (href + texte affiche,
+ *   « trompeur » si le texte montre un autre domaine), parcours borne.
  * 1.6 (v4.14) : [S130] revoquer() : « tout couper », jetons revoques chez
  *   Google puis verifies ; le module refuse tout ensuite (COUPE).
  * 1.5 (v4.13) : [S120] le texte ENTIER (64 Ko) remis aux seules regles
@@ -56,7 +58,7 @@ const https = require('https');
 const crypto = require('crypto');
 const { URL } = require('url');
 
-const VERSION = '1.6';
+const VERSION = '1.7';
 const LIMITES_MAIL = Object.freeze({ delaiMs: 12000, maxOctets: 1024 * 1024, permisMs: 30 * 1000,
   objetMax: 150, texteMax: 3000, autorisesMax: 10, plafondDefaut: 5, plafondMax: 20,
   lusMax: 5, extraitMax: 1200, diagnosticMs: 20000, lectureTotaleMs: 20000,
@@ -280,9 +282,50 @@ function texteDe(payload) {
     if (Array.isArray(p.parts)) for (const x of p.parts.slice(0, 30)) visiter(x, prof + 1);
   };
   visiter(payload, 0);
+  /* [S133] le HTML brut est garde a part : il donne les VRAIS liens (href) et le texte affiche */
   const brut = plain !== null ? plain : html !== null ? html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>|<\/p>/gi, '\n')
     .replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'") : '';
-  return { texte: brut, piecesJointes: pj };
+  return { texte: brut, piecesJointes: pj, html: html || '' };
+}
+/* [S133] v4.15 LES VRAIS LIENS d'un e-mail recu : le href de chaque <a> (et son texte affiche),
+ * puis les adresses web ecrites en clair ; 10 au plus. « trompeur » : le texte affiche ressemble
+ * a une adresse web d'un AUTRE domaine que le vrai lien. Parcours borne : 300 Ko, 500 balises,
+ * aucune expression sans borne sur le HTML (un mail piege ne doit pas bloquer le serveur). */
+const { enregistrable } = require('./jarvis-domaines.js');
+const RE_DOMAINE_AFFICHE = /(?:https?:\/\/)?(?:www\.)?((?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.){1,10}[a-z]{2,24})(?=[\/\s:?#)\]»"']|$)/i;
+const decoderEntites = (x) => String(x).replace(/&nbsp;/gi, ' ').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#0*39;|&apos;/gi, "'").replace(/&amp;/gi, '&');
+function hoteDe(href) {
+  try { const u = new URL(/^www\./i.test(href) ? 'https://' + href : href); return /^https?:$/.test(u.protocol) && u.hostname ? u.hostname.toLowerCase().replace(/\.$/, '') : null; }
+  catch { return null; }
+}
+function liensRecus(html, texte) {
+  const out = [], vus = new Set();
+  const h = String(html || '').slice(0, 300000), hl = h.toLowerCase();
+  let i = 0, n = 0;
+  while (out.length < 10 && n < 500) {
+    const a = hl.indexOf('<a', i); if (a < 0) break; n++;
+    const r = hl.slice(a, a + 4001).indexOf('>'), fin = r < 0 ? -1 : a + r;   /* une balise de 4 000 caracteres au plus */
+    if (fin < 0 || !/^<a[\s>]/.test(hl.slice(a, a + 3))) { i = a + 2; continue; }
+    const tag = h.slice(a, fin + 1);
+    const m = /\bhref\s*=\s*(?:"([^"]{0,2000})"|'([^']{0,2000})'|([^\s>]{1,2000}))/i.exec(tag);
+    const rf = hl.slice(fin, fin + 3001).indexOf('</a'), ferme = rf < 0 ? -1 : fin + rf;
+    const affiche = ferme > 0 ? decoderEntites(h.slice(fin + 1, ferme).replace(/<[^>]{0,500}>/g, ' ')).replace(/\s+/g, ' ').trim().slice(0, 120) : '';
+    i = fin + 1;
+    if (!m) continue;
+    const hote = hoteDe(decoderEntites(m[1] != null ? m[1] : m[2] != null ? m[2] : m[3]).trim());
+    if (!hote) continue;
+    const dA = (RE_DOMAINE_AFFICHE.exec(affiche) || [])[1];
+    const eA = dA ? enregistrable(dA) : null, eH = enregistrable(hote);
+    const k = hote + '|' + affiche; if (vus.has(k)) continue; vus.add(k);
+    out.push(Object.freeze({ hote, affiche: nettoyer(affiche, 80) || null, trompeur: !!(eA && eH && eA !== eH) }));
+  }
+  for (const m of String(texte || '').slice(0, 65536).matchAll(/\b(?:https?:\/\/|www\.)[^\s<>"'«»‹›]{1,500}/gi)) {
+    if (out.length >= 10) break;
+    const hote = hoteDe(m[0].replace(/[.,;:!?)\]]+$/, ''));
+    if (!hote || out.some(x => x.hote === hote)) continue;
+    out.push(Object.freeze({ hote, affiche: null, trompeur: false }));
+  }
+  return Object.freeze(out);
 }
 const entete = (m, nom) => { const h = ((m.payload || {}).headers || []).find(x => x && String(x.name).toLowerCase() === nom); return h ? String(h.value || '') : ''; };
 
@@ -538,8 +581,8 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
         const t = texteDe(m.json.payload);
         const plein = nettoyer(t.texte, L.analyseMax + 1);   /* [S120] */
         mails.push(avecTexteRegles({ id, de: nettoyer(entete(m.json, 'from'), 150), objet: nettoyer(entete(m.json, 'subject'), 200), date: nettoyer(entete(m.json, 'date'), 60),
-          texte: plein.slice(0, L.extraitMax), coupe: plein.length > L.extraitMax, piecesJointes: t.piecesJointes,
-          nonLu: Array.isArray(m.json.labelIds) && m.json.labelIds.includes('UNREAD'),
+          texte: plein.slice(0, L.extraitMax), coupe: plein.length > L.extraitMax, piecesJointes: t.piecesJointes, liens: liensRecus(t.html, plein),   /* [S133] */
+          nonLu: Array.isArray(m.json.labelIds) && m.json.labelIds.includes('UNREAD'), recuLe: Number(m.json.internalDate) || 0,   /* [1.7] reception par Gmail (la veille) */
           repondreA: (adressesDe(entete(m.json, 'reply-to'))[0] || {}).adresse || null, cc: adressesDe(entete(m.json, 'cc')).map(x => x.adresse).slice(0, 20) }, plein, L.analyseMax));
       }
       return { ok: true, filtre: permis.filtre, mails: Object.freeze(mails), tronque: typeof l.json.nextPageToken === 'string' };
@@ -664,6 +707,7 @@ function convertirFil(id, json, moi) {
       a: adressesDe(entete(m, 'to')).map(x => x.adresse), cc: adressesDe(entete(m, 'cc')).map(x => x.adresse),
       repondreA: (adressesDe(entete(m, 'reply-to'))[0] || {}).adresse || null, date: Number(m.internalDate) || 0,
       objet: nettoyer(decoderEntete(entete(m, 'subject')), 200), texte: plein.slice(0, LIMITES_MAIL.texteFil), coupe: plein.length > LIMITES_MAIL.texteFil,
+      liens: liensRecus(t.html, plein),   /* [S133] */
       piecesJointes: Object.freeze(piecesDe(m.payload)), messageId: RE_MESSAGE_ID.test(mid) ? mid : null,
       references: referencesDe(m), auth: authDe(m),   /* [S85] [S86] */
       moi: labels.includes('SENT') || (!!m0 && de.adresse === m0), nonLu: labels.includes('UNREAD') }, plein, LIMITES_MAIL.analyseMax);
@@ -674,4 +718,5 @@ function convertirFil(id, json, moi) {
 module.exports = Object.freeze({ VERSION, creerMail, adresseValide, liensDe, verifierContenu, messageBrut, motEncode, lireClient, lireAutorises, valeurPropre, mailto,
   verifierReponse, adressesDe, decoderEntete, partieNouvelle, convertirFil,   /* [S80] [S81] v4.10 */
   authDe,   /* [S86] v4.10.1 */
+  liensRecus,   /* [S133] v4.15 */
   PORTEE_ENVOI, PORTEE_LECTURE, LIMITES_MAIL });
