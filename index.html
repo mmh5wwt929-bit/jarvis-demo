@@ -475,6 +475,98 @@ button.ligne-repliee{display:block;width:100%;text-align:left;background:none;bo
   .corps,.titre-defense,.entete-detail .mesures,.marque-detail{padding-left:16px;padding-right:16px}
   details.bloc>summary::after{padding:0 16px}
 }
+/* ==========================================================================
+ * [S126] v4.13 INSTANCE PRIVEE CLAIRE, FACON iOS (la demo garde :root, sombre).
+ * Le fond prend la GRAVITE calculee par le serveur ([S123]) : blanc rien a
+ * decider, vert effet reel verifie, orange attend ton geste, rouge coupe ou
+ * suspect. Contrastes >= 4,5:1 sur les 4 fonds (verifies par tests-v415.js).
+ * ======================================================================== */
+body.prive{--encre:#FFFFFF;--ardoise:#F2F2F7;--regle:#E3E3E8;--texte:#1C1C1E;--lumiere:#1C1C1E;--sourd:#5E5E63;--signal:#0A66D6;
+  --sur:#17633A;--retenu:#8A4B00;--refus:#B3261E;--fond-g:#FFFFFF;
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Roboto,Arial,sans-serif;background:var(--fond-g);color:var(--texte);
+  overscroll-behavior:none}
+html.prive,html:has(body.prive){background:#FFFFFF;overscroll-behavior:none}
+body.prive[data-onglet="discuter"][data-gravite="vert"]{--fond-g:#EEF8F0}
+body.prive[data-onglet="discuter"][data-gravite="orange"]{--fond-g:#FFF6E8}
+body.prive[data-onglet="discuter"][data-gravite="rouge"]{--fond-g:#FDEEEE}
+body.prive[data-onglet="discuter"].grav-flash{--fond-g:#F9D3D1}
+body.prive,body.prive header,body.prive #conversation,body.prive .saisie{transition:background-color .4s}
+body.prive header{position:sticky;top:0;z-index:40;background:var(--fond-g);border-bottom:1px solid var(--regle);padding-top:env(safe-area-inset-top,0px)}
+body.prive .marque{color:var(--texte);font-weight:700;letter-spacing:.04em}
+body.prive main>.colonne,body.prive #conversation{background:var(--fond-g)}
+body.prive .colonne{background:#FFFFFF}
+body.prive #pastille{display:none}
+.grav{display:none}
+body.prive .grav{display:inline-flex;margin-left:auto;align-items:center;gap:6px;border:none;border-radius:999px;padding:6px 12px;font-size:13px;font-weight:600;
+  background:#F2F2F7;color:#3A3A3C;min-height:32px}
+body.prive .grav[data-gravite="vert"]{background:#D5F0DC;color:#17633A}
+body.prive .grav[data-gravite="orange"]{background:#FFE6C2;color:#8A4B00}
+body.prive .grav[data-gravite="rouge"]{background:#F9D3D1;color:#B3261E}
+body.prive .grav-detail{font-size:13px;color:var(--sourd);padding:0 16px 8px}
+body.prive .bouton-vert{background:#F2F2F7;color:#0A66D6;border:none}
+/* les bulles : qui parle se voit */
+body.prive #fil{padding:8px 14px 16px;gap:10px}
+body.prive .tour{max-width:min(86%,62ch)}
+body.prive .tour .qui{font-size:12px;color:var(--sourd);font-weight:600;margin:0 4px 3px}
+body.prive .tour.moi>.qui{display:none}
+body.prive .tour.moi .quoi{background:#0A66D6;color:#FFFFFF;border:none;border-radius:18px;padding:9px 14px;text-align:left}
+body.prive .tour.de-claude .quoi{background:#E9E9EB;color:#1C1C1E;border:none;border-radius:18px;padding:9px 14px}
+body.prive .tour.de-jarvis{max-width:min(94%,66ch)}
+body.prive .tour.de-jarvis>.qui{display:flex;align-items:center;gap:5px;color:#1C1C1E}
+body.prive .tour.de-jarvis>.qui::before{content:"";width:13px;height:14px;flex:none;background:#0A66D6;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 14'%3E%3Cpath d='M6.5 0 13 2.4v4.3C13 10.4 10.3 13 6.5 14 2.7 13 0 10.4 0 6.7V2.4z'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 13 14'%3E%3Cpath d='M6.5 0 13 2.4v4.3C13 10.4 10.3 13 6.5 14 2.7 13 0 10.4 0 6.7V2.4z'/%3E%3C/svg%3E") center/contain no-repeat}
+body.prive .tour.de-jarvis>.quoi,body.prive .tour.de-jarvis>.decision,body.prive .tour.de-jarvis>.alerte-adresse,body.prive .tour.de-jarvis>.point-du-jour{
+  background:#FFFFFF;border:1px solid #E3E3E8;border-radius:14px;padding:11px 14px;color:#1C1C1E}
+body[data-gravite="rouge"].prive .tour.de-jarvis:last-child>*:not(.qui){border-color:#E9A9A5}
+body[data-gravite="orange"].prive .tour.de-jarvis:last-child>*:not(.qui){border-color:#F0C98A}
+body[data-gravite="vert"].prive .tour.de-jarvis:last-child>*:not(.qui){border-color:#9ED3AD}
+body.prive .decision{border-left:none}
+body.prive .decision .plan{font-weight:600;color:#1C1C1E}
+body.prive .mail-carte,body.prive .alerte-extrait{background:#F2F2F7;border-color:#E3E3E8;color:#1C1C1E}
+body.prive .alerte-adresse{background:#FFFFFF}
+/* les boutons : principal plein bleu, secondaire gris ; 44 px */
+body.prive button,body.prive a.bouton{min-height:44px;border-radius:12px;background:#F2F2F7;color:#0A66D6;border:1px solid transparent;font-weight:500}
+body.prive button.primaire,body.prive a.bouton.primaire{background:#0A66D6;border-color:#0A66D6;color:#FFFFFF;font-weight:600}
+body.prive button.danger{background:#F2F2F7;color:#B3261E}
+body.prive button.lien,body.prive button.ligne-repliee,body.prive .auj-texte,body.prive button.lire-tout{min-height:0;background:none;border:none;border-radius:0}
+body.prive button.lien{color:#0A66D6}
+body.prive input,body.prive select,body.prive textarea{background:#FFFFFF;color:#1C1C1E;border:1px solid #D1D1D6;border-radius:10px}
+/* la saisie : champ arrondi, micro, bouton rond */
+body.prive .saisie{background:var(--fond-g);border-top:1px solid var(--regle);padding:8px 12px}
+body.prive .saisie>.rang:first-child{align-items:flex-end;gap:8px}
+body.prive #msg{border-radius:20px;padding:10px 14px;min-height:44px;background:#F2F2F7;border-color:#F2F2F7}
+body.prive #micro{width:44px;padding:0;border-radius:50%;background:#F2F2F7;color:#0A66D6}
+body.prive #envoyer{width:44px;height:44px;padding:0;border-radius:50%;font-size:0;flex:none;position:relative}
+body.prive #envoyer::after{content:"";position:absolute;inset:0;margin:auto;width:18px;height:18px;background:#FFFFFF;
+  -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='M9 1 16 8l-1.4 1.4L10 4.8V17H8V4.8L3.4 9.4 2 8z'/%3E%3C/svg%3E") center/contain no-repeat;
+  mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18'%3E%3Cpath d='M9 1 16 8l-1.4 1.4L10 4.8V17H8V4.8L3.4 9.4 2 8z'/%3E%3C/svg%3E") center/contain no-repeat}
+/* les onglets : icone + libelle, actif en bleu, 44 px, sans vide au-dessus */
+body.prive{--haut-onglets:calc(58px + env(safe-area-inset-bottom,0px))}
+body.prive .onglets{background:rgba(249,249,251,.97);border-top:1px solid var(--regle);padding:4px 4px calc(2px + env(safe-area-inset-bottom,0px));gap:0}
+body.prive .onglets button{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:48px;font-size:11px;color:#6E6E73;background:none;border:none;border-radius:8px;padding:4px 2px;font-weight:500}
+body.prive .onglets button svg{width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+body.prive .onglets button[aria-current="page"]{color:#0A66D6;background:none;font-weight:600}
+/* Aujourd'hui, Réglages, Contrôle : blancs (fatigue d'alarme) */
+body.prive #aujourdhui,body.prive #defense,body.prive #controle{background:#FFFFFF}
+body.prive .auj-point,body.prive .gerer-item{border-left:none;border-bottom:1px solid #E3E3E8;padding:10px 0;margin:0}
+body.prive .auj-point.fort .auj-texte,body.prive .gerer-item.fort .point-titre{color:#B3261E}
+.point-raison{font-size:13.5px;color:var(--sourd);margin-top:3px}
+.point-preuve{font-size:13.5px;margin-top:3px}
+.point-plus{display:inline-block;position:relative}
+.point-plus>summary{list-style:none;cursor:pointer;min-width:44px;min-height:36px;display:inline-flex;align-items:center;justify-content:center;border-radius:12px;background:#F2F2F7;color:#0A66D6;font-weight:700}
+.point-plus>summary::-webkit-details-marker{display:none}
+.point-plus[open]>.rang{margin-top:6px}
+.gerer-regle{font-size:12.5px;color:var(--sourd);margin-top:8px}
+/* Contrôle en clair : l'etat donne la gravite (meme pastille, meme flash), sans liseré ni anneaux */
+body.prive .ctl-noyau{display:none}
+body.prive[data-onglet="controle"]::after{display:none}
+body.prive[data-onglet="controle"] header{border-bottom-color:var(--regle);background:#FFFFFF}
+body.prive[data-onglet="controle"][data-ctl="attend"] #controle,body.prive[data-onglet="controle"][data-ctl="attend"] header{background:#FFF6E8}
+body.prive[data-onglet="controle"][data-ctl="coupe"] #controle,body.prive[data-onglet="controle"][data-ctl="coupe"] header{background:#FDEEEE}
+body.prive[data-onglet="controle"].ctl-flash #controle{background:#F9D3D1}
+body.prive .ctl-tete{background:#F2F2F7;border-color:#E3E3E8}
+@media(prefers-reduced-motion:reduce){body.prive,body.prive header,body.prive #conversation{transition:none}}
 </style>
 </head>
 <body data-onglet="aujourdhui">
@@ -484,9 +576,11 @@ button.ligne-repliee{display:block;width:100%;text-align:left;background:none;bo
     <div class="marque">JARVIS</div>
     <button class="pastille" id="pastille" type="button" aria-expanded="false" aria-controls="enteteDetail"
       aria-label="Plancher de confiance : toucher pour le détail"><i class="point b3" id="pPoint"></i><span class="plancher-val n3" id="pVal">intention directe</span></button>
+    <button class="grav" id="gravPastille" type="button" data-gravite="blanc" aria-expanded="false" aria-controls="gravDetail" aria-live="polite">En veille</button>
     <button class="bouton-vert" id="repartirVert" type="button" hidden title="Nouvelle session : efface l'historique de cette conversation (ici et sur le serveur) ; garde tes souvenirs."
       aria-label="Repartir au vert : nouvelle session. Efface l'historique de la conversation, garde tes souvenirs.">Repartir au vert</button>
   </div>
+  <p class="grav-detail" id="gravDetail" hidden></p>
   <div class="entete-detail" id="enteteDetail" hidden>
     <div class="entete-titre">Détails techniques</div>
     <p class="accroche">La couche de sécurité d'un assistant personnel : avant chaque action, elle vérifie d'où vient l'intention.</p>
@@ -677,10 +771,10 @@ button.ligne-repliee{display:block;width:100%;text-align:left;background:none;bo
   </section>
 </main>
 <nav class="onglets prive-seul" id="onglets" aria-label="Vues">
-  <button type="button" data-onglet="controle">Contrôle</button>
-  <button type="button" data-onglet="aujourdhui" aria-current="page">Aujourd'hui</button>
-  <button type="button" data-onglet="discuter">Discuter</button>
-  <button type="button" data-onglet="reglages">Réglages</button>
+  <button type="button" data-onglet="controle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 19 5.6v5.2c0 4.4-3 7.6-7 9.2-4-1.6-7-4.8-7-9.2V5.6z"/></svg><span>Contrôle</span></button>
+  <button type="button" data-onglet="aujourdhui" aria-current="page"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 9.5h17M8 3v4M16 3v4"/></svg><span>Aujourd'hui</span></button>
+  <button type="button" data-onglet="discuter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5.5h16v10.5H9.5L5 19.5V16H4z"/></svg><span>Discuter</span></button>
+  <button type="button" data-onglet="reglages"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><span>Réglages</span></button>
 </nav>
 
 <div class="porte" id="porteCle" hidden role="dialog" aria-modal="true" aria-labelledby="titreCle">
@@ -757,7 +851,10 @@ const allege = () => document.body.classList.contains('allege');
 let toutPage = null;   /* le choix fait dans CETTE page (si le navigateur ne garde rien) */
 function toutAfficher() { if (toutPage !== null) return toutPage; try { return localStorage.getItem(TOUT_AFFICHER) === '1'; } catch (e) { return false; } }
 function appliquerAffichage(prive) {
-  if (prive !== undefined) document.body.classList.toggle('prive', !!prive);
+  if (prive !== undefined) { document.body.classList.toggle('prive', !!prive); document.documentElement.classList.toggle('prive', !!prive); }
+  /* [S123] « Repartir au vert » devient « Nouvelle conversation » (le vert veut dire « fait, vérifié ») ; même fonction */
+  const rv = $('repartirVert');
+  if (rv && document.body.classList.contains('prive')) { rv.textContent = 'Nouvelle conversation'; rv.setAttribute('aria-label', "Nouvelle conversation : efface l'historique de la conversation, garde tes souvenirs."); }
   const tout = toutAfficher(), p = document.body.classList.contains('prive'), a = p && !tout;
   document.body.classList.toggle('allege', a);
   const c = $('toutAfficher'); if (c) c.checked = tout;
@@ -770,6 +867,36 @@ const pluriel = (n, un, plusieurs) => n + ' ' + (n > 1 ? plusieurs : un);
 /* [S102] v4.11 « LES POINTS NE DESCENDENT PAS » : ce que TU as marqué « Fait » ou « Plus tard »,
  * gardé sur CE téléphone (clé → état, échéance), renvoyé au serveur qui masque ces points.
  * Une liste de clés (20 hex), rien d'autre : elle ne donne ni permission, ni cible. */
+/* [S123] v4.13 LA GRAVITE : posee par le SERVEUR (gravite, graviteMotif), jamais deduite
+ * du texte. Valeur absente ou inconnue -> blanc, « En veille ». Retour au blanc a
+ * l'envoi d'un message ; un rouge qui arrive : flash d'1 s (sauf mouvement reduit). */
+const Gravite = (() => {
+  const VALEURS = ['blanc', 'vert', 'orange', 'rouge'];
+  const MOTS = { blanc: 'En veille', vert: 'Fait, vérifié', orange: 'Attend ton geste', rouge: 'Coupé' };
+  const ROUGES = { COUPE: 'Coupé', SUSPECT: 'Mail suspect', ALERTE_ADRESSE: 'Adresse à vérifier' };
+  let minuteur = null, courante = { g: 'blanc', motif: null };
+  /* la pastille seule (Contrôle y montre son propre état) */
+  function pastille(g, motif) {
+    if (!VALEURS.includes(g)) { g = 'blanc'; motif = null; }
+    const p = $('gravPastille');
+    if (p) { p.dataset.gravite = g; p.textContent = g === 'rouge' ? (ROUGES[motif] || 'Coupé') : MOTS[g]; }
+  }
+  function poser(g, motif) {
+    if (!VALEURS.includes(g)) { g = 'blanc'; motif = null; }
+    const avant = document.body.dataset.gravite || 'blanc';
+    document.body.dataset.gravite = g;
+    courante = { g, motif: motif || null };
+    if (document.body.dataset.onglet !== 'controle') pastille(g, motif);
+    if (g === 'rouge' && avant !== 'rouge') {
+      let reduit = false; try { reduit = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); } catch (e) { reduit = false; }
+      if (!reduit) { document.body.classList.add('grav-flash'); clearTimeout(minuteur); minuteur = setTimeout(() => document.body.classList.remove('grav-flash'), 1000); }
+    }
+  }
+  function depuis(d) { if (d && typeof d === 'object' && typeof d.gravite === 'string') poser(d.gravite, d.graviteMotif); }
+  const remettre = () => pastille(courante.g, courante.motif);
+  return { poser, depuis, pastille, remettre, VALEURS };
+})();
+const ROUTES_GRAVITE = /^\/api\/(chat|finaliser|confirmer|annuler|reformuler|compenser|mail\/retaper|claude\/retaper|claude\/evenement|gerer\/evenement|elevation\/(faceid|code))$/;
 const Traites = (() => {
   const CLE = 'jarvis_traites', MAX = 300, JOUR = 86400000;
   let memo = {};
@@ -807,6 +934,7 @@ const Ctl = (() => {
     document.body.dataset.ctl = ok;
     if ($('ctlNoyau')) $('ctlNoyau').dataset.etat = ok;
     if ($('ctlEtat')) $('ctlEtat').textContent = MOTS[ok];
+    if (document.body.dataset.onglet === 'controle') Gravite.pastille({ veille: 'blanc', attend: 'orange', coupe: 'rouge' }[ok], 'COUPE');   /* [S128] même pastille */
   }
   function flash() {
     if (flashT) clearTimeout(flashT);
@@ -850,7 +978,8 @@ function montrer(onglet) {
   for (const b of document.querySelectorAll('#onglets [data-onglet]')) { if (b.dataset.onglet === onglet) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
   if (onglet === 'discuter') { const f = $('fil'); if (f) f.scrollTop = f.scrollHeight; }
   if (onglet === 'aujourdhui' && document.body.classList.contains('prive') && Date.now() - Auj.charge > 120000) Auj.charger(false);
-  if (onglet === 'controle') Ctl.demarrer(); else Ctl.arreter();   /* [S115] */
+  if (onglet === 'controle') { Gravite.pastille({ veille: 'blanc', attend: 'orange', coupe: 'rouge' }[document.body.dataset.ctl] || 'blanc', 'COUPE'); Ctl.demarrer(); }
+  else { Ctl.arreter(); Gravite.remettre(); }   /* [S115] [S128] */
   try { window.scrollTo(0, 0); } catch (e) {}
 }
 /* [S102] un flux termine (reponse envoyee, evenement cree, ancienne liste « à gérer ») : UNE ligne,
@@ -1035,6 +1164,7 @@ async function api(chemin, corps, dejaRenouvele, dejaReveille) {
     throw new Error('le serveur ne se réveille pas, réessaie dans une minute');
   }
   const d = await r.json();
+  if (ROUTES_GRAVITE.test(chemin)) Gravite.depuis(d);   /* [S123] la couleur vient du serveur */
   if (d && d.erreur === 'SESSION_INCONNUE' && !dejaRenouvele) {
     if (sid === utilise) { sid = null; await assurerSession(); sessionRenouvelee(); }
     return api(chemin, corps, true, dejaReveille);
@@ -1053,6 +1183,7 @@ function majEtat(d) {
     b.className = 'b' + p.n;
     if ($('pPoint')) $('pPoint').className = 'point b' + p.n;   /* [v4.7] */
     if ($('repartirVert')) $('repartirVert').hidden = p.n !== 1;   /* [S92] pastille rouge : repartir au vert en un toucher */
+    document.body.dataset.plancher = String(p.n);   /* [S123] lu au toucher sur la pastille de gravité */
     const inf = d.influences || [];
     $('pOrigine').textContent = inf.length
       ? p.aide + ' Origine : ' + inf.map(i => i.source).join(', ')
@@ -1216,7 +1347,7 @@ function separerNotes(texte) {
 }
 function tour(qui, texte, moi, riche) {
   const d = document.createElement('div');
-  d.className = 'tour' + (moi ? ' moi' : '');
+  d.className = 'tour' + (moi ? ' moi' : qui === 'Claude' ? ' de-claude' : qui === 'JARVIS' ? ' de-jarvis' : '');   /* [S124] l'auteur vient du code, jamais du texte */
   const sep = riche ? separerNotes(texte) : { corps: texte, notes: [] };
   d.innerHTML = '<div class="qui">' + esc(qui) + '</div><div class="quoi' + (riche ? ' riche' : '') + '">'
     + (riche ? md(sep.corps) : esc(texte)) + sep.notes.map(n => '<p class="note-jarvis">' + esc(n) + '</p>').join('') + '</div>';
@@ -1397,7 +1528,11 @@ function rendreDecision(d) {
       : detailA) + '</div>';
     const blocA = tour('JARVIS', '', false);
     blocA.querySelector('.quoi').outerHTML = hA;
-    if (d.reponse) tour('Claude', d.reponse, false, true);
+    /* [S124] v4.13 : la liste est ECRITE PAR LE SERVEUR -> « JARVIS » ; la partie filtree du modele, a part -> « Claude » */
+    if (typeof d.listeServeur === 'string' && d.listeServeur) {
+      tour('JARVIS', d.listeServeur, false, true);
+      if (typeof d.suiteModele === 'string' && d.suiteModele.trim()) tour('Claude', d.suiteModele, false, true);
+    } else if (d.reponse) tour(echec ? 'JARVIS' : 'Claude', d.reponse, false, true);
     $('fil').scrollTop = $('fil').scrollHeight;
     return;
   }
@@ -1808,6 +1943,7 @@ async function envoyer() {
   const voix = Voix.dicte(); Voix.arreter(); Voix.oublier();
   $('envoyer').disabled = true;
   perimerTout();   /* [S40] le serveur fait de meme a la reception du message */
+  Gravite.poser('blanc');   /* [S123] retour au blanc dès l'envoi */
   tour('Toi', (voix ? '🎤 ' : '') + m, true);
   $('msg').value = ''; $('msg').style.height = '';   /* [v4.7] le champ reprend sa hauteur */
   try {
@@ -1877,7 +2013,9 @@ function afficherGerer(r) {
   if (allege()) {
     /* [S90] sections repliables (avec le nombre) ; un point = une ligne + ses boutons ; la preuve au toucher ;
      * les mails suspects regroupés dans un bloc replié « ⚠ N mails suspects » */
-    const point = (it) => '<div class="' + classe(it) + '"' + cle(it) + '>' + (it.preuve || it.certitude ? '<details class="point"><summary>' + esc(it.texte) + '</summary>' + preuveH(it) + '</details>' : '<p>' + esc(it.texte) + '</p>') + boutonsGerer(it) + '</div>';
+    const point = (it) => it.vide || it.type === 'erreur' || !jetonFil(it.fil) && !Traites.valide(it.cle)
+      ? '<div class="' + classe(it) + '"' + cle(it) + '>' + (it.preuve || it.certitude ? '<details class="point"><summary>' + esc(it.texte) + '</summary>' + preuveH(it) + '</details>' : '<p>' + esc(it.texte) + '</p>') + '</div>'
+      : pointCompact(it);   /* [S127] le même rendu qu'Aujourd'hui */
     h = '<div class="decision ' + couleur + ' gerer"><div class="plan">À gérer — ' + esc(r.date || '') + ' <span class="code">' + esc(r.resume || '') + '</span></div>'
       + r.sections.map(sec => {
         const tous = sec.items || [], suspects = tous.filter(it => it.type === 'suspect'), autres = tous.filter(it => it.type !== 'suspect');
@@ -1885,7 +2023,7 @@ function afficherGerer(r) {
           + (suspects.length ? '<details class="suspects"><summary>⚠ ' + esc(pluriel(suspects.length, 'mail suspect', 'mails suspects')) + ' : ne réponds pas, ne paie rien, ne clique pas</summary>' + suspects.map(point).join('') + '</details>' : '')
           + autres.map(point).join('') + '</details>';
       }).join('')
-      + plie('<p class="pdj-note">' + esc(r.regle || '') + '</p>') + '</div>';
+      + '<p class="gerer-regle">' + esc(LIGNE_REGLES) + '</p>' + '</div>';
   } else h = '<div class="decision ' + couleur + ' gerer"><div class="plan">À gérer — ' + esc(r.date || '') + ' <span class="code">' + esc(r.resume || '') + '</span></div>'
     + r.sections.map(sec => '<div class="gerer-section"><b>' + esc(sec.titre) + '</b>' + (sec.items || []).map(it =>
         '<div class="' + classe(it) + '"' + cle(it) + '><p>' + esc(it.texte) + '</p>' + preuveH(it) + boutonsGerer(it) + '</div>').join('') + '</div>').join('')
@@ -2251,6 +2389,14 @@ document.addEventListener('click', async (ev) => {
   if (t.dataset.voirGerer) { await gererTout(t, false); return; }
   /* [S92] « Repartir au vert » : la session est fermée côté serveur, une neuve s'ouvre ; les souvenirs restent */
   if (t.id === 'repartirVert') { await repartirAuVert(t); return; }
+  if (t.id === 'gravPastille') {   /* [S123] le plancher reste lisible au toucher */
+    const dt = $('gravDetail'); if (!dt) return;
+    const ouvre = dt.hidden;
+    dt.textContent = document.body.dataset.plancher === '1' ? 'Contenu externe lu : une action sensible exigera ta frappe.'
+      : "Rien d'externe lu dans cette conversation.";
+    dt.hidden = !ouvre; t.setAttribute('aria-expanded', ouvre ? 'true' : 'false');
+    return;
+  }
   if (t.id === 'toutOublier') { if (confirm('Effacer tout ce que JARVIS retient de toi ?')) Memoire.toutOublier(); return; }
   if (t.id === 'reset') {
     t.disabled = true;   /* le parcours guide attend que ce bouton se reactive */
@@ -2630,6 +2776,37 @@ function afficherPointDuJour(r) {
  * « à traiter » au plus, chacun avec son action principale, « Fait » et « Plus tard ». Écrit par le
  * serveur (règles), la même lecture que « à gérer » (une seule lecture de la boîte à l'ouverture). */
 const ACTIONS_COURTES = { repondre: 'Répondre', rappel: 'Rappel', creneau: "Vérifier l'agenda" };
+/* [S127] v4.13 point 6 « À GÉRER » ALLÉGÉ (affichage seulement) : le titre, la raison courte
+ * (le « Pourquoi » jusqu'au premier « : »), la preuve ; « + détail » : le « Pourquoi » complet et
+ * la certitude ; 2 boutons visibles au plus, le reste derrière « … ». Mêmes clés, même comportement. */
+function pointCompact(it) {
+  const j = jetonFil(it.fil), k = Traites.valide(it.cle) ? it.cle : '';
+  const suspect = it.suspect === true || it.type === 'suspect';
+  const pourquoi = suspect ? String(it.preuve || '') : '';
+  const raison = pourquoi ? pourquoi.split(' : ')[0].split(' :')[0] : '';
+  const preuve = !suspect && it.preuve ? (it.type === 'agenda' || it.type === 'note' || it.type === 'conflit' ? 'Source : ' + it.preuve : '« ' + it.preuve + ' »') : '';
+  const btn = (a) => a === 'fait' || a === 'plustard'
+    ? '<button type="button" class="traite" data-traite="' + a + '" data-point="' + k + '">' + (a === 'fait' ? 'Fait' : 'Plus tard') + '</button>'
+    : '<button type="button" data-gerer="' + a + '" data-fil="' + esc(j) + '"' + (a === 'creneau' ? ' data-index="' + it.creneau + '"' : '') + '>' + (a === 'voir' ? ACTIONS_GERER.voir : ACTIONS_COURTES[a] || ACTIONS_GERER[a]) + '</button>';
+  const actes = [];
+  if (j) {
+    /* toutes les actions permises (un suspect : « Voir » seulement), la principale d'abord ; « Voir » ensuite */
+    const ordre = it.type === 'engagement' || it.type === 'promesse' ? ['rappel', 'repondre', 'creneau'] : it.type === 'creneau' ? ['creneau', 'repondre', 'rappel'] : ['repondre', 'rappel', 'creneau'];
+    const permises = suspect ? [] : ordre.filter(a => (it.actions || []).includes(a) && (a !== 'creneau' || (Number.isInteger(it.creneau) && it.creneau >= 0)));
+    actes.push(...(permises.length ? [permises[0], 'voir', ...permises.slice(1)] : ['voir']));
+  }
+  const visibles = [actes[0]].filter(Boolean).concat(k ? ['fait'] : []), caches = actes.slice(1).concat(k ? ['plustard'] : []);
+  const det = (pourquoi && pourquoi !== raison) || it.certitude ? '<details class="plie"><summary>détail</summary>' + (pourquoi ? '<p class="preuve">Pourquoi : ' + esc(pourquoi) + '</p>' : '')
+    + (it.certitude && it.type !== 'erreur' ? '<p class="certitude">' + esc(CERTITUDE[it.certitude] || '') + '</p>' : '') + '</details>' : '';
+  return '<div class="gerer-item auj-point' + (suspect || it.type === 'conflit' ? ' fort' : '') + '" data-cle="' + esc(String(it.texte || '').slice(0, 200))
+    + '" data-objet="' + esc(String(it.objet || '').slice(0, 200)) + '"' + (k ? ' data-point="' + k + '"' : '') + '>'
+    + '<p class="point-titre auj-texte">' + esc(it.texte) + '</p>'
+    + (raison ? '<p class="point-raison">' + esc(raison) + '</p>' : '') + (preuve ? '<p class="point-preuve">' + esc(preuve) + '</p>' : '') + det
+    + (visibles.length || caches.length ? '<div class="rang auj-actions">' + visibles.map(btn).join('')
+      + (caches.length ? '<details class="point-plus"><summary aria-label="Plus d\'options">…</summary><div class="rang">' + caches.map(btn).join('') + '</div></details>' : '') + '</div>' : '')
+    + '</div>';
+}
+const LIGNE_REGLES = 'Repéré par des règles, sans IA. Rien ne part sans ton geste.';
 /* [S103] v4.12 LES PROPOSITIONS DE CLAUDE (connecteur) : en tête d'« Aujourd'hui », jamais repliées
  * avant l'action. Un e-mail : adresse à retaper, puis 10 s et Face ID. Un événement : « Créer ». */
 const ETATS_CONNECTEUR = { actif: 'actif', inactif: 'inactif', ferme: 'fermé 1 h', 'erreur-config': 'mal réglé' };
@@ -2708,19 +2885,9 @@ const Auj = {
     h.push('<div class="auj-titre2">À traiter · ' + (points.length ? points.length : r.incomplet ? '?' : '0') + '</div>');
     if (!points.length) h.push('<p class="pdj-vide">' + esc(r.incomplet ? "Lecture incomplète : rien n'est garanti." : 'Rien à traiter.')
       + (r.masques ? ' ' + esc(pluriel(r.masques, 'point marqué', 'points marqués')) + ' « fait » ou « plus tard ».' : '') + '</p>');
-    for (const it of points.slice(0, 5)) {
-      const j = jetonFil(it.fil), k = Traites.valide(it.cle) ? it.cle : '';
-      const suspect = it.suspect === true || it.type === 'suspect';
-      const act = suspect ? null : ['creneau', 'repondre', 'rappel'].find(a => (it.actions || []).includes(a) && (a !== 'creneau' || (Number.isInteger(it.creneau) && it.creneau >= 0)));
-      h.push('<div class="gerer-item auj-point' + (suspect || it.type === 'conflit' ? ' fort' : '') + '" data-cle="' + esc(String(it.texte || '').slice(0, 200))
-        + '" data-objet="' + esc(String(it.objet || '').slice(0, 200)) + '"' + (k ? ' data-point="' + k + '"' : '') + '>'
-        + (j ? '<button type="button" class="auj-texte" data-gerer="voir" data-fil="' + esc(j) + '" title="Voir la conversation">' + esc(it.texte) + '</button>' : '<p>' + esc(it.texte) + '</p>')
-        + '<div class="rang auj-actions">'
-        + (act && j ? '<button type="button" data-gerer="' + act + '" data-fil="' + esc(j) + '"' + (act === 'creneau' ? ' data-index="' + it.creneau + '"' : '') + '>' + ACTIONS_COURTES[act] + '</button>' : '')
-        + (k ? '<button type="button" class="traite" data-traite="fait" data-point="' + k + '">Fait</button><button type="button" class="traite" data-traite="plustard" data-point="' + k + '">Plus tard</button>' : '')
-        + '</div></div>');
-    }
+    for (const it of points.slice(0, 5)) h.push(pointCompact(it));   /* [S127] */
     if (points.length > 5) h.push('<button type="button" class="lien" data-voir-gerer="1">Tout voir (' + points.length + ')</button>');
+    if (points.length) h.push('<p class="gerer-regle">' + esc(LIGNE_REGLES) + '</p>');
     zone.innerHTML = h.join('');
   }
 };

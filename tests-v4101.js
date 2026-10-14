@@ -486,7 +486,8 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
     const itL = gP ? [...gP.querySelectorAll('.gerer-item')].find(x => /Répondre à Luc/.test(x.textContent)) : null, blocS = gP ? gP.querySelector('details.suspects') : null;
     await t('I5', "« à gérer » allégé : sections repliables avec le nombre ; un point = une ligne + ses boutons, la preuve au toucher ; les suspects dans un bloc replié « ⚠ 2 mails suspects »", async () =>
       ({ ok: secs.length === 2 && /Agenda \(1\)/.test(secs[0].querySelector('summary').textContent) && /Mails \(3\)/.test(secs[1].querySelector('summary').textContent)
-          && !!itL && !/Pouvez-vous confirmer/.test(visible(itL)) && /Répondre à Luc/.test(visible(itL)) && !!itL.querySelector(':scope > .gerer-actions [data-gerer="repondre"]')
+          /* [v4.15 S127] inversé par SPEC-v4.13 point 6 (signalé dans PROGRESSION-v4.15) : la preuve est VISIBLE, l'action principale en tête de .auj-actions */
+          && !!itL && /Pouvez-vous confirmer/.test(visible(itL)) && /Répondre à Luc/.test(visible(itL)) && !!itL.querySelector(':scope > .auj-actions > [data-gerer="repondre"]')
           && !!blocS && !blocS.open && /⚠ 2 mails suspects/.test(blocS.querySelector('summary').textContent) && !/URGENT|Colis/.test(visible(gP)),
          info: gP ? visible(gP).slice(0, 150) : 'pas de carte' }));
     const LONG = 'Bonjour,\n' + 'Voici le programme complet du tournoi de samedi avec tous les horaires des matchs. '.repeat(8);
