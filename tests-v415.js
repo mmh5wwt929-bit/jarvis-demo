@@ -423,7 +423,7 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
          info: vL.join(' | ').slice(0, 300) }));
     await t('D3', "domaine de l'expéditeur créé il y a 3 jours → « RÉCENT » (signal) ; un domaine ancien → sa date ; lu par RDAP (annuaire IANA puis registre)", async () =>
       ({ ok: /Domaine de l'expéditeur : banque-alerte-exemple\.com — créé le \d{4}-\d{2}-\d{2} \(il y a 3 j\), RÉCENT/.test(x) && /Domaine de l'expéditeur : club-hand\.fr — créé le 2015-03-02/.test(x)
-          && W.rdap.includes('banque-alerte-exemple.com'), info: JSON.stringify(W.rdap) }));
+          && W.rdap.some(d => d === 'banque-alerte-exemple.com'), info: JSON.stringify(W.rdap) }));
     const AN = require(path.join(DIR, 'jarvis-analyse.js'));
     const seul = AN.analyser({ id: 'x', objet: 'Bonjour', messages: [{ id: '1', de: { nom: 'X', adresse: 'x@neuf-exemple.com' }, texte: 'Bonjour, à bientôt.', date: Date.now() }] },
       { ages: new Map([['neuf-exemple.com', { ok: true, recent: true, jours: 2, creeLe: '2026-10-12' }]]) });
