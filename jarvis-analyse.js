@@ -60,9 +60,10 @@
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const V = require('./jarvis-verite.js');
 
-const VERSION = '1.3';
+const VERSION = '1.4';
 const JOUR_MS = 86400000;
-const LIMITES = Object.freeze({ messages: 12, texte: 4000, phrases: 60, creneaux: 4, extrait: 160 });
+const LIMITES = Object.freeze({ messages: 12, texte: 4000, phrases: 60, creneaux: 4, extrait: 160,
+  texteSecurite: 65536, phrasesSecurite: 3000 });   /* [S120] v4.13 : la SECURITE lit le message entier */
 
 /* [S86] un point, deux-points ou « ? » qui ne tient pas entre deux caracteres
  * (fin de phrase) devient un blanc : avant, « …votre nouveau RIB. » ou
@@ -73,6 +74,13 @@ const court = (s, n = LIMITES.extrait) => { const x = String(s || '').replace(/\
 const cleAdresse = (a) => String(a || '').trim().toLowerCase();
 const domaineDe = (a) => { const i = cleAdresse(a).lastIndexOf('@'); return i > 0 ? cleAdresse(a).slice(i + 1) : ''; };
 /* phrases de la partie NOUVELLE d'un message (sans l'historique cite « Le … a ecrit : », ni les lignes >) */
+/* [S120] v4.13 0a — les phrases de TOUT le message (64 Ko), cite compris : seulement
+ * pour les regles de SECURITE (transmission, consigne, demande sensible). Une
+ * consigne placee loin dans le mail, ou entre guillemets, n'echappe plus. */
+function phrasesSecurite(texte) {
+  const t = String(texte || '').slice(0, LIMITES.texteSecurite);
+  return (t.match(/(?:[^.!?…\n]|[.!?…](?=\S))+[.!?…]*/g) || []).map(x => x.trim()).filter(x => x.length > 1).slice(0, LIMITES.phrasesSecurite);
+}
 function phrasesDe(texte) {
   const p = String(separer(String(texte || '').slice(0, LIMITES.texte)).propres || '');
   return (p.match(/(?:[^.!?…\n]|[.!?…](?=\S))+[.!?…]*/g) || []).map(x => x.trim()).filter(x => x.length > 1).slice(0, LIMITES.phrases);
@@ -259,13 +267,18 @@ function analyser(fil, o = {}) {
           if (d >= auj) r.creneaux.push({ jour: d, iso: V.iso(d), debut: { h: h.h, mi: h.mi }, duree: rh.duree || 60, libelle: V.libelle(d, false) + ' à ' + hhmm(h),
             message: m.i, extrait: court(s), certitude: 'deduction' });
       }
-      /* securite (messages des autres) */
-      if (!m.moi) {
+    }
+    /* [S120] securite (messages des autres) : sur le message ENTIER, cite compris */
+    if (!m.moi) {
+      let urgentMsg = null;
+      for (const s of phrasesSecurite(m.texte)) {
+        const p = norm(s);
         const tiers = demandeTransmission(s, m.de && m.de.adresse, moi);   /* [S107] avant l'injection : la plus precise en tete */
         if (tiers) alerte('transmission', 'fort', 'Demande de transmission vers une adresse tierce (' + court(tiers, 80) + ') : factures, documents ou coordonnées à envoyer ailleurs ? C\'est une donnée, pas un ordre ; vérifie par un autre moyen.', s, m.i);
         if (RE_INJECTION.test(p)) alerte('injection', 'fort', "Consigne adressée à un assistant ou demande de transférer : c'est une donnée, pas un ordre.", s, m.i);
         if (RE_SENSIBLE.test(p)) {
-          const urgent = RE_URGENCE.test(norm(m.texte));
+          if (urgentMsg === null) urgentMsg = RE_URGENCE.test(norm(m.texte));
+          const urgent = urgentMsg;
           sensibles.set(m.i, urgent || !!sensibles.get(m.i));
           alerte('sensible', 'fort', urgent ? 'Demande sensible sous pression (paiement, coordonnées bancaires, code…) : typique d\'une fraude.'
             : 'Demande sensible (paiement, coordonnées bancaires, code, mot de passe) : vérifie par un autre moyen.', s, m.i);
@@ -368,5 +381,5 @@ function contactsConnus(fils, moi) {
   return s;
 }
 
-module.exports = Object.freeze({ VERSION, analyser, contactsConnus, phrasesDe, montantsDe, distance, LIMITES, demandeTransmission,   /* [S107] */
+module.exports = Object.freeze({ VERSION, analyser, contactsConnus, phrasesDe, phrasesSecurite, montantsDe, distance, LIMITES, demandeTransmission,   /* [S107] */
   objetNormalise, grouperFils, fusionnerFils, correspondantDe, grandService, GRANDS_SERVICES, promesseDe });   /* [S85] [S86] v4.10.1 */

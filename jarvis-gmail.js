@@ -46,17 +46,22 @@
  *  - 5 messages au plus de la boite de reception (recents ou non lus), texte
  *    nettoye et borne (1 200 caracteres par message) : un CONTENU EXTERNE,
  *    remis au serveur qui le declare a la couche avant tout modele.
+ *  - 1.5 (v4.13, [S120]) : le texte ENTIER (64 Ko) est garde a part pour les
+ *    REGLES (pourAnalyse) ; le modele, la page et le connecteur n'ont que
+ *    l'extrait. Vu le 8 oct : une consigne placee apres 1 200 caracteres
+ *    passait en « rien de suspect repere par les regles ».
  * ========================================================================== */
 const https = require('https');
 const crypto = require('crypto');
 const { URL } = require('url');
 
-const VERSION = '1.4';
+const VERSION = '1.5';
 const LIMITES_MAIL = Object.freeze({ delaiMs: 12000, maxOctets: 1024 * 1024, permisMs: 30 * 1000,
   objetMax: 150, texteMax: 3000, autorisesMax: 10, plafondDefaut: 5, plafondMax: 20,
   lusMax: 5, extraitMax: 1200, diagnosticMs: 20000, lectureTotaleMs: 20000,
   filsMax: 15, messagesParFil: 10, texteFil: 2500, joursFils: 14,   /* [S80] v4.10 les conversations */
-  lecturesParallele: 4 });   /* [S91] v4.10.1 */
+  lecturesParallele: 4,   /* [S91] v4.10.1 */
+  analyseMax: 65536 });   /* [S120] v4.13 0a : les REGLES lisent le mail entier (64 Ko), le modele l'extrait */
 const HOTES = new Set(['oauth2.googleapis.com', 'gmail.googleapis.com']);
 const PORTEE_ENVOI = 'https://www.googleapis.com/auth/gmail.send';
 const PORTEE_LECTURE = 'https://www.googleapis.com/auth/gmail.readonly';
@@ -269,6 +274,28 @@ function texteDe(payload) {
   const brut = plain !== null ? plain : html !== null ? html.replace(/<(script|style)[\s\S]*?<\/\1>/gi, ' ').replace(/<br\s*\/?>|<\/p>/gi, '\n')
     .replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'") : '';
   return { texte: brut, piecesJointes: pj };
+}
+/* [S120] v4.13 0a — le texte ENTIER (64 Ko au plus) pour les REGLES seulement.
+ * Range a cote du mail, jamais DANS le mail : ni JSON.stringify, ni le modele,
+ * ni la page, ni le connecteur ne peuvent l'emporter. Retrouve par
+ * l'identifiant Gmail du message (une copie { ...m } le garde, une conversation
+ * fusionnee aussi), 400 messages au plus, 30 min. Seul pourAnalyse(m) le rend
+ * (au serveur, pour jarvis-analyse et le magasin « adresse vue »).
+ * incomplet : le mail depasse 64 Ko, sa fin n'est pas lue par les regles. */
+const ANALYSE = new Map();
+const ANALYSE_MAX = 400, ANALYSE_MS = 30 * 60 * 1000;
+function retenirAnalyse(objet, brutComplet) {
+  const c = nettoyer(brutComplet, LIMITES_MAIL.analyseMax + 1), id = String(objet && objet.id || '');
+  if (!id) return objet;
+  ANALYSE.delete(id);
+  ANALYSE.set(id, Object.freeze({ texte: c.slice(0, LIMITES_MAIL.analyseMax), incomplet: c.length > LIMITES_MAIL.analyseMax, ts: Date.now() }));
+  while (ANALYSE.size > ANALYSE_MAX) ANALYSE.delete(ANALYSE.keys().next().value);
+  return objet;
+}
+function pourAnalyse(m) {
+  const a = m && typeof m === 'object' && m.id != null ? ANALYSE.get(String(m.id)) : null;
+  if (!a || Date.now() - a.ts > ANALYSE_MS) return null;
+  return a;
 }
 const entete = (m, nom) => { const h = ((m.payload || {}).headers || []).find(x => x && String(x.name).toLowerCase() === nom); return h ? String(h.value || '') : ''; };
 
@@ -490,10 +517,10 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
         if (!m.ok || m.status !== 200 || !m.json) { mails.push(Object.freeze({ id, illisible: true, code: m.ok ? erreurGmail(m.status, m.json) : m.code })); continue; }
         const t = texteDe(m.json.payload);
         const brut = nettoyer(t.texte, L.extraitMax + 1);
-        mails.push(Object.freeze({ id, de: nettoyer(entete(m.json, 'from'), 150), objet: nettoyer(entete(m.json, 'subject'), 200), date: nettoyer(entete(m.json, 'date'), 60),
+        mails.push(retenirAnalyse(Object.freeze({ id, de: nettoyer(entete(m.json, 'from'), 150), objet: nettoyer(entete(m.json, 'subject'), 200), date: nettoyer(entete(m.json, 'date'), 60),
           texte: brut.slice(0, L.extraitMax), coupe: brut.length > L.extraitMax, piecesJointes: t.piecesJointes,
           nonLu: Array.isArray(m.json.labelIds) && m.json.labelIds.includes('UNREAD'),
-          repondreA: (adressesDe(entete(m.json, 'reply-to'))[0] || {}).adresse || null, cc: adressesDe(entete(m.json, 'cc')).map(x => x.adresse).slice(0, 20) }));
+          repondreA: (adressesDe(entete(m.json, 'reply-to'))[0] || {}).adresse || null, cc: adressesDe(entete(m.json, 'cc')).map(x => x.adresse).slice(0, 20) }), t.texte));
       }
       return { ok: true, filtre: permis.filtre, mails: Object.freeze(mails), tronque: typeof l.json.nextPageToken === 'string' };
     },
@@ -611,15 +638,15 @@ function convertirFil(id, json, moi) {
   const messages = json.messages.slice().sort((a, b) => (Number(a.internalDate) || 0) - (Number(b.internalDate) || 0)).slice(-LIMITES_MAIL.messagesParFil).map((m) => {
     const de = adressesDe(entete(m, 'from'))[0] || { nom: '', adresse: '' };
     const t = texteDe(m.payload);
-    const brut = nettoyer(partieNouvelle(t.texte), LIMITES_MAIL.texteFil + 1);
+    const nouvelle = partieNouvelle(t.texte), brut = nettoyer(nouvelle, LIMITES_MAIL.texteFil + 1);
     const mid = entete(m, 'message-id').trim(), labels = Array.isArray(m.labelIds) ? m.labelIds : [];
-    return Object.freeze({ id: String(m.id || '').slice(0, 40), de: Object.freeze({ nom: nettoyer(de.nom, 80), adresse: de.adresse }),
+    return retenirAnalyse(Object.freeze({ id: String(m.id || '').slice(0, 40), de: Object.freeze({ nom: nettoyer(de.nom, 80), adresse: de.adresse }),
       a: adressesDe(entete(m, 'to')).map(x => x.adresse), cc: adressesDe(entete(m, 'cc')).map(x => x.adresse),
       repondreA: (adressesDe(entete(m, 'reply-to'))[0] || {}).adresse || null, date: Number(m.internalDate) || 0,
       objet: nettoyer(decoderEntete(entete(m, 'subject')), 200), texte: brut.slice(0, LIMITES_MAIL.texteFil), coupe: brut.length > LIMITES_MAIL.texteFil,
       piecesJointes: Object.freeze(piecesDe(m.payload)), messageId: RE_MESSAGE_ID.test(mid) ? mid : null,
       references: referencesDe(m), auth: authDe(m),   /* [S85] [S86] */
-      moi: labels.includes('SENT') || (!!m0 && de.adresse === m0), nonLu: labels.includes('UNREAD') });
+      moi: labels.includes('SENT') || (!!m0 && de.adresse === m0), nonLu: labels.includes('UNREAD') }), nouvelle);
   });
   return Object.freeze({ id, objet: messages.length ? messages[0].objet : '', messages: Object.freeze(messages) });
 }
@@ -627,4 +654,5 @@ function convertirFil(id, json, moi) {
 module.exports = Object.freeze({ VERSION, creerMail, adresseValide, liensDe, verifierContenu, messageBrut, motEncode, lireClient, lireAutorises, valeurPropre, mailto,
   verifierReponse, adressesDe, decoderEntete, partieNouvelle, convertirFil,   /* [S80] [S81] v4.10 */
   authDe,   /* [S86] v4.10.1 */
+  pourAnalyse,   /* [S120] v4.13 0a */
   PORTEE_ENVOI, PORTEE_LECTURE, LIMITES_MAIL });

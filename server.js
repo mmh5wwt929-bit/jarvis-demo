@@ -1485,7 +1485,8 @@ function noterAdressesLues(s, texte) {
  * Instance privee : un magasin pour l'instance (une seule personne). Demo
  * publique : un par session (jamais l'extrait d'un visiteur chez un autre).
  * ======================================================================== */
-const TEXTE_ALERTE = "Cette adresse vient d'un contenu que tu as reçu, pas de toi. Vérifie par téléphone, à un numéro que tu connais déjà, avant de l'utiliser.";
+/* [S121] v4.13 0b : l'alerte ne nait QUE si la personne a tape l'adresse : « pas de toi » etait faux */
+const texteAlerte = (origine) => "Tu l'as tapée, mais elle apparaît aussi dans un contenu reçu (" + origine + "). Si elle vient de là, vérifie par téléphone, à un numéro que tu connais déjà.";
 const LIMITES_VUES = Object.freeze({ max: 500, maxDemo: 50, dureeMs: 14 * 86400000, extrait: 160 });   /* demo : 50 par session (200 sessions) */
 const VUES_INSTANCE = new Map();
 const magasinVues = (s) => CLE_ACCES ? VUES_INSTANCE : s ? (s.vues || (s.vues = new Map())) : null;
@@ -1501,7 +1502,7 @@ function purgerVues(m) {
 function noterVues(s, texte, o) {
   const m = magasinVues(s);
   if (!m || !texte) return 0;
-  const brut = String(texte).slice(0, 20000).replace(/‹/g, '<').replace(/›/g, '>');
+  const brut = String(texte).slice(0, 70000).replace(/‹/g, '<').replace(/›/g, '>');   /* [S120] 64 Ko : le mail entier */
   let n = 0;
   for (const x of brut.matchAll(/[^\s<>()«»"';,]+@[^\s<>()«»"';,]+/g)) {
     const a = x[0].replace(/[.:!?]+$/, '');
@@ -1520,13 +1521,13 @@ function noterVues(s, texte, o) {
   return n;
 }
 /* un e-mail lu : en-tetes De / Repondre a / Cc, puis le corps (l'extrait vient du bon endroit) */
-function noterVuesMail(s, m, suspect, par) {
-  const o = { source: 'mail', libelle: 'mail « ' + lisible(m.objet || '', 80) + ' »' + (par ? ' ' + par : ''), dateMs: Date.parse(m.date) || Number(m.date) || Date.now(), suspect };
+function noterVuesMail(s, m, suspect, par, objet) {
+  const o = { source: 'mail', libelle: 'mail « ' + lisible(objet || m.objet || '', 80) + ' »' + (par ? ' ' + par : ''), dateMs: Date.parse(m.date) || Number(m.date) || Date.now(), suspect };
   const de = typeof m.de === 'string' ? m.de : m.de ? (m.de.nom ? m.de.nom + ' ' : '') + '<' + m.de.adresse + '>' : '';
   noterVues(s, 'De : ' + de, o);
   if (m.repondreA) noterVues(s, 'Répondre à : ' + m.repondreA, o);
   if (Array.isArray(m.cc) && m.cc.length) noterVues(s, 'Cc : ' + m.cc.join(', '), o);
-  noterVues(s, m.texte, o);
+  noterVues(s, reglesDe(m).texte, o);   /* [S120] le corps ENTIER : une adresse apres 1 200 caracteres entre aussi au magasin */
 }
 /* l'alerte d'une adresse TAPEE : null, ou la carte (l'empreinte pour la trace, l'extrait pour la page seulement) */
 function alerteAdresse(s, adresse) {
@@ -1536,10 +1537,19 @@ function alerteAdresse(s, adresse) {
   const v = m.get(empreinteAdresse(adresse));
   if (!v) return null;
   const quand = V.libelle(V.local(v.dateMs, FUSEAU).jour, false);
+  const origine = (v.libelle || v.source) + ' du ' + quand + (v.suspect ? ', suspect' : '');
   return { empreinte: v.h.slice(0, 16), adresse: v.adresse, extrait: v.extrait, source: v.source, libelle: v.libelle, date: quand, suspect: v.suspect,
-    origine: (v.libelle || v.source) + ' du ' + quand + (v.suspect ? ', suspect' : ''), texte: TEXTE_ALERTE };
+    origine, texte: texteAlerte(origine) };
 }
-const suspectMail = (m) => { try { return AN.analyser({ id: m.id, objet: m.objet, messages: [{ id: m.id, de: expediteurDe(m.de), texte: m.texte, date: Date.parse(m.date) || Date.now() }] }, { zone: FUSEAU }).suspect; } catch { return false; } };
+/* [S120] v4.13 0a — ce que lisent les REGLES : le mail ENTIER (64 Ko) garde a part par
+ * le module Gmail ; l'extrait seulement si le module n'a rien garde. Le modele, la
+ * page, le connecteur et les traces n'ont jamais que l'extrait (m.texte). */
+const reglesDe = (m) => GM.pourAnalyse(m) || { texte: String((m && m.texte) || ''), incomplet: false, extraitSeul: true };
+const pourRegles = (m) => ({ ...m, texte: reglesDe(m).texte });
+const filPourRegles = (f) => f && Array.isArray(f.messages) ? { ...f, messages: f.messages.map(pourRegles) } : f;
+const filIncomplet = (f) => !!(f && Array.isArray(f.messages) && f.messages.some(m => reglesDe(m).incomplet));
+const analyseMail = (m) => AN.analyser({ id: m.id, objet: m.objet, messages: [{ id: m.id, de: expediteurDe(m.de), texte: reglesDe(m).texte, date: Date.parse(m.date) || Date.now() }] }, { zone: FUSEAU });
+const suspectMail = (m) => { try { return analyseMail(m).suspect; } catch { return false; } };
 const noterVuesAgenda = (s, evenements) => { for (const e of evenements || []) noterVues(s, [e.titre, e.lieu, e.description].filter(Boolean).join(' · '),
   { source: 'agenda', libelle: 'agenda « ' + lisible(e.titre || '', 60) + ' »', dateMs: Date.parse(e.debut) || Date.now() }); };
 
@@ -1600,7 +1610,8 @@ async function lireMails(s, sessionId, texte, plan, avant) {
   if (net) memoriser(s, sessionId, texte, net.texte, 'modele');
   return sortie({ decide: 'AUTORISE', etape: 'COMPLET', motif: rep.ok ? null : rep.erreur, reponse: net ? net.texte : null, retirees: net ? net.retirees.length : 0,
     usage: rep.usage, transactionId: exe.transactionId || null,
-    boite: { filtre, lus: lu.mails.length, tronque: !!lu.tronque, nonLus: lu.mails.filter(m => m.nonLu).length, suspects: lu.mails.filter(m => /(transf[eé]r|envoie|paie|payer|virement|mot de passe|clique|ignore)/i.test(m.texte + ' ' + m.objet)).length } });
+    boite: { filtre, lus: lu.mails.length, tronque: !!lu.tronque, nonLus: lu.mails.filter(m => m.nonLu).length, suspects: lu.mails.filter(m => /(transf[eé]r|envoie|paie|payer|virement|mot de passe|clique|ignore)/i.test(m.texte + ' ' + m.objet)).length,
+      suspectsRegles: lu.mails.filter(m => !m.illisible && suspectMail(m)).length, incomplets: lu.mails.filter(m => !m.illisible && reglesDe(m).incomplet).length } });
 }
 
 /* ==========================================================================
@@ -2214,8 +2225,8 @@ async function envoiMailReel(s, sessionId, texte, plan, avant, o = {}) {
       return preparerMailto(s, sessionId, texte, plan, avant, o, { horsListe: true });
     const al = alerteAdresse(s, cible);   /* [S104] la carte d'alerte en plus du refus */
     if (al) noterVerdict(s, { decide: 'REFUSE', action: 'SEND', target: 'adresse:' + al.empreinte, motif: 'ALERTE_ADRESSE_VUE' });
-    return dire("« " + lisible(cible, 80) + " » n'est pas dans ta liste d'adresses autorisées (JARVIS_MAIL_AUTORISES) : rien n'est préparé, et Face ID n'y changerait rien.",
-      { decide: 'REFUSE', etape: 'MAIL_LISTE', motif: 'HORS_LISTE', ...(al ? { alerte: al } : {}) });
+    return dire(al ? "Pas dans ta liste : rien n'est préparé." : "« " + lisible(cible, 80) + " » n'est pas dans ta liste d'adresses autorisées (JARVIS_MAIL_AUTORISES) : rien n'est préparé, et Face ID n'y changerait rien.",
+      { decide: 'REFUSE', etape: 'MAIL_LISTE', motif: 'HORS_LISTE', ...(al ? { alerte: al } : {}) });   /* [S121] l'alerte explique, une fois */
   }
 
   /* 3. l'adresse a ete retapee : la transaction, liee au contenu, Face ID exige */
@@ -2283,7 +2294,7 @@ async function envoiMailReel(s, sessionId, texte, plan, avant, o = {}) {
   while (s.brouillons.size > 4) s.brouillons.delete(s.brouillons.keys().next().value);
   return base({ decide: 'CONFIRMATION_REQUISE', etape: 'MAIL_RETAPER', motif: null, classe: 'IRREVERSIBLE', reponse,
     aRetaper: { jeton, a: v.brouillon.a, objet: v.brouillon.objet, texte: v.brouillon.texte, redigePar: b.redigePar, restants: MAIL_ENVOI.restants(),
-      expireDansMs: LIMITES.brouillonMs, avertissements: b.avertissements.concat(s.adressesLues.has(cleMail(cible)) ? [ALERTE_ADRESSE_LUE] : []),
+      expireDansMs: LIMITES.brouillonMs, avertissements: b.avertissements,   /* [S122] v4.13 0c : la cible est dans la liste : jamais d'avertissement « adresse lue » */
       mailto: GM.mailto(v.brouillon) } });   /* [S75] ou l'envoyer soi-meme, depuis Mail */
 }
 
@@ -2355,7 +2366,8 @@ async function preparerMailto(s, sessionId, texte, plan, avant, o = {}, extra = 
   const al = alerteAdresse(s, cible);
   const horsListe = extra.horsListe ? "« " + lisible(cible, 80) + " » n'est pas dans ta liste d'adresses autorisées : pas d'envoi par le compte d'essai (Face ID n'y changerait rien). " : '';
   if (al) noterVerdict(s, { decide: 'SANS_OBJET', action: 'SEND', target: 'adresse:' + al.empreinte, motif: 'ALERTE_ADRESSE_VUE' });
-  const reponseAlerte = () => dire(horsListe + "Alerte : cette adresse apparaît dans un contenu reçu (" + al.origine + "), pas dans une de tes demandes. Vérifie-la par un autre moyen (téléphone, adresse déjà connue) : rien n'est préparé.",
+  /* [S121] v4.13 0b : l'explication est sur la carte d'alerte, dite UNE fois */
+  const reponseAlerte = () => dire(extra.horsListe ? "Pas dans ta liste : rien n'est préparé." : "Rien n'est préparé : vérifie d'abord l'adresse (voir l'alerte).",
     { decide: 'SANS_OBJET', etape: 'MAILTO', motif: 'ALERTE_ADRESSE_VUE', alerte: al });
   /* [S110] une piece jointe demandee : dit avant toute redaction (l'alerte d'abord) ; le lien seulement si l'adresse passe la liste */
   if (demandePieceJointe(o.contenuReponse || texte)) {
@@ -2369,7 +2381,8 @@ async function preparerMailto(s, sessionId, texte, plan, avant, o = {}, extra = 
   if (b.refus) return dire(horsListe + (horsListe ? "Je peux le préparer pour « Ouvrir dans Mail » (c'est toi qui l'envoies). " : '') + b.refus.reponse, { decide: 'SANS_OBJET', etape: 'MAILTO', motif: b.refus.motif });
   const lien = GM.mailto(b.brouillon);
   if (!lien) return dire("Je n'ai pas pu préparer le lien vers Mail : rien n'est préparé.", { decide: 'SANS_OBJET', etape: 'MAILTO', motif: 'LIEN_MAILTO_IMPOSSIBLE' });
-  const avertissements = (s.adressesLues.has(cleMail(cible)) ? [ALERTE_ADRESSE_LUE] : []).concat(b.avertissements);
+  /* [S122] v4.13 0c : jamais pour une adresse de la liste (fatigue d'alarme) */
+  const avertissements = (s.adressesLues.has(cleMail(cible)) && !(MAIL_ENVOI && MAIL_ENVOI.autorise(cible)) ? [ALERTE_ADRESSE_LUE] : []).concat(b.avertissements);
   let jetonAlerte = null;
   if (al) {
     jetonAlerte = 'al_' + crypto.randomUUID();
@@ -2548,8 +2561,8 @@ async function lireConversations(s, cible) {
   if (!lu.ok) return { ok: false, code: lu.code, transactionId: exe.transactionId };
   for (const f of lu.fils) if (!f.illisible) for (const m of f.messages) if (!m.moi) noterAdressesLues(s, m.de.adresse + ' ' + (m.repondreA || ''));
   for (const f of lu.fils) if (!f.illisible) {   /* [S104] */
-    let sus = false; try { sus = AN.analyser(f, { zone: FUSEAU, moi: lu.moi }).suspect; } catch { sus = false; }
-    for (const m of f.messages) if (!m.moi) noterVuesMail(s, { ...m, objet: f.objet }, sus);
+    let sus = false; try { sus = AN.analyser(filPourRegles(f), { zone: FUSEAU, moi: lu.moi }).suspect; } catch { sus = false; }
+    for (const m of f.messages) if (!m.moi) noterVuesMail(s, m, sus, null, f.objet);
   }
   noterVerdict(s, { decide: 'AUTORISE', action: 'READ', target: 'MAIL', motif: null });
   return { ok: true, moi: lu.moi, fils: lu.fils.filter(f => !f.illisible), illisibles: lu.fils.filter(f => f.illisible).length, tronque: lu.tronque, transactionId: exe.transactionId };
@@ -2629,7 +2642,7 @@ async function mailsAGerer(s, rg) {
     const connus = AN.contactsConnus(lu.fils, lu.moi);
     /* [S85] les fils d'une meme conversation (objet normalise + correspondant) : analyses ENSEMBLE */
     for (const f of AN.grouperFils(lu.fils, lu.moi)) {
-      const an = AN.analyser(f, { moi: lu.moi, maintenant: now, zone: FUSEAU, contactsConnus: connus, relanceJours: rg.relanceJours || undefined });
+      const an = AN.analyser(filPourRegles(f), { moi: lu.moi, maintenant: now, zone: FUSEAU, contactsConnus: connus, relanceJours: rg.relanceJours || undefined });   /* [S120] */
       if (!an.aGerer.length) continue;
       const jeton = retenirFil(s, f, an);
       /* conversation suspecte : seulement l'alerte (ni echeance ni montant tires d'un mail piege) ; [S89] ni repondre ni rappel */
@@ -2700,7 +2713,7 @@ async function afficherFil(s, jeton) {
   const lu = await lireGroupe(s, f0);   /* [S85] une lecture gouvernee par fil */
   if (!lu.ok) return { ok: false, code: lu.code || 'FIL_INTROUVABLE', message: 'Conversation non lue : ' + erreurLecture(lu.code || 'FIL_INTROUVABLE') + '.' };
   const f = lu.groupe;
-  const an = AN.analyser(f, { moi: lu.moi, maintenant: Date.now(), zone: FUSEAU });
+  const an = AN.analyser(filPourRegles(f), { moi: lu.moi, maintenant: Date.now(), zone: FUSEAU });   /* [S120] */
   f0.suspect = an.suspect; f0.creneaux = an.creneaux;
   /* les messages montres sont ceux que l'analyse a lus (« message 2 » = le 2e affiche) */
   const vus = f.messages.slice(-AN.LIMITES.messages);
@@ -2732,7 +2745,7 @@ async function preparerReponse(s, sessionId, jeton, consigne, o = {}) {
   /* [S85] toute la conversation (chaque fil relu, gouverne) ; un fil manquant : rien n'est prepare */
   const lu = await lireGroupe(s, f0);
   if (!lu.ok || !lu.complet) return refus(lu.code || 'FIL_INCOMPLET', 'Conversation non relue ' + (lu.ok ? 'en entier' : ': ' + erreurLecture(lu.code || 'FIL_INTROUVABLE')) + ". Rien n'est préparé.");
-  const f = lu.groupe, an = AN.analyser(f, { moi: lu.moi, maintenant: Date.now(), zone: FUSEAU });
+  const f = lu.groupe, an = AN.analyser(filPourRegles(f), { moi: lu.moi, maintenant: Date.now(), zone: FUSEAU });   /* [S120] */
   /* la reponse va au DERNIER message d'un autre de la conversation, dans SON fil */
   const vise = f.messages.slice().reverse().find(m => !m.moi && m.messageId && adresseValide(m.de.adresse));
   if (!vise) return refus('PERSONNE_A_QUI_REPONDRE', "Dans cette conversation, aucun message d'un autre à qui répondre (ou identifiant de message absent). Rien n'est préparé.");
@@ -2988,13 +3001,20 @@ async function mcpLireMails(args) {
   for (const [i, m] of lu.mails.entries()) {
     g.ingerer({ origine: 'CONTENT_DERIVED', source: 'mail:' + m.id, resume: resumeMail(m) });   /* G1, avant que Claude le voie */
     if (m.illisible) { blocs.push('[' + (i + 1) + '] (illisible : ' + propre(m.code, 30) + ')'); continue; }
-    const de = expediteurDe(m.de);
-    const an = AN.analyser({ id: m.id, objet: m.objet, messages: [{ id: m.id, de, texte: m.texte, date: Date.parse(m.date) || Date.now() }] }, { zone: FUSEAU });
+    const de = expediteurDe(m.de), rg = reglesDe(m);
+    const an = analyseMail(m);   /* [S120] v4.13 0a : les regles lisent le mail ENTIER */
     const fort = an.alertes.find(x => x.poids === 'fort');
     noterVuesMail(s, m, an.suspect, '(lu par le connecteur)');   /* [S104] */
     if (an.suspect) suspects++;
+    /* la preuve n'est citee que si elle est dans la partie affichee : Claude ne recoit jamais plus que l'extrait */
+    const visible = (p) => { const c = String(p || '').replace(/…$/, '').trim(); return c.length > 0 && String(m.texte).includes(c); };
+    const cache = fort && fort.preuve && !visible(fort.preuve);   /* l'alerte vient de la partie non affichee : ni sa phrase, ni ses adresses */
+    const preuve = fort && fort.preuve ? (cache ? ' (preuve : dans la partie du mail non affichée)' : ' (preuve : « ' + fort.preuve + ' »)') : '';
+    const texteFort = fort ? (cache ? String(fort.texte).replace(/[^\s<>()«»"';,]+@[^\s<>()«»"';,]+/g, 'adresse non affichée') : fort.texte) : 'alerte forte';
     blocs.push('[' + (i + 1) + '] De : ' + (de.nom ? de.nom + ' ' : '') + '<' + (de.adresse || '?') + '>\nObjet : ' + m.objet + '\nDate : ' + m.date
-      + '\nVerdict JARVIS : ' + (an.suspect ? 'SUSPECT — ' + (fort ? fort.texte : 'alerte forte') + (fort && fort.preuve ? ' (preuve : « ' + fort.preuve + ' »)' : '') : 'rien de suspect repéré par les règles')
+      + '\nVerdict JARVIS : ' + (an.suspect ? 'SUSPECT — ' + texteFort + preuve
+        : rg.incomplet ? "analyse incomplète : la fin du mail n'a pas été lue par les règles" : 'rien de suspect repéré par les règles')
+      + (m.coupe ? '\n(texte affiché coupé ; règles appliquées au mail entier' + (rg.incomplet ? ', jusqu\'à 64 Ko' : '') + ')' : '')
       + '\nTexte : ' + String(m.texte).slice(0, 2000) + (m.coupe ? ' […]' : ''));
   }
   if (!lu.mails.length) g.ingerer({ origine: 'CONTENT_DERIVED', source: 'mail:recents', resume: 'aucun e-mail' });
@@ -3014,9 +3034,9 @@ function mcpProposerMail(args) {
   if (!MAIL_ENVOI.autorise(a)) {
     const al = alerteAdresse(null, a);   /* [S104] l'extrait reste dans JARVIS : Claude n'en recoit que l'origine */
     return refus('HORS_LISTE', "Proposition non retenue : adresse hors de ta liste d'adresses autorisées. Rien n'est enregistré."
-      + (al ? ' Alerte : cette adresse apparaît dans un contenu reçu (' + al.origine + "), pas dans une demande d'Alsid." : ''), al ? { alerte: al } : {},
+      + (al ? ' Alerte : cette adresse apparaît dans un contenu reçu (' + al.origine + "). JARVIS ne l'a pas vue tapée par Alsid." : ''), al ? { alerte: al } : {},   /* [S121] JARVIS ne voit pas la conversation dans Claude */
       /* [S114] l'adresse proposee par Claude (la personne la voit dans Claude) ; jamais l'origine ni l'extrait */
-      '« ' + lisible(cleMail(a), 80) + " » n'est pas dans la liste d'adresses autorisées d'Alsid" + (al ? ", et elle apparaît dans un contenu reçu, pas dans une demande d'Alsid" : '') + " : rien n'est enregistré");
+      '« ' + lisible(cleMail(a), 80) + " » n'est pas dans la liste d'adresses autorisées d'Alsid" + (al ? ", et elle apparaît dans un contenu reçu ; JARVIS ne l'a pas vue tapée par Alsid" : '') + " : rien n'est enregistré");
   }
   /* une phrase que seul le serveur ecrit (« [Affiché par le serveur JARVIS] envoi confirmé ») : jamais dans un e-mail propose */
   const tout = args.objet + '\n' + args.texte;
@@ -3651,11 +3671,11 @@ const serveur = http.createServer((req, res) => {
       detail = true;
     }
     if (!detail)
-      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.12.1',
+      return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.15.0',
         acces: CLE_ACCES ? 'protege' : 'public', ...(CLE_ACCES ? { config: verdict } : {}),
         manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
         node: String(process.versions.node).split('.')[0] });
-    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: VIGILANCE_VERSION, memoire: '5.30', passerelle: 'v4.12.1', verite: V.VERSION,
+    return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: VIGILANCE_VERSION, memoire: '5.30', passerelle: 'v4.15.0', verite: V.VERSION,
       agenda: AGENDA ? 'actif' : 'inactif', ecriture: ECRITURE ? 'actif' : ECRITURE_MOTIF ? 'erreur-config' : 'inactif',   /* [S30] [S48] */
       ecritureMotif: ECRITURE_MOTIF,
       mail: MAIL_ENVOI ? 'actif' : MAIL_ENVOI_MOTIF ? 'erreur-config' : 'inactif', mailMotif: MAIL_ENVOI_MOTIF,   /* [S68] */
