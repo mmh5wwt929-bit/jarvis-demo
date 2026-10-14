@@ -46,6 +46,8 @@
  *  - 5 messages au plus de la boite de reception (recents ou non lus), texte
  *    nettoye et borne (1 200 caracteres par message) : un CONTENU EXTERNE,
  *    remis au serveur qui le declare a la couche avant tout modele.
+ * 1.6 (v4.14) : [S130] revoquer() : « tout couper », jetons revoques chez
+ *   Google puis verifies ; le module refuse tout ensuite (COUPE).
  * 1.5 (v4.13) : [S120] le texte ENTIER (64 Ko) remis aux seules regles
  *   (propriete non enumerable texteRegles, analyseIncomplete au-dela) ; le
  *   modele, la page et Claude ne recoivent toujours que l'extrait.
@@ -54,7 +56,7 @@ const https = require('https');
 const crypto = require('crypto');
 const { URL } = require('url');
 
-const VERSION = '1.5';
+const VERSION = '1.6';
 const LIMITES_MAIL = Object.freeze({ delaiMs: 12000, maxOctets: 1024 * 1024, permisMs: 30 * 1000,
   objetMax: 150, texteMax: 3000, autorisesMax: 10, plafondDefaut: 5, plafondMax: 20,
   lusMax: 5, extraitMax: 1200, diagnosticMs: 20000, lectureTotaleMs: 20000,
@@ -377,7 +379,40 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
     return { ok: true, status: r.status, json, parti: r.parti };
   }
   /* un jeton d'acces, et la portee VERIFIEE : exactement celle attendue */
+  /* [S130] v4.14 « TOUT COUPER » : les deux jetons REVOQUES chez Google (durable : tient apres un
+   * redemarrage), puis verifies (un renouvellement doit repondre invalid_grant). Ensuite, ce module
+   * refuse tout (COUPE) jusqu'au redemarrage ; apres, Google refuse les jetons revoques. */
+  let coupe = false;
+  async function renouveler(quel) {
+    const rt = quel === 'envoi' ? jE : jL, c = (quel === 'envoi' ? cl : clL).client;
+    if (!rt || !c) return { ok: false, code: 'JETON_ABSENT' };
+    const r = await appeler('POST', 'https://oauth2.googleapis.com/token', 'grant_type=refresh_token&client_id=' + encodeURIComponent(c.id)
+      + '&client_secret=' + encodeURIComponent(c.secret) + '&refresh_token=' + encodeURIComponent(rt), null, 'form');
+    if (!r.ok) return r;
+    return r.status === 200 && r.json && typeof r.json.access_token === 'string' ? { ok: true } : { ok: false, code: erreurJeton(r.json) };
+  }
+  async function revoquer() {
+    coupe = true; acces.envoi = null; acces.lecture = null;   /* d'abord : plus rien ne part, meme si Google ne repond pas */
+    const out = {};
+    const vus = new Set();
+    for (const quel of ['envoi', 'lecture']) {
+      const rt = quel === 'envoi' ? jE : jL;
+      if (!rt) { out[quel] = Object.freeze({ revoque: false, verifie: false, code: 'JETON_ABSENT' }); continue; }
+      let code;
+      if (vus.has(rt)) code = 'DEJA_REVOQUE';
+      else {
+        vus.add(rt);
+        const r = await appeler('POST', 'https://oauth2.googleapis.com/revoke', 'token=' + encodeURIComponent(rt), null, 'form');
+        code = !r.ok ? r.code : r.status === 200 ? 'REVOQUE' : r.json && /invalid_token/i.test(String(r.json.error || '')) ? 'DEJA_INVALIDE' : 'REVOCATION_REFUSEE_' + r.status;
+      }
+      const v = await renouveler(quel);   /* la preuve : Google refuse maintenant ce jeton */
+      out[quel] = Object.freeze({ revoque: code === 'REVOQUE' || code === 'DEJA_INVALIDE' || code === 'DEJA_REVOQUE', verifie: !v.ok && v.code === 'JETON_REVOQUE_OU_EXPIRE', code,
+        verification: v.ok ? 'JETON_ENCORE_ACCEPTE' : v.code });
+    }
+    return Object.freeze(out);
+  }
   async function jeton(quel) {
+    if (coupe) return { ok: false, code: 'COUPE' };
     const a = acces[quel];
     if (a && maintenant() < a.expire) return { ok: true, jeton: a.jeton };
     const rt = quel === 'envoi' ? jE : jL, attendue = quel === 'envoi' ? PORTEE_ENVOI : PORTEE_LECTURE;
@@ -429,7 +464,7 @@ function creerMail({ client, clientId, clientSecret, clientLecture, clientLectur
   }
 
   return Object.freeze({
-    VERSION, envoiActif, lectureActive, motifEnvoi, motifLecture, plafond: plafondJour, diagnostic,
+    VERSION, envoiActif, lectureActive, motifEnvoi, motifLecture, plafond: plafondJour, diagnostic, revoquer, coupe: () => coupe,   /* [S130] */
     nbAutorises: liste.length,
     autorise: (a) => envoiActif && adresseValide(a) && liste.includes(cleAdresse(a)),
     restants,

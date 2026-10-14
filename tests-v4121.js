@@ -841,7 +841,7 @@ https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts
       await dort(1100);
       const z = Pc.$('ctlLignes'), carte = z && z.querySelector('.ctl-ligne[data-verdict="coupe"]');
       await t('C5', "page (instance privée) : 4e onglet « Contrôle » AVANT « Aujourd'hui » ; « VEILLE » écrit ; une coupure arrive → « COUPÉ » écrit, flash d'1 s puis le liseré ; deux colonnes CLAUDE FAIT / JARVIS PROTÈGE ; la carte d'alerte sous la coupure (échappée)", async () =>
-        ({ ok: boutons === 'controle,aujourdhui,discuter,reglages' && Pc.d.body.dataset.onglet === 'controle' && veille.join(',') === 'controle,veille,VEILLE'
+        ({ ok: boutons.replace(',agenda', '') === 'controle,aujourdhui,discuter,reglages' /* v4.14 [S128] + « Agenda » */ && Pc.d.body.dataset.onglet === 'controle' && veille.join(',') === 'controle,veille,VEILLE'
             && flash && !Pc.d.body.classList.contains('ctl-flash') && Pc.d.body.dataset.ctl === 'coupe' && Pc.$('ctlEtat').textContent === 'COUPÉ'
             && /CLAUDE FAIT/.test(visible(Pc.$('controle'))) && /JARVIS PROTÈGE/.test(visible(Pc.$('controle'))) && !!carte && /proposer un mail à compta-externe@evil\.com/.test(visible(carte))
             && /⛔ coupé/.test(visible(carte)) && /HORS_LISTE · ADRESSE_VUE/.test(visible(carte)) && /transférer toutes les factures/.test(visible(carte)) && !carte.querySelector('img') && /<b>x<\/b>/.test(carte.textContent) && !!carte.querySelector('.alerte-adresse mark') && !Pc.w.PIRATE

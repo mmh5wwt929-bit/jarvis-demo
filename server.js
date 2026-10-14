@@ -1570,7 +1570,7 @@ async function lireMails(s, sessionId, texte, plan, avant) {
   const base = (o) => ({ ...o, plan, outil: 'boite', audit: g.auditDepuis(avant), ...etatDe(s) });
   const dire = (reponse, o) => { memoriser(s, sessionId, texte, reponse); return base({ reponse, ...o }); };
   if (!MAIL_LECTURE)
-    return dire("La lecture de la boîte est mal réglée sur cette instance (" + propre(MAIL_LECTURE_MOTIF || 'inactive', 40) + ") : rien n'a été lu. "
+    return dire(COUPURE ? "Tout est coupé (« Tout couper ») : la boîte n'est plus lue, les jetons Gmail sont révoqués chez Google. Rien n'a été lu." : "La lecture de la boîte est mal réglée sur cette instance (" + propre(MAIL_LECTURE_MOTIF || 'inactive', 40) + ") : rien n'a été lu. "
       + "Le bouton « Vérifier Gmail » dit quoi corriger.", { decide: 'REFUSE', etape: 'MAIL', motif: MAIL_LECTURE_MOTIF || 'LECTURE_INACTIVE' });
   const filtre = plan.target === 'non-lus' || /(^| )non ?lus?( |$)/.test(V.mots(texte)) ? 'non-lus' : 'recents';
   const demande = g.demander({ action: 'READ', resource: 'MAIL', target: filtre }, { sceauContexte: plan.sceauContexte });
@@ -1722,6 +1722,7 @@ async function pointDuJour(s) {
  * Aucun appel au modele : la reponse est ecrite par le serveur, exacte.
  * ======================================================================== */
 const ERREURS_ECRITURE = {
+  TOUT_COUPE: "tout est coupé (« Tout couper ») : rien n'est écrit jusqu'au prochain redémarrage de Render",   /* [S130] */
   ECRITURE_NON_CONFIRMEE: "Google n'a pas confirmé le droit d'écriture (valeur accessRole affichée) : le vrai test est une création",   /* [S52] */
   AGENDA_INACCESSIBLE: "l'agenda JARVIS n'est pas accessible (partage au compte de service, ou identifiant d'agenda, à vérifier)",
   AUTH_GOOGLE_REFUSEE: "Google a refusé la clé du compte de service",
@@ -1996,7 +1997,8 @@ function reponseServeur(s, sessionId, texte, reponse, motif, extra = {}) {
   memoriser(s, sessionId, texte, reponse);
   return { decide: 'SANS_OBJET', etape: 'SERVEUR', motif, reponse, plan: { action: 'AUCUNE' }, ...extra, ...etatDe(s) };
 }
-const TEXTE_SANS_ECRITURE = () => CLE_ACCES
+const TEXTE_SANS_ECRITURE = () => COUPURE ? "Tout est coupé (« Tout couper ») : rien n'est écrit dans l'agenda jusqu'au prochain redémarrage de Render."   /* [S130] */
+  : CLE_ACCES
   ? "Aucun agenda JARVIS n'est relié : ajoute JARVIS_GOOGLE_COMPTE et JARVIS_AGENDA_JARVIS dans Render (voir le guide)."
   : "C'est la démo publique : elle ne crée aucun événement réel.";
 
@@ -2039,6 +2041,7 @@ async function compenserCreation(s, id, tx) {
  * ======================================================================== */
 const cleMail = (a) => String(a || '').toLowerCase();
 const ERREURS_MAIL = {
+  TOUT_COUPE: "tout est coupé (« Tout couper ») : les jetons Gmail sont révoqués chez Google", COUPE: "tout est coupé (« Tout couper »)",   /* [S130] */
   HORS_LISTE: "cette adresse n'est pas dans ta liste d'adresses autorisées (JARVIS_MAIL_AUTORISES)",
   ADRESSE_INVALIDE: "ce n'est pas une adresse e-mail complète",
   OBJET_INVALIDE: "l'objet est vide, trop long (150 caractères au plus) ou contient des caractères interdits",
@@ -2229,6 +2232,8 @@ async function envoiMailReel(s, sessionId, texte, plan, avant, o = {}) {
     garder(reponse);
     return base({ reponse, ...x });
   };
+  if (!MAIL_ENVOI && COUPURE)   /* [S130] */
+    return dire("Tout est coupé (« Tout couper ») : aucun e-mail ne part, les jetons Gmail sont révoqués chez Google. Rien n'est préparé.", { decide: 'SANS_OBJET', etape: 'MAIL', motif: 'TOUT_COUPE' });
   if (!MAIL_ENVOI)
     return dire("L'envoi d'e-mails est mal réglé sur cette instance (" + propre(MAIL_ENVOI_MOTIF || 'inactif', 40) + ") : rien n'est envoyé, même en simulation. "
       + "Le bouton « Vérifier Gmail » du bloc « Gmail (compte d'essai) » dit quoi corriger.", { decide: 'REFUSE', etape: 'MAIL', motif: MAIL_ENVOI_MOTIF || 'ENVOI_INACTIF' });
@@ -2609,6 +2614,30 @@ async function lireAgendaJours(s, j0, j1, o = LECTURE_DU_SERVEUR) {   /* [S103] 
   noterVuesAgenda(s, f.evenements);   /* [S104] */
   return { ok: true, evenements: f.evenements, transactionId: exe.transactionId, periode: periode.cle, lus: lus.map(x => x.source), nonLus };
 }
+/* [S128] v4.14 la semaine de l'onglet Agenda : 7 jours, par jour les evenements tries
+ * (heure, titre, source) et les conflits calcules par le CODE (memes regles que v4.12.1) */
+async function semaineAgenda(s, j0) {
+  const j1 = j0 + 6;
+  const lu = await lireAgendaJours(s, j0, j1);
+  const nomSource = (x) => NOMS_AGENDA[x] || x;
+  const base = { debut: V.iso(j0), fin: V.iso(j1), libelle: V.libelle(j0, false) + ' → ' + V.libelle(j1, false), ecritPar: 'serveur', ecriture: !!ECRITURE,
+    ecritureMotif: ECRITURE ? null : (ECRITURE_MOTIF ? erreurEcriture(ECRITURE_MOTIF) : TEXTE_SANS_ECRITURE()), aujourdhui: V.iso(V.local(Date.now(), FUSEAU).jour) };
+  if (!lu.ok) return { ok: false, code: lu.code, message: "L'agenda n'a pas pu être lu (" + erreurAgenda(lu.code) + ") : ce n'est pas « rien ».", nonLus: (lu.nonLus || []).map(x => nomSource(x.source)), ...base };
+  const jourCivil = (iso) => { const [y, m, d] = String(iso).split('-').map(Number); return V.jourDe(y, m, d); };
+  const jourDe = (e) => e.journee ? jourCivil(e.debut) : V.local(Date.parse(e.debut), FUSEAU).jour;
+  const h = lu.evenements.filter(e => !jamaisConflit(e));
+  const enConflit = new Set(); let paires = 0;
+  if (!lu.nonLus.length) for (let i = 0; i < h.length; i++) for (const b of chevauchent(h.slice(i + 1), Date.parse(h[i].debut), Date.parse(h[i].fin))) { enConflit.add(h[i]); enConflit.add(b); paires++; }
+  const jours = [];
+  for (let j = j0; j <= j1; j++) {
+    const evts = lu.evenements.filter(e => { const a = jourDe(e); const b = e.journee ? Math.max(a, jourCivil(e.fin) - 1) : V.local(Date.parse(e.fin) - 1, FUSEAU).jour; return a <= j && j <= b; })
+      .map(e => ({ heure: e.journee ? 'journée' : horaire(Date.parse(e.debut)) + ' → ' + horaire(Date.parse(e.fin)), titre: lisible(e.titre || '', 100).trim() || 'sans titre',
+        source: (e.sources || []).map(nomSource).join(' + '), journee: !!e.journee, conflit: enConflit.has(e) }));
+    jours.push({ iso: V.iso(j), libelle: V.libelle(j, false), aujourdhui: j === V.local(Date.now(), FUSEAU).jour, evenements: evts });
+  }
+  return { ok: true, ...base, jours, sources: lu.lus.map(nomSource), nonLus: lu.nonLus.map(x => nomSource(x.source) + ' (' + propre(x.code, 30) + ')'),
+    conflits: lu.nonLus.length ? null : paires, transactionId: lu.transactionId || null };
+}
 const bornesJour = (j) => { const a = V.civil(j), b = V.civil(j + 1); return [AG.versUtc(FUSEAU, a.y, a.mo, a.d), AG.versUtc(FUSEAU, b.y, b.mo, b.d)]; };
 const msCreneau = (jour, h) => { const c = V.civil(jour); return AG.versUtc(FUSEAU, c.y, c.mo, c.d, h.h, h.mi); };
 const horaire = (ms) => { const l = V.local(ms, FUSEAU); return hhmm(l.h, l.mi); };
@@ -2893,7 +2922,7 @@ async function verifierCreneau(s, jeton, index) {
  *    l'audit (un mail piege ferait ecrire « Rappeler la banque au … »).
  *  - chaque appel est trace (outil, verdict, raison, heure) ; jamais un contenu.
  * ======================================================================== */
-const etatMcp = () => MCP_CONFIG.etat !== 'actif' ? MCP_CONFIG.etat : MCP_GARDE.ferme() ? 'ferme' : 'actif';
+const etatMcp = () => MCP_CONFIG.etat !== 'actif' ? MCP_CONFIG.etat : COUPURE ? 'coupe' : MCP_GARDE.ferme() ? 'ferme' : 'actif';
 const TRACE_MCP = [];
 function tracerMcp(outil, verdict, raison, plancher) {
   TRACE_MCP.push(Object.freeze({ outil: propre(outil, 40), verdict: propre(verdict, 20), raison: raison ? propre(raison, 60) : null, ts: Date.now(), plancher: plancher || null }));
@@ -3148,6 +3177,8 @@ function routeMcp(req, res) {
    * tracee : des sondes ne doivent pas chasser les vraies lignes) ; seule une cle presente
    * et fausse compte. La comparaison en temps constant a lieu dans tous les cas. */
   const entete = req.headers.authorization;
+  /* [S130] « tout couper » : plus rien, cle ou non (jusqu'au prochain redemarrage) */
+  if (COUPURE && MCP.cleAcceptee(entete, MCP_EMPREINTE)) return repondre(503, MCP.erreur(null, MCP.ERR.REQUETE, "JARVIS a tout coupé : le connecteur est fermé jusqu'au prochain redémarrage. Rien n'est fait."));
   if (!MCP.cleAcceptee(entete, MCP_EMPREINTE)) {
     if (entete === undefined) return repondre(401, MCP.erreur(null, MCP.ERR.REQUETE, 'Clé absente : en-tête « Authorization: Bearer <clé> » attendu'));
     MCP_GARDE.cleFausse();
@@ -3675,6 +3706,39 @@ function gravite(o) {
   for (const x of t) if (GRAVITE_RANG[x[0]] > GRAVITE_RANG[m[0]]) m = x;
   return { gravite: m[0], graviteMotif: m[1] };
 }
+/* ==========================================================================
+ * [S130] v4.14 « TOUT COUPER » (Reglages, instance privee) : Face ID ou code,
+ * defi lie a « COUPURE|<nonce> » (usage unique, 2 min). Effet, dans l'ordre :
+ * Gmail revoque CHEZ GOOGLE puis verifie (durable) ; connecteur 503 ; ecriture
+ * d'agenda refusee ; propositions de Claude retirees. Le compte rendu dit ce
+ * qui tient apres un redemarrage (Gmail) et ce qui ne tient pas (le reste).
+ * ======================================================================== */
+let COUPURE = null;
+const DEFIS_COUPURE = new Map();   /* sessionId -> { nonce, ts } */
+async function toutCouper(par) {
+  if (COUPURE) return COUPURE;
+  const depuis = Date.now();
+  let gmail = null;
+  if (MAIL) { try { gmail = await MAIL.revoquer(); } catch { gmail = { erreur: true }; } }
+  MAIL_ENVOI = null; MAIL_LECTURE = null; MAIL_ENVOI_MOTIF = MAIL ? 'TOUT_COUPE' : MAIL_ENVOI_MOTIF; MAIL_LECTURE_MOTIF = MAIL ? 'TOUT_COUPE' : MAIL_LECTURE_MOTIF;
+  const ecritureAvant = !!ECRITURE;
+  ECRITURE = null; if (ecritureAvant) ECRITURE_MOTIF = 'TOUT_COUPE';
+  PROPOSITIONS_CLAUDE.mail = null; PROPOSITIONS_CLAUDE.evenement = null;
+  const ligne = (nom, x) => !x ? null : x.code === 'JETON_ABSENT' ? null
+    : nom + ' : ' + (x.verifie ? 'révoqué chez Google, vérifié (Google refuse désormais ce jeton)' : x.revoque ? 'révocation demandée, NON vérifiée (' + x.verification + ')' : 'NON révoqué (' + x.code + ')');
+  const lignes = [ligne('Gmail (envoi)', gmail && gmail.envoi), ligne('Gmail (lecture)', gmail && gmail.lecture)].filter(Boolean);
+  if (!MAIL) lignes.push("Gmail : rien à révoquer (pas branché sur cette instance).");
+  lignes.push(MCP_CONFIG.etat === 'actif' ? 'Connecteur Claude : coupé.' : 'Connecteur Claude : pas actif ici.');
+  lignes.push(ecritureAvant ? "Écriture dans l'agenda JARVIS : coupée." : "Écriture d'agenda : pas active ici.");
+  lignes.push("Tient après un redémarrage : la révocation Gmail (chez Google). Ne tient PAS : le connecteur et l'écriture d'agenda, rallumés au prochain redémarrage de Render "
+    + "(le service gratuit redémarre après 15 min sans visite). Pour les couper pour de bon : supprime JARVIS_CLE_MCP et JARVIS_GOOGLE_COMPTE dans Render. "
+    + "Pour rallumer le mail : refais les 2 jetons Gmail.");
+  COUPURE = Object.freeze({ depuis, par, gmail, lignes: Object.freeze(lignes) });
+  noterControle({ outil: 'tout_couper', claude: '(toi) tout couper, confirmé par ' + (par === 'FACE_ID' ? 'Face ID' : 'le code'), type: 'coupe',
+    raison: "JARVIS a tout coupé : Gmail révoqué chez Google, connecteur et écriture coupés", codes: ['TOUT_COUPE'] });
+  if (typeof notifier === 'function') notifier('COUPE');
+  return COUPURE;
+}
 const ROUTES_GRAVITE = new Set(['/api/chat', '/api/confirmer', '/api/finaliser', '/api/annuler', '/api/reformuler', '/api/compenser', '/api/gerer',
   '/api/mail/retaper', '/api/mail/fil', '/api/mail/repondre', '/api/claude/retaper', '/api/claude/evenement', '/api/gerer/evenement', '/api/alerte/vue',
   '/api/agenda/preparer']);
@@ -3749,7 +3813,7 @@ const serveur = http.createServer((req, res) => {
     }
     if (!detail)
       return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue', passerelle: 'v4.12.1',
-        acces: CLE_ACCES ? 'protege' : 'public', ...(CLE_ACCES ? { config: verdict } : {}),
+        acces: CLE_ACCES ? 'protege' : 'public', ...(CLE_ACCES ? { config: verdict } : {}), ...(COUPURE ? { coupure: true } : {}),   /* [S130] */
         manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
         node: String(process.versions.node).split('.')[0] });
     return json(200, { status: 'ok', noyau: '5.28.3', couche: P.VERSION || 'inconnue' /* [S33] */, vigilance: VIGILANCE_VERSION, memoire: '5.30', passerelle: 'v4.12.1', verite: V.VERSION,
@@ -3767,7 +3831,7 @@ const serveur = http.createServer((req, res) => {
       ipDepuis: IP_DEPUIS, tonIp: ipDe(req),
       /* [S34] les fichiers qui tournent sont-ils ceux livres ? [S32] delai IA */
       manifeste: MF.resume(MANIFESTE), empreinte: MANIFESTE ? MANIFESTE.empreinte : 'inconnue',
-      delaiIa: DELAI_IA + ' s', node: String(process.versions.node).split('.')[0],
+      delaiIa: DELAI_IA + ' s', node: String(process.versions.node).split('.')[0], coupure: !!COUPURE,   /* [S130] */
       ...(CLE_ACCES ? { config: verdict } : {}) });
   }
 
@@ -3825,6 +3889,65 @@ const serveur = http.createServer((req, res) => {
     const a = actionAutorisee(ipDe(req));
     if (!a.ok) return json(429, { erreur: a.motif, motif: a.motif, reessayerDans: a.reessayerDans });
   }
+
+  /* [S130] v4.14 « TOUT COUPER » : le defi (Face ID ou code), puis la coupure */
+  if (u.pathname === '/api/coupure/defi' && req.method === 'POST')
+    return lire(req, res, (b) => {
+      if (!CLE_ACCES) return json(404, { erreur: 'INTROUVABLE' });
+      const s = sessionDe(b.sessionId);
+      if (!s) return inconnue();
+      if (COUPURE) return json(200, { ok: true, deja: true, lignes: COUPURE.lignes });
+      if (!ELEVATION || !(ELEVATION.faceId || ELEVATION.codeSecours)) return json(409, { ok: false, motif: 'ELEVATION_ABSENTE',
+        message: 'Pour tout couper, il faut Face ID ou le code de secours (variables JARVIS_PASSKEYS ou JARVIS_CODE_SECOURS).' });
+      const nonce = crypto.randomBytes(16).toString('hex');
+      DEFIS_COUPURE.set(String(b.sessionId), { nonce, ts: Date.now() });
+      const f = ELEVATION.faceId ? ELEVATION.defiAssertion(String(b.sessionId), String(req.headers.host || '').slice(0, 260), ipDe(req), 'COUPURE|' + nonce) : null;
+      return json(200, { ok: true, faceId: !!(f && f.ok), options: f && f.ok ? f.options : null, code: !!ELEVATION.codeSecours });
+    });
+  if (u.pathname === '/api/coupure' && req.method === 'POST')
+    return lire(req, res, async (b) => {
+      if (!CLE_ACCES) return json(404, { erreur: 'INTROUVABLE' });
+      const s = sessionDe(b.sessionId);
+      if (!s) return inconnue();
+      if (COUPURE) return json(200, { ok: true, deja: true, lignes: COUPURE.lignes });
+      const d = DEFIS_COUPURE.get(String(b.sessionId)); DEFIS_COUPURE.delete(String(b.sessionId));   /* usage unique */
+      if (!d || Date.now() - d.ts > 2 * 60 * 1000 || !ELEVATION) return json(409, { ok: false, motif: 'DEFI_ABSENT_OU_EXPIRE', message: 'Recommence : touche « Tout couper ».' });
+      const ip = ipDe(req);
+      const r = b.reponse && ELEVATION.faceId ? ELEVATION.verifierAssertion(String(b.sessionId), String(req.headers.host || '').slice(0, 260), ip, b.reponse, 'COUPURE|' + d.nonce)
+        : typeof b.code === 'string' && ELEVATION.codeSecours ? ELEVATION.verifierCode(String(b.sessionId), ip, b.code) : { ok: false, motif: 'PREUVE_ABSENTE' };
+      if (!r.ok) return json(200, { ok: false, motif: r.motif, message: "Identité non confirmée : rien n'est coupé." });
+      const c = await toutCouper(r.mode);
+      return json(200, { ok: true, lignes: c.lignes, gmail: c.gmail ? { envoi: c.gmail.envoi || null, lecture: c.gmail.lecture || null } : null });
+    });
+
+  /* [S128] v4.14 L'ONGLET AGENDA : la semaine, lue par la lecture gouvernee du serveur
+   * (comme le point du jour), ecrite par le serveur, SANS modele ; rien n'entre dans
+   * le contexte du modele. Une source non lue est nommee : jamais « rien » sans le dire. */
+  if (u.pathname === '/api/agenda/semaine' && req.method === 'GET') {
+    if (!CLE_ACCES) return json(404, { erreur: 'INTROUVABLE' });
+    const s = sessionDe(sid());
+    if (!s) return inconnue();
+    const auj = V.local(Date.now(), FUSEAU).jour;
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(u.query.debut || ''));
+    const j0 = m ? V.jourDe(+m[1], +m[2], +m[3]) : auj;
+    if (!Number.isInteger(j0) || j0 < auj - 28 || j0 > auj + 56) return json(400, { ok: false, code: 'PERIODE_INVALIDE', message: 'Semaine hors de la fenêtre (de −4 à +8 semaines).' });
+    return semaineAgenda(s, j0).then(r => json(200, r), () => json(500, { ok: false, code: 'LECTURE_IMPOSSIBLE' }));
+  }
+  if (u.pathname === '/api/agenda/preparer' && req.method === 'POST')
+    return lire(req, res, (b) => {
+      if (!CLE_ACCES) return json(404, { erreur: 'INTROUVABLE' });
+      const s = sessionDe(b.sessionId);
+      if (!s) return inconnue();
+      /* tout est TAPE par la personne dans le formulaire : titre, jour, heure, duree */
+      const titre = titrePropre(b.titre), jour = String(b.jour || ''), heure = String(b.heure || ''), duree = Number(b.duree);
+      if (!titre) return json(200, { ok: false, code: 'TITRE_ABSENT', message: 'Écris un titre.' });
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(jour) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(heure)) return json(200, { ok: false, code: 'DATE_ILLISIBLE', message: 'Jour ou heure illisible.' });
+      if (!Number.isInteger(duree) || duree < 5 || duree > 720) return json(200, { ok: false, code: 'DUREE_INVALIDE', message: 'Durée entre 5 min et 12 h.' });
+      const r = proposerEvenement(s, jour + 'T' + heure + '|' + duree + '|' + titre, []);
+      if (!r.ok) return json(200, { ok: false, code: r.code, message: r.message });
+      const { ok, ...decision } = r;
+      return json(200, { ...decision, aConfirmer: { ...decision.aConfirmer, titre }, ...etatDe(s) });
+    });
 
   /* [S7] seule porte d'entree : c'est le serveur qui emet l'identifiant */
   if (u.pathname === '/api/session' && req.method === 'POST') {
