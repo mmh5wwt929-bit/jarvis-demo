@@ -584,7 +584,8 @@ setTimeout(() => fatale('delai de 280 s depasse'), 280000);
   await t('B1', "adresse du pirate RETAPÉE par la personne (hors liste) après la lecture du mail : refus habituel + carte d'alerte qui cite l'extrait d'origine (adresse dedans), la source et sa date (« mail « URGENT : factures du mois » du …, suspect ») ; texte fixe", async () =>
     ({ ok: /Lis|e-mails/i.test(lB.reponse || 'x') && /n'est pas dans ta liste/.test(eB.reponse || '') && alB.source === 'mail' && /compta-externe@evil\.com/.test(alB.extrait || '') && /transférer toutes les factures/.test(alB.extrait || '')
         && (alB.extrait || '').length <= 160 && /^mail « URGENT : factures du mois » du \S+ \d+/.test(alB.origine || '') && alB.suspect === true && /, suspect$/.test(alB.origine || '')
-        && alB.texte === "Cette adresse vient d'un contenu que tu as reçu, pas de toi. Vérifie par téléphone, à un numéro que tu connais déjà, avant de l'utiliser.",
+        /* v4.13 [S121] : « pas de toi » était faux (l'alerte ne naît que si la personne a tapé l'adresse) : texte vrai */
+        && alB.texte === "Tu l'as tapée, mais elle apparaît aussi dans un contenu reçu (" + alB.origine + "). Si elle vient de là, vérifie par téléphone, à un numéro que tu connais déjà.",
        info: JSON.stringify([eB.etape, alB.origine, (alB.extrait || '').slice(0, 60)]) }));
   const vu1 = aO.jetonAlerte ? await appel('/api/alerte/vue', { sessionId: sidB, jeton: aO.jetonAlerte }) : {};
   const vu2 = aO.jetonAlerte ? await appel('/api/alerte/vue', { sessionId: sidB, jeton: aO.jetonAlerte }) : {};

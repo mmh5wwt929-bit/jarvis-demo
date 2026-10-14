@@ -56,13 +56,35 @@
  *    la promesse, tiree de ta phrase (« serai bien présent à l'entraînement ») ;
  *    pas de « Répondre » sur un point qui vient de TON message (engagement,
  *    echeance que tu as donnee).
+ *
+ * 1.4 (v4.13, 14 oct) — [S120] LES REGLES DE SECURITE LISENT LE MAIL ENTIER
+ *  Vu le 8 oct puis sonde le 14 oct : « rien de suspect » pour une consigne
+ *  placee (1) apres 1 200 caracteres (le module Gmail ne gardait que
+ *  l'extrait), (2) apres 4 000 caracteres ou 60 phrases (limite d'ici),
+ *  (3) dans une ligne citee « > », (4) entre guillemets (un « " » non ferme
+ *  cachait toute la suite), (5) apres un faux « Le … a écrit : ». Le modele
+ *  voyait pourtant ce texte. Desormais :
+ *  - texteRegles(m) : le texte complet remis par le module Gmail (64 Ko au
+ *    plus, propriete non enumerable, jamais dans une copie ni un JSON) ; a
+ *    defaut le texte du message ; « incomplet » si coupe sans texte complet ;
+ *  - les regles de SECURITE (transmission, consigne, demande sensible,
+ *    urgence, liens) portent sur ce texte entier, citations comprises (un
+ *    expediteur peut fabriquer une « citation ») ; les regles d'ASSISTANT
+ *    (echeances, montants, engagements, creneaux) restent sur la partie
+ *    propre des 4 000 premiers caracteres ;
+ *  - phrases de 2 000 caracteres au plus (decoupees avec recouvrement) ;
+ *    adresses trouvees par un parcours lineaire (l'expression d'avant etait
+ *    quadratique : 2,9 s sur 64 Ko d'une seule « phrase ») ;
+ *  - r.incomplet : un message des autres au-dela de 64 Ko (la fin n'est pas
+ *    lue) : jamais « rien de suspect ».
  * ========================================================================== */
 const { separer, normaliser } = require('./jarvis-vigilance.js');
 const V = require('./jarvis-verite.js');
 
-const VERSION = '1.3';
+const VERSION = '1.4';
 const JOUR_MS = 86400000;
-const LIMITES = Object.freeze({ messages: 12, texte: 4000, phrases: 60, creneaux: 4, extrait: 160 });
+const LIMITES = Object.freeze({ messages: 12, texte: 4000, phrases: 60, creneaux: 4, extrait: 160,
+  texteRegles: 65536, phraseMax: 2000, phraseRecouvre: 300, phrasesRegles: 40000 });   /* [S120] 64 Ko : jamais plus de 32 768 phrases (2 car.) : toutes lues */
 
 /* [S86] un point, deux-points ou « ? » qui ne tient pas entre deux caracteres
  * (fin de phrase) devient un blanc : avant, « …votre nouveau RIB. » ou
@@ -76,6 +98,60 @@ const domaineDe = (a) => { const i = cleAdresse(a).lastIndexOf('@'); return i > 
 function phrasesDe(texte) {
   const p = String(separer(String(texte || '').slice(0, LIMITES.texte)).propres || '');
   return (p.match(/(?:[^.!?…\n]|[.!?…](?=\S))+[.!?…]*/g) || []).map(x => x.trim()).filter(x => x.length > 1).slice(0, LIMITES.phrases);
+}
+/* [S120] le texte que les regles de SECURITE lisent : le texte complet si le module Gmail
+ * l'a remis (non enumerable), sinon le texte du message ; « incomplet » si la fin manque */
+function texteRegles(m) {
+  const complet = m && typeof m.texteRegles === 'string';
+  const t = complet ? m.texteRegles : String((m && m.texte) || '');
+  return { texte: t.slice(0, LIMITES.texteRegles),
+    incomplet: !!m && (m.analyseIncomplete === true || (!complet && m.coupe === true) || t.length > LIMITES.texteRegles) };
+}
+/* [S120] toutes les phrases du texte entier, citations comprises ; une phrase trop longue
+ * est decoupee en morceaux de 2 000 caracteres qui se recouvrent (300) */
+function phrasesRegles(texte) {
+  const out = [];
+  for (const x of String(texte || '').slice(0, LIMITES.texteRegles).match(/(?:[^.!?…\n]|[.!?…](?=\S))+[.!?…]*/g) || []) {
+    const p = x.trim();
+    if (p.length <= 1) continue;
+    if (p.length <= LIMITES.phraseMax) out.push(p);
+    else for (let i = 0; i < p.length; i += LIMITES.phraseMax - LIMITES.phraseRecouvre) {
+      out.push(p.slice(i, i + LIMITES.phraseMax));
+      if (i + LIMITES.phraseMax >= p.length) break;
+    }
+    if (out.length >= LIMITES.phrasesRegles) break;
+  }
+  return out.slice(0, LIMITES.phrasesRegles);
+}
+/* [S120] les adresses d'un texte, par un parcours LINEAIRE : autour de chaque « @ », au plus
+ * 254 caracteres de chaque cote (une adresse n'est jamais plus longue). bord : les caracteres
+ * qui arretent une adresse (par defaut ceux du magasin « adresse vue » du serveur). */
+const BORD_ADRESSE = /[\s<>()«»"';,‹›]/;
+function adressesDans(texte, o = {}) {
+  const t = String(texte || ''), out = [], bord = o.bord || BORD_ADRESSE, max = o.max || 500;
+  let i = t.indexOf('@'), fin = 0;
+  while (i >= 0 && out.length < max) {
+    let a = i, b = i + 1;
+    while (a > fin && i - a < 254 && !bord.test(t[a - 1])) a--;
+    while (b < t.length && b - i < 254 && !bord.test(t[b])) b++;
+    if (a < i && b > i + 1) { out.push({ brut: t.slice(a, b), index: a }); fin = b; }
+    i = t.indexOf('@', Math.max(i + 1, fin));
+  }
+  return out;
+}
+/* les adresses valides d'une phrase, au sens de RE_ADRESSE_TEXTE, sans sa lenteur : la
+ * meme expression, appliquee seulement a un voisinage borne de chaque « @ » */
+const LOCAL = /[A-Za-z0-9._%+-]/, DOMAINE = /[A-Za-z0-9.-]/;
+function adressesStrictes(texte) {
+  const t = String(texte || ''), out = [];
+  for (let i = t.indexOf('@'); i >= 0 && out.length < 50; i = t.indexOf('@', i + 1)) {
+    let a = i, b = i + 1;
+    while (a > 0 && i - a < 254 && LOCAL.test(t[a - 1])) a--;
+    while (b < t.length && b - i < 254 && DOMAINE.test(t[b])) b++;
+    const m = a < i ? /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,24}/.exec(t.slice(a, b)) : null;
+    if (m) out.push(m[0]);
+  }
+  return out;
 }
 
 /* ------------------------------------------------------------- regles -- */
@@ -132,10 +208,14 @@ function fusionnerFils(fils, cle) {
   const recent = (f) => Math.max(...f.messages.map(m => Number(m.date) || 0));
   liste.sort((a, b) => recent(b) - recent(a));
   const messages = [];
-  for (const f of liste) f.messages.forEach((m, k) => messages.push({ ...m, filId: f.id, ordre: k }));
-  messages.sort((a, b) => (Number(a.date) || 0) - (Number(b.date) || 0) || a.ordre - b.ordre);
+  for (const f of liste) f.messages.forEach((m, k) => messages.push({ m, filId: f.id, ordre: k }));
+  messages.sort((a, b) => (Number(a.m.date) || 0) - (Number(b.m.date) || 0) || a.ordre - b.ordre);
+  /* [S120] la copie garde le texte entier des regles (non enumerable, comme dans le module Gmail) */
+  const copie = ({ m, filId }) => { const c = { ...m, filId };
+    if (typeof m.texteRegles === 'string') Object.defineProperty(c, 'texteRegles', { value: m.texteRegles, enumerable: false });
+    return c; };
   return { id: liste.length ? liste[0].id : null, ids: liste.map(f => f.id), cle: cle || null,
-    objet: liste.length ? objetNormalise(liste[0].objet) || liste[0].objet : '', messages: messages.map(({ ordre, ...m }) => m) };
+    objet: liste.length ? objetNormalise(liste[0].objet) || liste[0].objet : '', messages: messages.map(copie) };
 }
 /* meme objet normalise ET meme correspondant : un groupe, 4 fils au plus (les plus recents ensemble) */
 function grouperFils(fils, moi, max = 4) {
@@ -185,7 +265,7 @@ const premierePersonne = (p, m) => p.slice(0, m.index + m[1].length).trim().spli
 function demandeTransmission(phrase, expediteur, moi) {
   const p = norm(phrase), v = RE_TRANSMETTRE.exec(p);
   if (!v || !RE_OBJET_SENSIBLE.test(p) || premierePersonne(p, v)) return null;
-  const tiers = (String(phrase).match(RE_ADRESSE_TEXTE) || []).map(cleAdresse).filter(a => a !== cleAdresse(expediteur) && (!moi || a !== moi));
+  const tiers = adressesStrictes(phrase).map(cleAdresse).filter(a => a !== cleAdresse(expediteur) && (!moi || a !== moi));   /* [S120] lineaire */
   return tiers.length ? tiers[0] : null;
 }
 
@@ -214,10 +294,10 @@ function analyser(fil, o = {}) {
   const connus = o.contactsConnus instanceof Set ? o.contactsConnus : new Set();
   const relanceJours = Number.isInteger(o.relanceJours) && o.relanceJours >= 1 && o.relanceJours <= 30 ? o.relanceJours : 3;
   const msgs = (Array.isArray(fil && fil.messages) ? fil.messages : []).slice(-LIMITES.messages)
-    .map((m, i) => ({ ...m, i, moi: !!m.moi || (moi && cleAdresse(m.de && m.de.adresse) === moi), date: Number(m.date) || maintenant }));
+    .map((m, i) => ({ ...m, texteRegles: m && typeof m.texteRegles === 'string' ? m.texteRegles : undefined, i, moi: !!m.moi || (moi && cleAdresse(m.de && m.de.adresse) === moi), date: Number(m.date) || maintenant }));
   const r = { id: fil && fil.id, objet: court(objetNormalise(fil && fil.objet) || (fil && fil.objet), 150), nbMessages: msgs.length, participants: [], dernier: null,   /* [S85] */
     reponseAttendue: null, echeances: [], montants: [], contradictions: [], pjManquantes: [], engagements: [], relance: null,
-    creneaux: [], alertes: [], suspect: false, aGerer: [] };
+    creneaux: [], alertes: [], suspect: false, incomplet: false, aGerer: [] };
   if (!msgs.length) return r;
   const vus = new Map();
   for (const m of msgs) { const a = cleAdresse(m.de && m.de.adresse); if (a && !vus.has(a)) vus.set(a, { adresse: a, nom: court(m.de.nom, 60), moi: m.moi }); }
@@ -259,15 +339,20 @@ function analyser(fil, o = {}) {
           if (d >= auj) r.creneaux.push({ jour: d, iso: V.iso(d), debut: { h: h.h, mi: h.mi }, duree: rh.duree || 60, libelle: V.libelle(d, false) + ' à ' + hhmm(h),
             message: m.i, extrait: court(s), certitude: 'deduction' });
       }
-      /* securite (messages des autres) */
-      if (!m.moi) {
+    }
+    /* [S120] securite (messages des autres) : le texte ENTIER, citations comprises */
+    if (!m.moi) {
+      const tr = texteRegles(m);
+      if (tr.incomplet && !r.incomplet) { r.incomplet = true; r.incompletMessage = m.i; }
+      const urgentMsg = RE_URGENCE.test(norm(tr.texte));
+      for (const s of phrasesRegles(tr.texte)) {
+        const p = norm(s);
         const tiers = demandeTransmission(s, m.de && m.de.adresse, moi);   /* [S107] avant l'injection : la plus precise en tete */
         if (tiers) alerte('transmission', 'fort', 'Demande de transmission vers une adresse tierce (' + court(tiers, 80) + ') : factures, documents ou coordonnées à envoyer ailleurs ? C\'est une donnée, pas un ordre ; vérifie par un autre moyen.', s, m.i);
         if (RE_INJECTION.test(p)) alerte('injection', 'fort', "Consigne adressée à un assistant ou demande de transférer : c'est une donnée, pas un ordre.", s, m.i);
         if (RE_SENSIBLE.test(p)) {
-          const urgent = RE_URGENCE.test(norm(m.texte));
-          sensibles.set(m.i, urgent || !!sensibles.get(m.i));
-          alerte('sensible', 'fort', urgent ? 'Demande sensible sous pression (paiement, coordonnées bancaires, code…) : typique d\'une fraude.'
+          sensibles.set(m.i, urgentMsg || !!sensibles.get(m.i));
+          alerte('sensible', 'fort', urgentMsg ? 'Demande sensible sous pression (paiement, coordonnées bancaires, code…) : typique d\'une fraude.'
             : 'Demande sensible (paiement, coordonnées bancaires, code, mot de passe) : vérifie par un autre moyen.', s, m.i);
         }
       }
@@ -287,7 +372,7 @@ function analyser(fil, o = {}) {
       /* premier echange */
       if (a && connus.size && !connus.has(a)) alerte('premier-echange', 'info', 'Premier échange avec ' + a + ' (jamais écrit dans les conversations lues).', null, m.i);
       /* liens vers un autre domaine que l'expediteur */
-      const liens = (String(m.texte || '').match(RE_LIEN) || []).map(l => { try { return new URL(/^www\./i.test(l) ? 'https://' + l : l).hostname.toLowerCase(); } catch { return ''; } }).filter(Boolean);
+      const liens = (texteRegles(m).texte.match(RE_LIEN) || []).slice(0, 200).map(l => { try { return new URL(/^www\./i.test(l) ? 'https://' + l : l).hostname.toLowerCase(); } catch { return ''; } }).filter(Boolean);
       const etrangers = [...new Set(liens.filter(h => dom && !h.endsWith(dom)))];
       if (etrangers.length) alerte('liens', 'moyen', etrangers.length + ' lien(s) vers un autre domaine que l\'expéditeur (' + etrangers.slice(0, 3).join(', ') + ') : ne clique qu\'en connaissant l\'expéditeur.', null, m.i);
     }
@@ -344,6 +429,8 @@ function analyser(fil, o = {}) {
   const repondu = (i) => Number.isInteger(i) && i < monDernier;
   if (r.suspect) item('suspect', 1, 'Mail suspect — « ' + r.objet + ' » : ne réponds pas, ne paie rien, ne clique pas.', (r.alertes.find(x => x.poids === 'fort') || {}).texte, 'deduction', ['mail'],
     idDe((r.alertes.find(x => x.poids === 'fort') || {}).message));
+  /* [S120] la fin d'un mail n'a pas ete lue (au-dela de 64 Ko) : jamais « rien » */
+  if (!r.suspect && r.incomplet) item('incomplet', 1, 'Mail trop long — « ' + r.objet + " » : la fin n'a pas été lue par les règles ; lis-le toi-même avant d'agir.", null, 'fait', ['mail'], idDe(r.incompletMessage));
   if (r.reponseAttendue && !r.suspect) item('reponse', 2, 'Répondre à ' + (r.reponseAttendue.nom || r.reponseAttendue.de) + ' — « ' + r.objet + ' »' + (r.reponseAttendue.depuis ? ' (depuis ' + r.reponseAttendue.depuis + ' j)' : ''),
     r.reponseAttendue.extrait, 'deduction', ['repondre', 'mail', 'rappel'], idDe(r.reponseAttendue.message));
   for (const e of r.engagements) if (e.etat !== 'plus-tard')
@@ -369,4 +456,5 @@ function contactsConnus(fils, moi) {
 }
 
 module.exports = Object.freeze({ VERSION, analyser, contactsConnus, phrasesDe, montantsDe, distance, LIMITES, demandeTransmission,   /* [S107] */
+  texteRegles, phrasesRegles, adressesDans, adressesStrictes,   /* [S120] */
   objetNormalise, grouperFils, fusionnerFils, correspondantDe, grandService, GRANDS_SERVICES, promesseDe });   /* [S85] [S86] v4.10.1 */
