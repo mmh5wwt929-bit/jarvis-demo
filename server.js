@@ -3866,6 +3866,47 @@ function defiReussi(s, sessionId, att) {
 }
 
 /* ==========================================================================
+ * [S137] v4.15 L'INSTALLATION GUIDEE (Reglages, instance privee) : chaque
+ * piece -> ok / a-faire / erreur / coupe, et la PROCHAINE ACTION en francais.
+ * Jamais une valeur secrete, jamais une adresse : des etats et des noms de
+ * variables. « obligatoire » : sans elle, JARVIS ne protege pas une action.
+ * ======================================================================== */
+const VAR = (n) => String(process.env[n] || '').trim() !== '';
+function installation() {
+  const p = [];
+  const piece = (id, titre, etat, action, obligatoire = false) => p.push({ id, titre, etat, obligatoire, action: etat === 'ok' ? null : action });
+  const dernierIa = VEILLE.dernier && (VEILLE.dernier.sources || []).find(x => x.source === 'ia');
+  piece('ia', "L'IA (clé Anthropic)", !API_KEY ? 'a-faire' : dernierIa && !dernierIa.ok ? 'erreur' : 'ok',
+    !API_KEY ? 'Dans Render → Environment : ANTHROPIC_API_KEY (console Anthropic → API Keys).' : 'La clé est refusée (' + (dernierIa ? dernierIa.code : '?') + ') : remplace ANTHROPIC_API_KEY dans Render.', true);
+  piece('expiration', "Date d'expiration de la clé", EXPIRATION.date ? 'ok' : EXPIRATION.motif ? 'erreur' : 'a-faire',
+    'Ajoute JARVIS_CLE_API_EXPIRE=AAAA-MM-JJ (la date de la console Anthropic) : JARVIS te préviendra 7 jours avant.');
+  piece('acces', "La clé d'accès", 'ok', null, true);
+  piece('code', 'Le code de secours', ELEVATION && ELEVATION.codeSecours ? 'ok' : VAR('JARVIS_CODE_SECOURS') ? 'erreur' : 'a-faire',
+    'JARVIS_CODE_SECOURS : 12 à 64 chiffres, notés sur papier. Il confirme une action quand Face ID manque — jamais un vrai e-mail (Face ID seul).', true);
+  piece('faceid', 'Face ID', ELEVATION && ELEVATION.faceId ? 'ok' : VAR('JARVIS_PASSKEYS') ? 'erreur' : 'a-faire',
+    'Réglages → Face ID → « Enregistrer Face ID » sur ton iPhone, puis colle la valeur donnée dans JARVIS_PASSKEYS (Render). Exigé pour un vrai e-mail.', true);
+  piece('agenda', 'Ton agenda (lecture)', AGENDA ? 'ok' : VAR('JARVIS_AGENDA_ICAL') ? 'erreur' : 'a-faire',
+    "iPhone : app Calendrier → (i) du calendrier → Calendrier public → copie le lien, puis JARVIS_AGENDA_ICAL dans Render (lien secret : ne le partage pas).");
+  piece('ecriture', "L'agenda JARVIS (écriture)", COUPE.actif && ECRITURE_MOTIF === 'COUPE_PAR_TOI' ? 'coupe' : ECRITURE ? 'ok' : VAR('JARVIS_GOOGLE_COMPTE') || VAR('JARVIS_AGENDA_JARVIS') ? 'erreur' : 'a-faire',
+    'Google Cloud : un compte de service et un agenda « Jarvis » partagé avec lui ; JARVIS_GOOGLE_COMPTE (le JSON) et JARVIS_AGENDA_JARVIS (son identifiant). Facultatif.');
+  piece('gmail_lecture', 'Gmail : lecture', COUPE.actif ? 'coupe' : MAIL_LECTURE ? 'ok' : VAR('JARVIS_GMAIL_LECTURE') ? 'erreur' : 'a-faire',
+    'Un jeton gmail.readonly SEUL dans JARVIS_GMAIL_LECTURE (guide Google de PROGRESSION-v4.9) ; « Vérifier Gmail » dit ce qui manque. Facultatif.');
+  piece('gmail_envoi', 'Gmail : envoi', COUPE.actif ? 'coupe' : MAIL_ENVOI ? 'ok' : VAR('JARVIS_GMAIL_ENVOI') ? 'erreur' : 'a-faire',
+    'Un AUTRE jeton, gmail.send SEUL, dans JARVIS_GMAIL_ENVOI, et ta liste d\'adresses dans JARVIS_MAIL_AUTORISES. Facultatif.');
+  piece('liste', "Ta liste d'adresses", MAIL && MAIL.nbAutorises > 0 ? 'ok' : VAR('JARVIS_MAIL_AUTORISES') ? 'erreur' : 'a-faire',
+    'JARVIS_MAIL_AUTORISES : les adresses vers lesquelles un vrai e-mail peut partir (10 au plus, séparées par des virgules). La modifier exige ton compte Render.');
+  piece('notifications', 'Notifications sur le téléphone', NOTIF && NOTIF.actif ? 'ok' : NOTIF && NOTIF.motif ? 'erreur' : 'a-faire',
+    "Installe l'appli ntfy, abonne-toi à un sujet long et aléatoire (16 à 64 lettres et chiffres), puis JARVIS_NTFY=https://ntfy.sh/<ce sujet>. Puis « Notification d'essai ».");
+  piece('surveillance', 'Surveillance quotidienne', CLE_VEILLE.etat === 'actif' ? 'ok' : CLE_VEILLE.etat === 'erreur-config' ? 'erreur' : 'a-faire',
+    "JARVIS_CLE_SURVEILLANCE (32 caractères au moins, différente des autres clés). Puis Raccourcis iPhone → Automatisation → chaque jour à 8 h → « Obtenir le contenu de l'URL » : POST <adresse de JARVIS>/veille, en-tête Authorization: Bearer <cette clé>.");
+  piece('connecteur', 'Connecteur (Claude, Mistral)', COUPE.actif ? 'coupe' : MCP_CONFIG.etat === 'actif' ? 'ok' : MCP_CONFIG.etat === 'erreur-config' ? 'erreur' : 'a-faire',
+    'JARVIS_CLE_MCP (32 caractères au moins). Dans Claude : Paramètres → Connecteurs → ajouter <adresse de JARVIS>/mcp, en-tête Authorization: Bearer <JARVIS_CLE_MCP>. Mistral : ajoute aussi JARVIS_MCP_ORIGINES.');
+  const obligatoires = p.filter(x => x.obligatoire);
+  return { pieces: p, pret: obligatoires.every(x => x.etat === 'ok'), faites: p.filter(x => x.etat === 'ok').length, total: p.length, coupe: COUPE.actif,
+    regle: "Les réglages vivent dans Render (Environment) : un changement demande ton compte Render, puis un redéploiement. JARVIS ne montre jamais une valeur." };
+}
+
+/* ==========================================================================
  * [S123] v4.13 point 3 — LA GRAVITE : calculee par le SERVEUR, jamais par le
  * modele ni par un contenu lu. Une table figee, une fonction. La page n'en
  * deduit rien d'autre (valeur absente ou inconnue -> blanc).
@@ -4576,6 +4617,11 @@ const serveur = http.createServer((req, res) => {
     const a = actionAutorisee(ipDe(req));
     if (!a.ok) return json(429, { ok: false, motif: a.motif, reessayerDans: a.reessayerDans });
     return semaineAgenda(s, String(u.query.debut || '')).then(r => json(r.status || 200, r), () => json(500, { ok: false, code: 'ERREUR_INTERNE' }));
+  }
+  /* [S137] v4.15 l'installation guidee : des etats, jamais une valeur */
+  if (u.pathname === '/api/installation' && req.method === 'GET') {
+    if (!CLE_ACCES) { res.writeHead(404); return res.end('Introuvable'); }
+    return json(200, installation());
   }
   /* [S135] v4.15 le defi (demo) : l'adresse, le contact, le tableau d'honneur */
   if (u.pathname === '/api/defi' && req.method === 'GET') {

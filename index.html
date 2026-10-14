@@ -596,6 +596,9 @@ body.prive button.ag-plus{width:44px;height:44px;padding:0;border-radius:50%;fon
 .veille-liste li{padding:5px 0;border-bottom:1px solid var(--regle)}
 .veille-liste .ok{color:var(--sur)}
 .veille-liste .ko{color:var(--refus)}
+.inst-liste .afaire{color:var(--retenu)}
+.inst-liste .action{display:block;font-size:13px;color:var(--sourd);margin-top:2px}
+.inst-liste .oblig{font-size:11px;color:var(--sourd);margin-left:4px}
 /* [S136] « Signaler » */
 .signaler{background:#F2F2F7;border-radius:12px;padding:10px 12px;margin-top:6px;font-size:13.5px}
 .signaler ul{margin:6px 0 0 18px}
@@ -671,6 +674,14 @@ body.prive button.ag-plus{width:44px;height:44px;padding:0;border-radius:50%;fon
   <!-- ─────────── instrumentation ─────────── -->
   <section class="colonne" id="defense">
     <div class="titre-defense">Défense, réglages et preuves</div>
+    <!-- [S137] v4.15 INSTALLATION GUIDÉE -->
+    <details class="bloc prive-seul" id="blocInstallation">
+      <summary><h2>Installation <span class="mono" id="etatInstallation"></span></h2></summary>
+      <div class="corps">
+        <ul id="instListe" class="veille-liste inst-liste"><li>Je lis l'état de l'installation…</li></ul>
+        <p class="pdj-note" id="instRegle"></p>
+      </div>
+    </details>
     <!-- [S131] v4.15 SANTÉ DES SOURCES ET NOTIFICATIONS -->
     <details class="bloc prive-seul" id="blocVeille">
       <summary><h2>Santé des sources <span class="mono" id="etatVeille"></span></h2></summary>
@@ -1056,6 +1067,7 @@ function montrer(onglet) {
   if (onglet === 'discuter') { const f = $('fil'); if (f) f.scrollTop = f.scrollHeight; }
   if (onglet === 'aujourdhui' && document.body.classList.contains('prive') && Date.now() - Auj.charge > 120000) Auj.charger(false);
   if (onglet === 'agenda' && document.body.classList.contains('prive') && Date.now() - Ag.charge > 120000) Ag.charger();   /* [S129] */
+  if (onglet === 'reglages' && document.body.classList.contains('prive')) chargerInstallation();   /* [S137] */
   if (onglet === 'controle') { Gravite.pastille({ veille: 'blanc', attend: 'orange', coupe: 'rouge' }[document.body.dataset.ctl] || 'blanc', 'COUPE'); Ctl.demarrer(); }
   else { Ctl.arreter(); Gravite.remettre(); }   /* [S115] [S128] */
   try { window.scrollTo(0, 0); } catch (e) {}
@@ -3026,6 +3038,18 @@ function afficherVeille(d) {
   const n = d && d.notifications;
   if (n || d && d.declencheur) $('veilleNote').textContent = 'Notifications : ' + (n && n.actif ? 'actives' : n && n.motif ? 'mal réglées (' + n.motif + ')' : 'inactives (JARVIS_NTFY)')
     + ' · déclencheur extérieur : ' + (d.declencheur === 'actif' ? 'actif (POST /veille)' : d.declencheur === 'erreur-config' ? 'mal réglé (JARVIS_CLE_SURVEILLANCE)' : 'inactif') + '.';
+}
+/* [S137] v4.15 l'installation guidée : chaque pièce, son état, la prochaine action (aucune valeur secrète) */
+const ICONES_INST = { ok: '✓', 'a-faire': '○', erreur: '✗', coupe: '⏸' };
+async function chargerInstallation() {
+  if (!document.body.classList.contains('prive') || !$('instListe')) return;
+  let r = null; try { r = await api('/api/installation'); } catch (e) { r = null; }
+  if (!r || !Array.isArray(r.pieces)) { $('instListe').innerHTML = '<li>État indisponible.</li>'; return; }
+  $('instListe').innerHTML = r.pieces.map(x => '<li class="' + (x.etat === 'ok' ? 'ok' : x.etat === 'a-faire' ? 'afaire' : 'ko') + '">' + (ICONES_INST[x.etat] || '?') + ' ' + esc(x.titre)
+    + (x.obligatoire ? '<span class="oblig">nécessaire</span>' : '') + (x.action ? '<span class="action">' + esc(x.action) + '</span>' : '') + '</li>').join('');
+  $('etatInstallation').textContent = r.faites + '/' + r.total + (r.pret ? '' : ' · à finir');
+  $('instRegle').textContent = r.regle || '';
+  if (!r.pret && $('blocInstallation')) $('blocInstallation').open = true;   /* une pièce nécessaire manque : ouvert */
 }
 /* [S136] « Signaler » : les canaux officiels ; JARVIS n'envoie rien */
 const TEXTE_SIGNALER = '<div class="signaler"><b>Ne réponds pas, ne clique pas, ne paie rien.</b><ul>'

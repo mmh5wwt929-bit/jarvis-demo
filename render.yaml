@@ -1,0 +1,33 @@
+# JARVIS — déploiement en un clic sur Render (Blueprint)                [S137] v4.15
+# Bouton : https://render.com/deploy?repo=https://github.com/mmh5wwt929-bit/jarvis-demo
+# Crée UNE instance privée « jarvis ». Ne touche à aucun service existant :
+# un Blueprint ne s'applique que si on le lance soi-même depuis ce bouton.
+# Render demande les secrets au déploiement (sync: false) et GÉNÈRE les clés.
+# Ensuite : ouvre l'instance, entre la clé d'accès (Render → Environment →
+# JARVIS_CLE_ACCES), puis Réglages → Installation : JARVIS dit quoi faire.
+services:
+  - type: web
+    name: jarvis
+    runtime: node
+    plan: free
+    region: frankfurt
+    branch: Racine
+    buildCommand: npm install --omit=dev --no-audit --no-fund
+    startCommand: node server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # demandées au déploiement
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: JARVIS_CODE_SECOURS
+        sync: false
+      # générées par Render (longues, aléatoires, différentes)
+      - key: JARVIS_CLE_ACCES
+        generateValue: true
+      - key: JARVIS_CLE_MCP
+        generateValue: true
+      - key: JARVIS_CLE_SURVEILLANCE
+        generateValue: true
+      - key: JARVIS_FUSEAU
+        value: Europe/Paris

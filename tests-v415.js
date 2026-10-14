@@ -719,6 +719,45 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
     }
   }
 
+  /* ============================ D [S137] v4.15 L'INSTALLATION GUIDÉE ============================ */
+  {
+    IP = '92.15.4.1'; const sid = await session();
+    const i1 = await appel('/api/installation?sessionId=' + sid);
+    const etat = (r, id) => ((r.pieces || []).find(x => x.id === id) || {}).etat;
+    const secrets = [CLE, CLE_MCP, process.env.JARVIS_CLE_SURVEILLANCE, '731904582614', PASSKEY, RT_E, RT_L, 'GOCSPX-secret-de-test-412', 'luc@club-hand.fr', 'agenda.test', 'ntfy.test/jarvis'];
+    const brut1 = JSON.stringify(i1);
+    await t('D1', "v4.15 /api/installation (instance réglée) : prête ; IA, code, Face ID, agenda, écriture, Gmail, liste, notifications, surveillance, connecteur « ok » ; AUCUNE valeur secrète ni adresse dans la réponse", async () =>
+      ({ ok: i1.pret === true && ['ia', 'code', 'faceid', 'agenda', 'ecriture', 'gmail_lecture', 'gmail_envoi', 'liste', 'notifications', 'surveillance', 'connecteur', 'expiration'].every(x => etat(i1, x) === 'ok')
+          && secrets.every(x => !brut1.includes(x)),
+         info: JSON.stringify((i1.pieces || []).map(x => x.id + ':' + x.etat)) + ' ' + secrets.filter(x => brut1.includes(x)).join(',') }));
+    const neuve = await fils({ JARVIS_CLE_ACCES: CLE });
+    const i2 = neuve.h ? await neuve.req('GET', '/api/installation') : {};
+    const demoI = await fils({});
+    const i3 = demoI.h ? await demoI.req('GET', '/api/installation') : {};
+    neuve.arreter(); demoI.arreter();
+    await t('D2', "instance neuve (clé d'accès seule) : pas prête ; Face ID et code « à faire » avec la prochaine action (JARVIS_PASSKEYS, JARVIS_CODE_SECOURS) ; démo → 404", async () =>
+      ({ ok: i2.pret === false && etat(i2, 'faceid') === 'a-faire' && /JARVIS_PASSKEYS/.test(((i2.pieces || []).find(x => x.id === 'faceid') || {}).action || '')
+          && etat(i2, 'code') === 'a-faire' && /JARVIS_CODE_SECOURS/.test(((i2.pieces || []).find(x => x.id === 'code') || {}).action || '') && etat(i2, 'acces') === 'ok' && i3.status === 404,
+         info: JSON.stringify([i2.pret, etat(i2, 'faceid'), etat(i2, 'code'), i3.status]) }));
+    const bp = fs.readFileSync(path.join(DIR, 'render.yaml'), 'utf8');
+    const rd = (() => { try { return fs.readFileSync(path.join(DIR, 'README.md'), 'utf8'); } catch { return ''; } })();
+    const gen = (k) => new RegExp('- key: ' + k + '\\n\\s+generateValue: true').test(bp), dem = (k) => new RegExp('- key: ' + k + '\\n\\s+sync: false').test(bp);
+    await t('D3', "render.yaml (Blueprint) : node server.js, /health, branche Racine ; clé Anthropic et code de secours DEMANDÉS au déploiement ; clés d'accès, MCP, surveillance GÉNÉRÉES ; aucune valeur secrète ; le README porte le bouton « Déployer »", async () =>
+      ({ ok: /startCommand: node server\.js/.test(bp) && /healthCheckPath: \/health/.test(bp) && /branch: Racine/.test(bp) && dem('ANTHROPIC_API_KEY') && dem('JARVIS_CODE_SECOURS')
+          && gen('JARVIS_CLE_ACCES') && gen('JARVIS_CLE_MCP') && gen('JARVIS_CLE_SURVEILLANCE') && !/sk-ant|GOCSPX|ya29|1\/\//.test(bp)
+          && rd.includes('https://render.com/deploy?repo=https://github.com/mmh5wwt929-bit/jarvis-demo'),
+         info: JSON.stringify([gen('JARVIS_CLE_ACCES'), dem('ANTHROPIC_API_KEY'), rd.length]) }));
+    if (JS) {
+      const P = await page({ prive: true, routes: (u) => /\/api\/installation/.test(u) ? i2 : /\/api\/claude$/.test(u) ? { connecteur: { etat: 'actif', appelsHeure: 0, trace: [] }, propositions: [], nonRetenues: [] } : /\/api\/gerer$/.test(u) ? { actif: true, sections: [], resume: "rien d'urgent" } : undefined });
+      await P.clic(P.d.querySelector('#onglets [data-onglet="reglages"]'));
+      await dort(300);
+      const li = visible(P.$('instListe'));
+      await t('D4', "page : Réglages → « Installation » ouvert quand une pièce nécessaire manque ; chaque pièce avec ✓ / ○ / ✗ et la prochaine action", async () =>
+        ({ ok: P.$('blocInstallation').open === true && /○ Face ID/.test(li) && /JARVIS_PASSKEYS/.test(li) && /✓ La clé d'accès/.test(li) && /\/\d+ · à finir/.test(P.$('etatInstallation').textContent),
+           info: li.slice(0, 200) + ' | ' + P.$('etatInstallation').textContent }));
+    }
+  }
+
   /* @@SUITE@@ */
 
   /* @@COUPURE@@ */
