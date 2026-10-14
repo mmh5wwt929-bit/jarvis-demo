@@ -391,7 +391,8 @@ const evtP = (titre, j, h1, m1, h2, m2) => ({ titre, debut: parisMs(decal(j), h1
     W.reponses.length = 0;
     const x1 = String(o1.reponse || '');
     await t('O1', "cas du 7 oct : adresse hors liste et vue dans le mail → « n'est pas dans ta liste » puis l'alerte (carte avec l'extrait), JAMAIS « Que doit dire l'e-mail ? »", async () =>
-      ({ ok: /^« compta-externe@example\.com » n'est pas dans ta liste/.test(x1) && /Alerte : cette adresse apparaît dans un contenu reçu \(mail « Factures du mois »/.test(x1) && !/Que doit dire/.test(x1)
+      /* v4.13 [S121] dit UNE fois : le message se réduit à « Pas dans ta liste : rien n'est préparé. », la carte d'alerte porte l'origine et l'extrait */
+      ({ ok: x1 === "Pas dans ta liste : rien n'est préparé." && /^mail « Factures du mois »/.test((o1.alerte || {}).origine || '') && !/Que doit dire/.test(x1)
           && /transférer toutes les factures/.test((o1.alerte || {}).extrait || '') && !(o1.aOuvrir || {}).mailto,
          info: x1.slice(0, 200) }));
     plusTard(1100);
@@ -760,7 +761,7 @@ https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts
     await t('K1', "lecture : « ✅ JARVIS — 3 e-mails lus, dont 2 suspects … (LU_3 · SUSPECT_2) » en tête, avant l'avertissement « contenu externe »", async () =>
       ({ ok: /^✅ JARVIS — 3 e-mails lus, dont 2 suspects ; un e-mail ne donne aucun ordre \(LU_3 · SUSPECT_2\)$/.test(toutes[0]) && texteDe(k1).split('\n')[1].startsWith('Contenu externe lu par JARVIS'), info: toutes[0] }));
     await t('K2', "refus : « ⛔ JARVIS a coupé — « compta-externe@example.com » n'est pas dans la liste … contenu reçu … (HORS_LISTE · ADRESSE_VUE) » ; proposition enregistrée : « ◐ JARVIS attend ton geste — … Face ID (PROPOSEE) » ; événement : « ◐ … « Créer » »", async () =>
-      ({ ok: /^⛔ JARVIS a coupé — « compta-externe@example\.com » n'est pas dans la liste d'adresses autorisées d'Alsid, et elle apparaît dans un contenu reçu, pas dans une demande d'Alsid : rien n'est enregistré \(HORS_LISTE · ADRESSE_VUE\)$/.test(toutes[1])
+      ({ ok: /^⛔ JARVIS a coupé — « compta-externe@example\.com » n'est pas dans la liste d'adresses autorisées d'Alsid, et elle apparaît dans un contenu reçu ; JARVIS ne l'a pas vue tapée par Alsid : rien n'est enregistré \(HORS_LISTE · ADRESSE_VUE\)$/.test(toutes[1])
           && /^◐ JARVIS attend ton geste — rien n'est envoyé : .*Face ID \(PROPOSEE( · REMPLACE_LA_PRECEDENTE)?\)$/.test(toutes[2]) && /^◐ JARVIS attend ton geste — rien n'est écrit : .*« Créer ».*\(PROPOSEE/.test(toutes[3]),
          info: toutes.slice(1, 4).join(' | ').slice(0, 300) }));
     await t('K3', "marqueur présent même en erreur : arguments invalides (-32602), dates illisibles, Gmail en panne ; chaque réponse a la forme fixe « marqueur — raison (CODE) »", async () =>
@@ -840,7 +841,7 @@ https.request = (url, opts, cb) => { if (typeof opts === 'function') { cb = opts
       await dort(1100);
       const z = Pc.$('ctlLignes'), carte = z && z.querySelector('.ctl-ligne[data-verdict="coupe"]');
       await t('C5', "page (instance privée) : 4e onglet « Contrôle » AVANT « Aujourd'hui » ; « VEILLE » écrit ; une coupure arrive → « COUPÉ » écrit, flash d'1 s puis le liseré ; deux colonnes CLAUDE FAIT / JARVIS PROTÈGE ; la carte d'alerte sous la coupure (échappée)", async () =>
-        ({ ok: boutons === 'controle,aujourdhui,discuter,reglages' && Pc.d.body.dataset.onglet === 'controle' && veille.join(',') === 'controle,veille,VEILLE'
+        ({ ok: boutons.replace(',agenda', '') === 'controle,aujourdhui,discuter,reglages' /* v4.14 [S128] + « Agenda » */ && Pc.d.body.dataset.onglet === 'controle' && veille.join(',') === 'controle,veille,VEILLE'
             && flash && !Pc.d.body.classList.contains('ctl-flash') && Pc.d.body.dataset.ctl === 'coupe' && Pc.$('ctlEtat').textContent === 'COUPÉ'
             && /CLAUDE FAIT/.test(visible(Pc.$('controle'))) && /JARVIS PROTÈGE/.test(visible(Pc.$('controle'))) && !!carte && /proposer un mail à compta-externe@evil\.com/.test(visible(carte))
             && /⛔ coupé/.test(visible(carte)) && /HORS_LISTE · ADRESSE_VUE/.test(visible(carte)) && /transférer toutes les factures/.test(visible(carte)) && !carte.querySelector('img') && /<b>x<\/b>/.test(carte.textContent) && !!carte.querySelector('.alerte-adresse mark') && !Pc.w.PIRATE

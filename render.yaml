@@ -1,0 +1,31 @@
+# JARVIS — installation en un clic sur Render (Blueprint)                [S137] v4.15
+# Le bouton « Deploy to Render » (INSTALLER.md) crée UN service web gratuit à partir
+# de ce dépôt. Les deux services existants (démo publique, instance privée d'Alsid)
+# n'ont pas été créés par ce Blueprint : ce fichier ne les touche pas.
+# Aucun secret ici : Render génère les clés (generateValue) et demande la clé de l'IA.
+services:
+  - type: web
+    name: jarvis
+    runtime: node
+    plan: free
+    region: frankfurt
+    buildCommand: npm install --omit=dev --no-audit --no-fund
+    startCommand: node server.js
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      # demandée au déploiement (console.anthropic.com → API keys)
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # générées par Render (lis-les dans Environment ; ne les donne qu'à toi-même)
+      - key: JARVIS_CLE_ACCES
+        generateValue: true
+      - key: JARVIS_CLE_MCP
+        generateValue: true
+      - key: JARVIS_CLE_VEILLE
+        generateValue: true
+      - key: JARVIS_FUSEAU
+        value: Europe/Paris
+      # Node 24, comme les deux services existants (sinon Render choisit sa version par défaut)
+      - key: NODE_VERSION
+        value: "24"

@@ -22,7 +22,7 @@
  * ========================================================================== */
 const crypto = require('crypto');
 
-const VERSION = '1.1';
+const VERSION = '1.2';
 /* du plus recent au plus ancien : la version demandee si on la connait, sinon la plus recente */
 const PROTOCOLES = Object.freeze(['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05']);
 const ORIGINES = Object.freeze(['https://claude.ai', 'https://claude.com']);
@@ -144,8 +144,27 @@ function cleAcceptee(entete, empreinteAttendue) {
   const egal = crypto.timingSafeEqual(donnee, empreinteAttendue);
   return egal && !!m;
 }
-/* anti DNS-rebinding : un Origin present doit etre celui de Claude */
-const origineAdmise = (o) => o === undefined || ORIGINES.includes(o);
+/* anti DNS-rebinding : un Origin present doit etre celui de Claude [1.2] ou d'une origine ajoutee
+ * dans JARVIS_MCP_ORIGINES (un autre assistant : Le Chat de Mistral…) */
+const origineAdmise = (o, autres) => o === undefined || ORIGINES.includes(o) || (Array.isArray(autres) && autres.includes(o));
+/* [1.2] v4.15 JARVIS_MCP_ORIGINES : 5 origines https EXACTES au plus (« https://chat.mistral.ai »),
+ * separees par des virgules ; une seule illisible -> { ok: false } (le connecteur se ferme) */
+function lireOrigines(texte) {
+  const v = String(texte == null ? '' : texte).trim();
+  if (!v) return Object.freeze({ ok: true, liste: Object.freeze([]) });
+  const mots = v.split(',').map(x => x.trim()).filter(Boolean);
+  if (!mots.length || mots.length > 5) return Object.freeze({ ok: false, motif: 'ORIGINES_TROP_NOMBREUSES' });
+  const liste = [];
+  for (const m of mots) {
+    let u; try { u = new URL(m); } catch { return Object.freeze({ ok: false, motif: 'ORIGINE_ILLISIBLE' }); }
+    if (u.protocol !== 'https:' || u.username || u.password || u.search || u.hash || (u.pathname && u.pathname !== '/') || u.origin !== m.replace(/\/$/, ''))
+      return Object.freeze({ ok: false, motif: 'ORIGINE_INVALIDE' });
+    liste.push(u.origin);
+  }
+  return Object.freeze({ ok: true, liste: Object.freeze(liste) });
+}
+/* [1.2] JARVIS_MCP_NOM : le nom affiche de l'assistant (lettres, espaces, 20 caracteres) ; « Claude » par defaut */
+const lireNom = (texte) => { const v = String(texte == null ? '' : texte).trim(); return /^[\p{L} ]{2,20}$/u.test(v) ? v : 'Claude'; };
 
 /* ---- compteurs GLOBAUX (les appels viennent d'IP partagees : pas de blocage par IP) ---- */
 function creerGarde(horloge = Date.now) {
@@ -180,4 +199,5 @@ function dateIso(x) {
 }
 
 module.exports = Object.freeze({ VERSION, PROTOCOLES, ORIGINES, LIMITES, ERR, OUTILS, NOMS_OUTILS, AVERTISSEMENT_LECTURE, MARQUES, CONSIGNE_MARQUEUR, marqueur,   /* [S114] */
-  analyser, negocier, initialiser, validerArguments, reponse, erreur, texte, configCle, empreinte, cleAcceptee, origineAdmise, creerGarde, dateIso, cleInterdite });
+  analyser, negocier, initialiser, validerArguments, reponse, erreur, texte, configCle, empreinte, cleAcceptee, origineAdmise, creerGarde, dateIso, cleInterdite,
+  lireOrigines, lireNom });   /* [1.2] */
